@@ -2,7 +2,7 @@
 
 A private WordPress starter plugin for reproducing a reviewed development baseline on clean WordPress installs without cloning media, users, client content, orders, or an entire old database.
 
-## Current baseline: v0.4.0
+## Current baseline: v0.4.1
 
 The real core-site audit established **Hello Elementor** as the reference theme and the following plugin stack:
 
@@ -82,7 +82,7 @@ The reviewed v3 values have now been promoted into `plugin_option_defaults` wher
 
 ## Reviewed plugin defaults
 
-v0.4.0 promotes the approved Audit v3 values into the actual setup baseline.
+v0.4.1 retains the approved Audit v3 values in the actual setup baseline.
 
 - Elementor: portable option values plus the already-reviewed Site Kit defaults
 - WooCommerce: reviewed store behavior, inventory, checkout, price, review, tax-display, shipping-display and image-size defaults
@@ -104,6 +104,12 @@ Current components:
 - remove Hello World / Sample Page
 - create starter pages
 - apply reviewed Elementor defaults
+
+## Staged setup runner
+
+v0.4.1 changes Initial Setup from one long `admin-post.php` request into a resumable queue. Theme installation, each plugin installation, WordPress defaults, plugin defaults, cleanup, page creation, and Elementor defaults each run as separate HTTP requests.
+
+If hosting returns a gateway timeout during a single plugin step, revisit **Site Starter → Initial Setup**. The unfinished step remains queued and can be retried safely; already completed idempotent steps are not repeated unnecessarily.
 
 ## Private / premium plugins
 

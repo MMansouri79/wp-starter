@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1 - 2026-08-23
+
+### Fixed
+- Replaced the single long-running Initial Setup request with a staged, resumable setup queue to prevent common 504 Gateway Timeout failures on managed/shared hosting.
+- Theme installation and every plugin installation now execute in separate HTTP requests.
+- A timed-out step remains pending, so revisiting Initial Setup safely retries that step instead of restarting the whole installation.
+
+### Added
+- Setup progress UI with completed/total step count and current task.
+- Persistent per-user setup state for up to six hours.
+- Cancel Setup action that preserves already completed idempotent work.
+
 ## 0.4.0 - 2026-08-23
 
 ### Added
