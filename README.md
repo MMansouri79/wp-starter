@@ -134,3 +134,9 @@ License activation remains site-specific and is never stored in this repository.
 5. Setup tasks should be safe to run more than once.
 6. One-time setup and permanent runtime behavior stay separate.
 7. Reference-site extraction is reviewed before it becomes a default.
+
+### Language and installation resilience
+
+Initial Setup lets each site independently keep its current WordPress language, switch to Persian (`fa_IR`), or switch to English (`en_US`). The language choice does not alter the project profile or silently copy a locale from the reference site.
+
+Public reference dependencies use pinned direct `downloads.wordpress.org` package URLs first. This avoids making the whole installer depend on `api.wordpress.org`, which some hosts block even when package downloads are allowed. Critical install failures pause the staged queue and can be retried or explicitly skipped.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2 - 2026-08-23
+
+- Add per-install WordPress site-language selection: keep current, Persian (`fa_IR`), or English (`en_US`).
+- Download the Persian core language pack before switching a fresh English WordPress installation to `fa_IR`.
+- Prefer pinned direct `downloads.wordpress.org` packages for the public reference theme/plugins, with the metadata API retained only as a fallback.
+- Include actual `WP_Error` codes in installation failures so outbound HTTPS/filesystem problems are diagnosable.
+- Stop the staged setup queue when a critical language/theme/plugin step fails instead of incorrectly counting it as completed.
+- Add explicit Retry / Skip controls for a blocked setup step.
+- Keep private Elementor Pro and FilterX packages out of Git and report missing bundles as a blocking step that can be manually resolved or skipped.
+
 ## 0.4.1 - 2026-08-23
 
 ### Fixed
