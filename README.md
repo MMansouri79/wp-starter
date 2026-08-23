@@ -2,9 +2,9 @@
 
 A private WordPress starter plugin for reproducing a reviewed development baseline on clean WordPress installs without cloning media, users, client content, orders, or an entire old database.
 
-## Current baseline: v0.2.0
+## Current baseline: v0.3.0
 
-The first real reference audit established **Hello Elementor** as the reference theme and the following plugin stack:
+The real core-site audit established **Hello Elementor** as the reference theme and the following plugin stack:
 
 ### Elementor profile
 - Classic Editor
@@ -21,6 +21,29 @@ The first real reference audit established **Hello Elementor** as the reference 
 
 Site Starter itself is the installer and is not part of its own target manifest.
 
+## Confirmed starter pages
+
+Both profiles create only these reusable blank pages:
+
+- Home (`home`)
+- About (`about`)
+- Contact (`contact`)
+- Blog (`blog`)
+
+The core site currently uses **Your latest posts**, so Site Starter intentionally does not assign Home as the front page or Blog as the posts page. WooCommerce is allowed to create/manage its own default store pages rather than treating those as custom starter pages.
+
+## Confirmed WordPress baseline
+
+The starter preserves the real core site's WordPress settings as-is, including:
+
+- permalink structure: `/%year%/%monthnum%/%day%/%postname%/`
+- comments: open
+- pingbacks: open
+- user registration: disabled
+- front page mode: latest posts
+- start of week: Saturday (`6`)
+- image sizes: 150 / 300 / 1024
+
 ## Install
 
 1. Build or download the `site-starter` ZIP.
@@ -34,14 +57,15 @@ Do **not** run Initial Setup on the existing reference site.
 
 Use **Site Starter → Reference Audit → Download Reference Audit JSON**.
 
-Audit v2 includes:
+Audit v3 includes:
 - installed plugin inventory
 - selected WordPress settings
 - page titles/slugs/status/template, but not page content
 - portable Elementor Site Kit settings
 - Code Snippets inventory without code
 - theme-mod keys without values
-- candidate plugin option names, lengths and autoload metadata without option values
+- candidate plugin option names, lengths and autoload metadata without arbitrary option values
+- values only for a small, explicitly reviewed plugin-option whitelist
 
 It intentionally excludes:
 - uploads/media
@@ -50,7 +74,10 @@ It intentionally excludes:
 - products/orders/customers
 - arbitrary plugin option values
 - Code Snippets source code
-- passwords, API keys and credentials
+- credentials, license keys and payment settings
+- client identity/contact data
+
+The v3 reviewed values are still review material. They are **not automatically imported** until approved and copied into `plugin_option_defaults`.
 
 ## New-site workflow
 
@@ -82,8 +109,9 @@ License activation remains site-specific and is never stored in this repository.
 ## Safety principles
 
 1. Whitelist setting values. Never clone arbitrary database rows.
-2. Candidate discovery may export option names, never unreviewed option values.
-3. Never store credentials, license keys or client identifiers.
-4. Setup tasks should be safe to run more than once.
-5. One-time setup and permanent runtime behavior stay separate.
-6. Reference-site extraction is reviewed before it becomes a default.
+2. Candidate discovery exports option names, not arbitrary values.
+3. Only explicitly reviewed safe option names may export values in audit v3.
+4. Never store credentials, license keys or client identifiers.
+5. Setup tasks should be safe to run more than once.
+6. One-time setup and permanent runtime behavior stay separate.
+7. Reference-site extraction is reviewed before it becomes a default.

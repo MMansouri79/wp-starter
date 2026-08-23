@@ -9,29 +9,34 @@
 - WordPress defaults
 - Starter pages
 
-## v0.2.0 — Encode the real reference baseline
-Input: JSON exported from the user's configured reference site.
+## v0.2.0 — Reference discovery
+- Real plugin manifest from the reference audit
+- Hello Elementor installer
+- Bundled/private package convention
+- Safe page inventory
+- Candidate plugin option-name discovery
+- Portable Elementor kit baseline
 
-- Final plugin manifest
-- Classify plugins: core / WooCommerce / optional / excluded
-- Review WordPress defaults
-- Review Elementor options
-- Review Elementor active-kit settings
-- Add selected global CSS settings
-- Identify snippets for migration into runtime modules
+## v0.3.0 — Lock the real core baseline
+- Confirm Home / About / Contact / Blog as the only custom starter pages
+- Keep the real core WordPress settings exactly as-is
+- Keep Home/Blog unassigned because the core site uses latest posts
+- Add audit v3 reviewed-value whitelist
+- Export only approved safe plugin setting values for final review
 
-## v0.3.0 — Plugin-specific defaults
-- Add whitelisted settings adapters per plugin
-- Never copy complete option tables
-- Secret/key denylist and validation
-- Per-setting reset/skip behavior
+## v0.4.0 — Apply plugin-specific defaults
+- Promote approved audit-v3 values into `plugin_option_defaults`
+- Add plugin-specific adapters where an option requires transformation
+- Add per-setting skip/reset behavior
+- Keep IDs, secrets, payment credentials and site identity excluded
 
-## v0.4.0 — Premium/private packages
-- Optional local ZIP package directory or upload flow
-- Elementor Pro support without license-key storage
+## v0.5.0 — Deployment packages
+- Improve local ZIP package workflow
+- Elementor Pro package status/install flow
+- FilterX package status/install flow
 - Clear manual license activation status
 
-## v0.5.0 — Permanent runtime modules
+## v0.6.0 — Permanent runtime modules
 - Reusable WordPress hooks
 - Reusable Elementor hooks
 - Reusable WooCommerce hooks

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0 - 2026-08-23
+
+### Added
+- Reference Audit v3 with an explicit reviewed plugin-option value whitelist.
+- Safe `reviewed_plugin_option_values` section for final plugin-default extraction.
+- Confirmed real-core starter page manifest: Home, About, Contact, Blog.
+
+### Changed
+- Locked the WordPress baseline to the real core site exactly as audited.
+- Renamed starter pages from About Us / Contact Us to About / Contact.
+- Kept Home and Blog intentionally unassigned because the core site uses latest posts.
+- Documented that WooCommerce default store pages are not custom starter pages.
+- Updated reference-audit documentation and roadmap for the staged settings workflow.
+
+### Safety
+- Audit v3 still never exports arbitrary plugin option values.
+- Credentials, license keys, payment settings, page IDs, client identity/contact values, logs and runtime state remain excluded from the reviewed-value whitelist.
+- Exported reviewed values are not applied automatically; they require a second explicit promotion into `plugin_option_defaults`.
+
 ## 0.2.0 - 2026-08-23
 
 ### Added
