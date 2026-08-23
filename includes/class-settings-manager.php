@@ -6,6 +6,47 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 final class Settings_Manager {
+    /**
+     * Set the WordPress site language independently from the starter profile.
+     *
+     * @param string $locale keep|en_US|fa_IR.
+     * @return array[]
+     */
+    public function apply_site_language( $locale ) {
+        $allowed = array( 'keep', 'en_US', 'fa_IR' );
+        if ( ! in_array( $locale, $allowed, true ) ) {
+            return array( $this->result( 'error', 'Language', 'Unsupported site language selection.' ) );
+        }
+
+        if ( 'keep' === $locale ) {
+            return array( $this->result( 'success', 'Language', sprintf( 'Kept current WordPress site language (%s).', get_locale() ) ) );
+        }
+
+        if ( 'en_US' === $locale ) {
+            update_option( 'WPLANG', '' );
+            return array( $this->result( 'success', 'Language', 'WordPress site language set to English (United States).' ) );
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/translation-install.php';
+
+        $installed = in_array( 'fa_IR', get_available_languages(), true );
+        if ( ! $installed ) {
+            $downloaded = wp_download_language_pack( 'fa_IR' );
+            if ( false === $downloaded ) {
+                return array(
+                    $this->result(
+                        'error',
+                        'Language',
+                        'Could not download the Persian WordPress language pack. The server may be blocking outbound WordPress.org requests.'
+                    ),
+                );
+            }
+        }
+
+        update_option( 'WPLANG', 'fa_IR' );
+        return array( $this->result( 'success', 'Language', 'WordPress site language set to Persian (fa_IR).' ) );
+    }
+
     /** @return array[] */
     public function apply_wordpress_defaults() {
         $results = array();

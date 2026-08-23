@@ -25,34 +25,43 @@ final class Theme_Manager {
             }
 
             require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
-            require_once ABSPATH . 'wp-admin/includes/theme.php';
 
-            $api = themes_api(
-                'theme_information',
-                array(
-                    'slug'   => $theme['slug'],
-                    'fields' => array( 'sections' => false ),
-                )
-            );
+            $package = ! empty( $theme['package_url'] ) ? $theme['package_url'] : '';
+            $direct_error = '';
 
-            if ( is_wp_error( $api ) ) {
-                return array( $this->result( 'error', $theme['name'], $api->get_error_message() ) );
+            if ( $package ) {
+                $result = $this->install_package( $package );
+                if ( true !== $result ) {
+                    $direct_error = 'Direct package: ' . $result;
+                }
             }
 
-            if ( empty( $api->download_link ) ) {
-                return array( $this->result( 'error', $theme['name'], 'WordPress.org did not return a theme package.' ) );
-            }
+            if ( ! $package || $direct_error ) {
+                require_once ABSPATH . 'wp-admin/includes/theme.php';
+                $api = themes_api(
+                    'theme_information',
+                    array(
+                        'slug'   => $theme['slug'],
+                        'fields' => array( 'sections' => false ),
+                    )
+                );
 
-            $skin      = new \Automatic_Upgrader_Skin();
-            $upgrader  = new \Theme_Upgrader( $skin );
-            $installed = $upgrader->install( $api->download_link );
+                if ( is_wp_error( $api ) ) {
+                    $message = 'WordPress.org API: ' . $this->format_wp_error( $api );
+                    if ( $direct_error ) {
+                        $message = $direct_error . ' | ' . $message;
+                    }
+                    return array( $this->result( 'error', $theme['name'], $message ) );
+                }
 
-            if ( is_wp_error( $installed ) ) {
-                return array( $this->result( 'error', $theme['name'], $installed->get_error_message() ) );
-            }
+                if ( empty( $api->download_link ) ) {
+                    return array( $this->result( 'error', $theme['name'], trim( $direct_error . ' | WordPress.org did not return a theme package.', ' |' ) ) );
+                }
 
-            if ( ! $installed ) {
-                return array( $this->result( 'error', $theme['name'], 'Theme installation did not complete.' ) );
+                $fallback = $this->install_package( $api->download_link );
+                if ( true !== $fallback ) {
+                    return array( $this->result( 'error', $theme['name'], trim( $direct_error . ' | API package: ' . $fallback, ' |' ) ) );
+                }
             }
         }
 
@@ -69,6 +78,39 @@ final class Theme_Manager {
         }
 
         return array( $this->result( 'success', $theme['name'], 'Installed and activated.' ) );
+    }
+
+    /**
+     * @param string $package Remote or local package.
+     * @return true|string
+     */
+    private function install_package( $package ) {
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+
+        $skin      = new \Automatic_Upgrader_Skin();
+        $upgrader  = new \Theme_Upgrader( $skin );
+        $installed = $upgrader->install( $package );
+
+        if ( is_wp_error( $installed ) ) {
+            return $this->format_wp_error( $installed );
+        }
+        if ( is_wp_error( $skin->result ) ) {
+            return $this->format_wp_error( $skin->result );
+        }
+        if ( ! $installed ) {
+            return 'Installation did not complete. The server may be unable to download or write the package.';
+        }
+
+        wp_clean_themes_cache( true );
+        return true;
+    }
+
+    /** @return string */
+    private function format_wp_error( $error ) {
+        $codes = is_wp_error( $error ) ? $error->get_error_codes() : array();
+        $code  = ! empty( $codes ) ? implode( ',', array_map( 'sanitize_key', $codes ) ) : 'unknown_error';
+        $msg   = is_wp_error( $error ) ? $error->get_error_message() : 'Unknown WordPress error.';
+        return sprintf( '[%s] %s', $code, wp_strip_all_tags( $msg ) );
     }
 
     /** @return array */

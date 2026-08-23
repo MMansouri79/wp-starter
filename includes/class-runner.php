@@ -11,9 +11,10 @@ final class Runner {
      *
      * @param string   $profile_id Profile key.
      * @param string[] $components Selected components.
+     * @param string   $site_language keep|fa_IR|en_US.
      * @return array[]
      */
-    public function build_queue( $profile_id, array $components ) {
+    public function build_queue( $profile_id, array $components, $site_language = 'keep' ) {
         $profiles = Config::get( 'profiles', array() );
         if ( empty( $profiles[ $profile_id ] ) ) {
             return array();
@@ -22,6 +23,15 @@ final class Runner {
         $profile     = $profiles[ $profile_id ];
         $definitions = Config::get( 'plugins', array() );
         $queue       = array();
+
+        if ( 'keep' !== $site_language ) {
+            $languages = Config::get( 'site_languages', array() );
+            $queue[] = array(
+                'type'   => 'language',
+                'locale' => $site_language,
+                'label'  => 'Site language: ' . ( isset( $languages[ $site_language ] ) ? $languages[ $site_language ] : $site_language ),
+            );
+        }
 
         if ( in_array( 'theme', $components, true ) ) {
             $theme   = Config::get( 'theme', array() );
@@ -79,6 +89,10 @@ final class Runner {
         $type    = isset( $step['type'] ) ? $step['type'] : '';
 
         switch ( $type ) {
+            case 'language':
+                $manager = new Settings_Manager();
+                return $manager->apply_site_language( isset( $step['locale'] ) ? $step['locale'] : 'keep' );
+
             case 'theme':
                 $manager = new Theme_Manager();
                 return $manager->ensure_theme();
@@ -115,20 +129,47 @@ final class Runner {
     }
 
     /**
+     * A theme/plugin/language step must succeed before the queue auto-advances.
+     * Other configuration steps can finish with warnings and still advance.
+     *
+     * @param array   $step Queue item.
+     * @param array[] $results Step results.
+     * @return bool
+     */
+    public function step_is_blocking_failure( array $step, array $results ) {
+        $type = isset( $step['type'] ) ? $step['type'] : '';
+        $critical = in_array( $type, array( 'language', 'theme', 'plugin' ), true );
+
+        foreach ( $results as $row ) {
+            $status = isset( $row['status'] ) ? $row['status'] : 'error';
+            if ( 'error' === $status ) {
+                return true;
+            }
+            if ( $critical && 'success' !== $status ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Persist successful completion metadata.
      *
      * @param string   $profile_id Profile key.
      * @param string[] $components Selected components.
+     * @param string   $site_language Selected language.
      * @return void
      */
-    public function finish( $profile_id, array $components ) {
+    public function finish( $profile_id, array $components, $site_language = 'keep' ) {
         update_option(
             'mss_last_setup_run',
             array(
-                'version'    => MSS_VERSION,
-                'profile'    => $profile_id,
-                'components' => array_values( $components ),
-                'timestamp'  => time(),
+                'version'       => MSS_VERSION,
+                'profile'       => $profile_id,
+                'components'    => array_values( $components ),
+                'site_language' => $site_language,
+                'timestamp'     => time(),
             ),
             false
         );
@@ -136,14 +177,14 @@ final class Runner {
 
     /**
      * Legacy synchronous runner retained for compatibility.
-     * New admin setup uses build_queue() + run_step() to avoid gateway timeouts.
      *
      * @param string   $profile_id Profile key.
      * @param string[] $components Selected components.
+     * @param string   $site_language Selected language.
      * @return array[]
      */
-    public function run( $profile_id, array $components ) {
-        $queue   = $this->build_queue( $profile_id, $components );
+    public function run( $profile_id, array $components, $site_language = 'keep' ) {
+        $queue   = $this->build_queue( $profile_id, $components, $site_language );
         $results = array();
 
         if ( empty( $queue ) ) {
@@ -151,10 +192,14 @@ final class Runner {
         }
 
         foreach ( $queue as $step ) {
-            $results = array_merge( $results, $this->run_step( $profile_id, $step ) );
+            $step_results = $this->run_step( $profile_id, $step );
+            $results = array_merge( $results, $step_results );
+            if ( $this->step_is_blocking_failure( $step, $step_results ) ) {
+                break;
+            }
         }
 
-        $this->finish( $profile_id, $components );
+        $this->finish( $profile_id, $components, $site_language );
         return $results;
     }
 

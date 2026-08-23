@@ -4,10 +4,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 return array(
+    'site_languages' => array(
+        'keep'  => 'Keep current WordPress language',
+        'fa_IR' => 'Persian (fa_IR)',
+        'en_US' => 'English (United States)',
+    ),
+
     'theme' => array(
         'name'   => 'Hello Elementor',
         'slug'   => 'hello-elementor',
-        'source' => 'wordpress.org',
+        'source'      => 'wordpress.org',
+        'version'     => '3.4.9',
+        'package_url' => 'https://downloads.wordpress.org/theme/hello-elementor.3.4.9.zip',
     ),
 
     /*
@@ -57,6 +65,8 @@ return array(
             'slug'            => 'classic-editor',
             'file'            => 'classic-editor/classic-editor.php',
             'source'          => 'wordpress.org',
+            'version'         => '1.7.0',
+            'package_url'     => 'https://downloads.wordpress.org/plugin/classic-editor.1.7.0.zip',
             'option_prefixes' => array( 'classic-editor', 'classic_editor' ),
         ),
         'elementor' => array(
@@ -64,6 +74,8 @@ return array(
             'slug'            => 'elementor',
             'file'            => 'elementor/elementor.php',
             'source'          => 'wordpress.org',
+            'version'         => '4.0.8',
+            'package_url'     => 'https://downloads.wordpress.org/plugin/elementor.4.0.8.zip',
             'option_prefixes' => array( 'elementor_' ),
         ),
         'elementor-pro' => array(
@@ -78,6 +90,8 @@ return array(
             'slug'            => 'woocommerce',
             'file'            => 'woocommerce/woocommerce.php',
             'source'          => 'wordpress.org',
+            'version'         => '10.9.4',
+            'package_url'     => 'https://downloads.wordpress.org/plugin/woocommerce.10.9.4.zip',
             'option_prefixes' => array( 'woocommerce_', 'wc_' ),
         ),
         'persian-woocommerce' => array(
@@ -85,6 +99,8 @@ return array(
             'slug'            => 'persian-woocommerce',
             'file'            => 'persian-woocommerce/woocommerce-persian.php',
             'source'          => 'wordpress.org',
+            'version'         => '10.0.4',
+            'package_url'     => 'https://downloads.wordpress.org/plugin/persian-woocommerce.10.0.4.zip',
             'option_prefixes' => array( 'persian_woocommerce', 'woocommerce_persian', 'pw_' ),
         ),
         'filterx' => array(

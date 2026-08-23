@@ -12,6 +12,7 @@ final class Admin_Page {
         add_action( 'admin_post_mss_run_setup', array( $this, 'handle_setup' ) );
         add_action( 'admin_post_mss_run_setup_step', array( $this, 'handle_setup_step' ) );
         add_action( 'admin_post_mss_cancel_setup', array( $this, 'handle_cancel_setup' ) );
+        add_action( 'admin_post_mss_skip_setup_step', array( $this, 'handle_skip_setup_step' ) );
         add_action( 'admin_post_mss_download_audit', array( $this, 'handle_audit' ) );
     }
 
@@ -135,6 +136,7 @@ final class Admin_Page {
                     <p><strong>Last setup run:</strong> <?php echo esc_html( wp_date( 'Y-m-d H:i:s', isset( $last_run['timestamp'] ) ? (int) $last_run['timestamp'] : time() ) ); ?></p>
                     <p><strong>Profile:</strong> <?php echo esc_html( isset( $last_run['profile'] ) ? $last_run['profile'] : '' ); ?></p>
                     <p><strong>Starter version:</strong> <?php echo esc_html( isset( $last_run['version'] ) ? $last_run['version'] : '' ); ?></p>
+                    <p><strong>Site language:</strong> <?php echo esc_html( isset( $last_run['site_language'] ) ? $last_run['site_language'] : 'keep' ); ?></p>
                 <?php else : ?>
                     <p>No initial setup has been run on this site.</p>
                 <?php endif; ?>
@@ -172,7 +174,8 @@ final class Admin_Page {
             return;
         }
 
-        $profiles = Config::get( 'profiles', array() );
+        $profiles  = Config::get( 'profiles', array() );
+        $languages = Config::get( 'site_languages', array() );
         $user_id  = get_current_user_id();
         $state    = get_transient( 'mss_setup_state_' . $user_id );
         $results  = get_transient( 'mss_results_' . $user_id );
@@ -205,16 +208,21 @@ final class Admin_Page {
                 $completed = max( 0, $total - $remaining );
                 $percent   = min( 100, (int) floor( ( $completed / $total ) * 100 ) );
                 $current   = reset( $state['queue'] );
+                $paused    = ! empty( $state['paused'] );
                 ?>
                 <section class="mss-card">
-                    <h2>Setup in progress</h2>
+                    <h2><?php echo $paused ? 'Setup needs attention' : 'Setup in progress'; ?></h2>
                     <p>Site Starter now performs one potentially slow task per request so hosting gateway limits cannot kill the entire installation at once.</p>
                     <div class="mss-progress" aria-label="Setup progress">
                         <span style="width: <?php echo esc_attr( (string) $percent ); ?>%;"></span>
                     </div>
                     <p><strong><?php echo esc_html( (string) $completed ); ?> / <?php echo esc_html( (string) $total ); ?></strong> steps completed.</p>
                     <p><strong>Current step:</strong> <?php echo esc_html( isset( $current['label'] ) ? $current['label'] : 'Setup task' ); ?></p>
-                    <p class="description">The next step starts automatically. If the host times out during a single plugin install, return to this page and the same step can be retried safely.</p>
+                    <?php if ( $paused ) : ?>
+                        <p class="description"><strong>This step did not succeed, so Site Starter stopped instead of pretending it was completed.</strong> Fix the issue and retry, install the dependency manually and retry, or explicitly skip the step.</p>
+                    <?php else : ?>
+                        <p class="description">The next step starts automatically. If the host times out during a single plugin install, return to this page and the same step can be retried safely.</p>
+                    <?php endif; ?>
 
                     <?php if ( ! empty( $state['results'] ) ) : ?>
                         <details class="mss-progress-results">
@@ -233,8 +241,16 @@ final class Admin_Page {
                     <form id="mss-setup-step-form" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
                         <input type="hidden" name="action" value="mss_run_setup_step">
                         <?php wp_nonce_field( 'mss_run_setup_step' ); ?>
-                        <?php submit_button( 'Continue Current Step', 'primary', 'submit', false ); ?>
+                        <?php submit_button( $paused ? 'Retry Current Step' : 'Continue Current Step', 'primary', 'submit', false ); ?>
                     </form>
+
+                    <?php if ( $paused ) : ?>
+                        <form class="mss-cancel-form" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                            <input type="hidden" name="action" value="mss_skip_setup_step">
+                            <?php wp_nonce_field( 'mss_skip_setup_step' ); ?>
+                            <?php submit_button( 'Skip This Step', 'secondary', 'submit', false ); ?>
+                        </form>
+                    <?php endif; ?>
 
                     <form class="mss-cancel-form" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
                         <input type="hidden" name="action" value="mss_cancel_setup">
@@ -242,6 +258,7 @@ final class Admin_Page {
                         <?php submit_button( 'Cancel Setup', 'secondary', 'submit', false ); ?>
                     </form>
                 </section>
+                <?php if ( ! $paused ) : ?>
                 <script>
                 document.addEventListener('DOMContentLoaded', function () {
                     window.setTimeout(function () {
@@ -256,6 +273,7 @@ final class Admin_Page {
                     }, 900);
                 });
                 </script>
+                <?php endif; ?>
             <?php else : ?>
                 <section class="mss-card">
                     <h2>Run Initial Setup</h2>
@@ -265,6 +283,14 @@ final class Admin_Page {
                     <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
                         <input type="hidden" name="action" value="mss_run_setup">
                         <?php wp_nonce_field( 'mss_run_setup' ); ?>
+
+                        <label for="mss-site-language"><strong>Site language</strong></label>
+                        <select name="site_language" id="mss-site-language">
+                            <?php foreach ( $languages as $locale => $label ) : ?>
+                                <option value="<?php echo esc_attr( $locale ); ?>" <?php selected( 'keep', $locale ); ?>><?php echo esc_html( $label ); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="description">Language is independent from the starter profile. Choose Persian when you want WordPress itself to run in fa_IR, English for en_US, or keep the language already used by this installation.</p>
 
                         <label for="mss-profile"><strong>Profile</strong></label>
                         <select name="profile" id="mss-profile">
@@ -299,14 +325,18 @@ final class Admin_Page {
 
         check_admin_referer( 'mss_run_setup' );
 
-        $profile    = isset( $_POST['profile'] ) ? sanitize_key( wp_unslash( $_POST['profile'] ) ) : 'elementor';
+        $profile       = isset( $_POST['profile'] ) ? sanitize_key( wp_unslash( $_POST['profile'] ) ) : 'elementor';
+        $site_language = isset( $_POST['site_language'] ) ? sanitize_text_field( wp_unslash( $_POST['site_language'] ) ) : 'keep';
+        if ( ! in_array( $site_language, array( 'keep', 'fa_IR', 'en_US' ), true ) ) {
+            $site_language = 'keep';
+        }
         $components = isset( $_POST['components'] ) ? (array) wp_unslash( $_POST['components'] ) : array();
         $components = array_values( array_filter( array_map( 'sanitize_key', $components ) ) );
         $allowed    = array( 'theme', 'plugins', 'wordpress', 'plugin-settings', 'cleanup', 'pages', 'elementor' );
         $components = array_values( array_intersect( $components, $allowed ) );
 
         $runner = new Runner();
-        $queue  = $runner->build_queue( $profile, $components );
+        $queue  = $runner->build_queue( $profile, $components, $site_language );
         $user_id = get_current_user_id();
 
         if ( empty( $queue ) ) {
@@ -331,11 +361,13 @@ final class Admin_Page {
             array(
                 'version'    => MSS_VERSION,
                 'profile'    => $profile,
-                'components' => $components,
+                'components'    => $components,
+                'site_language' => $site_language,
                 'queue'      => $queue,
                 'total'      => count( $queue ),
                 'results'    => array(),
                 'started_at' => time(),
+                'paused'     => false,
             ),
             6 * HOUR_IN_SECONDS
         );
@@ -369,14 +401,66 @@ final class Admin_Page {
         }
         $state['results'] = array_merge( $state['results'], $results );
 
-        array_shift( $state['queue'] );
-
-        if ( empty( $state['queue'] ) ) {
-            $runner->finish( $state['profile'], isset( $state['components'] ) ? (array) $state['components'] : array() );
-            set_transient( 'mss_results_' . $user_id, $state['results'], 10 * MINUTE_IN_SECONDS );
-            delete_transient( $key );
-        } else {
+        if ( $runner->step_is_blocking_failure( $step, $results ) ) {
+            $state['paused'] = true;
             set_transient( $key, $state, 6 * HOUR_IN_SECONDS );
+        } else {
+            $state['paused'] = false;
+            array_shift( $state['queue'] );
+
+            if ( empty( $state['queue'] ) ) {
+                $runner->finish(
+                    $state['profile'],
+                    isset( $state['components'] ) ? (array) $state['components'] : array(),
+                    isset( $state['site_language'] ) ? $state['site_language'] : 'keep'
+                );
+                set_transient( 'mss_results_' . $user_id, $state['results'], 10 * MINUTE_IN_SECONDS );
+                delete_transient( $key );
+            } else {
+                set_transient( $key, $state, 6 * HOUR_IN_SECONDS );
+            }
+        }
+
+        wp_safe_redirect( admin_url( 'admin.php?page=site-starter-setup' ) );
+        exit;
+    }
+
+    public function handle_skip_setup_step() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'You are not allowed to skip Site Starter setup steps.' );
+        }
+
+        check_admin_referer( 'mss_skip_setup_step' );
+
+        $user_id = get_current_user_id();
+        $key     = 'mss_setup_state_' . $user_id;
+        $state   = get_transient( $key );
+
+        if ( is_array( $state ) && ! empty( $state['queue'] ) ) {
+            $step = reset( $state['queue'] );
+            if ( ! isset( $state['results'] ) || ! is_array( $state['results'] ) ) {
+                $state['results'] = array();
+            }
+            $state['results'][] = array(
+                'status'  => 'warning',
+                'label'   => isset( $step['label'] ) ? $step['label'] : 'Setup step',
+                'message' => 'Step explicitly skipped by the administrator.',
+            );
+            array_shift( $state['queue'] );
+            $state['paused'] = false;
+
+            if ( empty( $state['queue'] ) ) {
+                $runner = new Runner();
+                $runner->finish(
+                    $state['profile'],
+                    isset( $state['components'] ) ? (array) $state['components'] : array(),
+                    isset( $state['site_language'] ) ? $state['site_language'] : 'keep'
+                );
+                set_transient( 'mss_results_' . $user_id, $state['results'], 10 * MINUTE_IN_SECONDS );
+                delete_transient( $key );
+            } else {
+                set_transient( $key, $state, 6 * HOUR_IN_SECONDS );
+            }
         }
 
         wp_safe_redirect( admin_url( 'admin.php?page=site-starter-setup' ) );
