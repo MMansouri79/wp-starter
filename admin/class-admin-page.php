@@ -120,6 +120,14 @@ final class Admin_Page {
             </section>
 
             <section class="mss-card">
+                <h2>Reviewed baseline</h2>
+                <?php $default_groups = Config::get( 'plugin_option_defaults', array() ); ?>
+                <?php $default_count = 0; foreach ( $default_groups as $group_options ) { $default_count += is_array( $group_options ) ? count( $group_options ) : 0; } ?>
+                <p><strong><?php echo esc_html( (string) $default_count ); ?></strong> reviewed plugin option values are configured for Initial Setup.</p>
+                <p>FilterX is intentionally install-only for now because the reference automatic-setup payload contains a site-specific filter-set ID.</p>
+            </section>
+
+            <section class="mss-card">
                 <h2>State</h2>
                 <?php if ( ! empty( $last_run ) ) : ?>
                     <p><strong>Last setup run:</strong> <?php echo esc_html( wp_date( 'Y-m-d H:i:s', isset( $last_run['timestamp'] ) ? (int) $last_run['timestamp'] : time() ) ); ?></p>

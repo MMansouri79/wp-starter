@@ -181,8 +181,9 @@ return array(
             'unit'     => 'px',
             'size'     => 0,
         ),
-        'page_title_selector' => 'h1.entry-title',
-        'viewport_md'         => 768,
+        'page_title_selector'             => 'h1.entry-title',
+        'hello_footer_copyright_text'     => 'All rights reserved',
+        'viewport_md'                     => 768,
         'viewport_lg'         => 1025,
     ),
 
@@ -284,6 +285,89 @@ return array(
         ),
     ),
 
-    // Filled only after the safe values exported by audit v3 are reviewed.
-    'plugin_option_defaults' => array(),
+    /*
+     * Reviewed reusable plugin settings from the real core-site audit v3.
+     *
+     * Intentionally omitted even when present on the reference site:
+     * - credentials, license/connect keys and payment settings
+     * - database-generated IDs and page/template IDs
+     * - store/client identity data
+     * - logs, diagnostics, install history and onboarding/runtime state
+     * - FilterX's raw automatic_setup payload because it contains a
+     *   site-specific filter_set_id and therefore is not portable as-is
+     */
+    'plugin_option_defaults' => array(
+        'elementor' => array(
+            'elementor_beta' => 'no',
+            'elementor_enable_inspector' => '',
+            'elementor_font_display' => 'swap',
+            'elementor_landing_pages_activation' => '0',
+        ),
+        'woocommerce' => array(
+            'woocommerce_allowed_countries' => 'all',
+            'woocommerce_all_except_countries' => array(),
+            'woocommerce_specific_allowed_countries' => array(),
+            'woocommerce_calc_taxes' => 'no',
+            'woocommerce_cart_redirect_after_add' => 'no',
+            'woocommerce_checkout_address_2_field' => 'optional',
+            'woocommerce_checkout_company_field' => 'hidden',
+            'woocommerce_checkout_highlight_required_fields' => 'yes',
+            'woocommerce_checkout_phone_field' => 'optional',
+            'woocommerce_currency' => 'IRT',
+            'woocommerce_currency_pos' => 'right_space',
+            'woocommerce_default_customer_address' => 'base',
+            'woocommerce_dimension_unit' => 'cm',
+            'woocommerce_downloads_add_hash_to_filename' => 'yes',
+            'woocommerce_downloads_count_partial' => 'yes',
+            'woocommerce_downloads_deliver_inline' => '',
+            'woocommerce_downloads_grant_access_after_payment' => 'yes',
+            'woocommerce_downloads_redirect_fallback_allowed' => 'no',
+            'woocommerce_downloads_require_login' => 'no',
+            'woocommerce_enable_ajax_add_to_cart' => 'yes',
+            'woocommerce_enable_checkout_login_reminder' => 'no',
+            'woocommerce_enable_coupons' => 'yes',
+            'woocommerce_enable_delayed_account_creation' => 'no',
+            'woocommerce_enable_guest_checkout' => 'yes',
+            'woocommerce_enable_myaccount_registration' => 'no',
+            'woocommerce_enable_review_rating' => 'yes',
+            'woocommerce_enable_reviews' => 'yes',
+            'woocommerce_enable_shipping_calc' => 'yes',
+            'woocommerce_enable_signup_and_login_from_checkout' => 'no',
+            'woocommerce_file_download_method' => 'force',
+            'woocommerce_hide_out_of_stock_items' => 'no',
+            'woocommerce_hold_stock_minutes' => '60',
+            'woocommerce_manage_stock' => 'yes',
+            'woocommerce_notify_low_stock' => 'yes',
+            'woocommerce_notify_low_stock_amount' => '2',
+            'woocommerce_notify_no_stock' => 'yes',
+            'woocommerce_notify_no_stock_amount' => '0',
+            'woocommerce_price_decimal_sep' => ',',
+            'woocommerce_price_display_suffix' => '',
+            'woocommerce_price_num_decimals' => '0',
+            'woocommerce_price_thousand_sep' => '.',
+            'woocommerce_prices_include_tax' => 'no',
+            'woocommerce_registration_generate_password' => 'yes',
+            'woocommerce_registration_generate_username' => 'yes',
+            'woocommerce_review_rating_required' => 'yes',
+            'woocommerce_review_rating_verification_label' => 'yes',
+            'woocommerce_review_rating_verification_required' => 'no',
+            'woocommerce_ship_to_countries' => '',
+            'woocommerce_ship_to_destination' => 'billing',
+            'woocommerce_shipping_cost_requires_address' => 'no',
+            'woocommerce_shipping_hide_rates_when_free' => 'no',
+            'woocommerce_shipping_tax_class' => 'inherit',
+            'woocommerce_single_image_width' => '600',
+            'woocommerce_tax_based_on' => 'shipping',
+            'woocommerce_tax_classes' => '',
+            'woocommerce_tax_display_cart' => 'excl',
+            'woocommerce_tax_display_shop' => 'excl',
+            'woocommerce_tax_round_at_subtotal' => 'no',
+            'woocommerce_tax_total_display' => 'itemized',
+            'woocommerce_thumbnail_image_width' => '300',
+            'woocommerce_weight_unit' => 'kg',
+        ),
+        'persian-woocommerce' => array(
+            'persian_woocommerce_translates' => array(),
+        ),
+    ),
 );

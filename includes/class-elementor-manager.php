@@ -31,7 +31,12 @@ final class Elementor_Manager {
                 $current = is_array( $current ) ? $current : array();
                 $merged  = array_replace_recursive( $current, $kit_settings );
                 update_post_meta( $kit_id, '_elementor_page_settings', $merged );
-                $results[] = $this->result( 'success', 'Elementor', 'Starter Site Settings merged into the active kit.' );
+
+                if ( class_exists( '\\Elementor\\Plugin' ) && isset( \Elementor\Plugin::$instance->files_manager ) ) {
+                    \Elementor\Plugin::$instance->files_manager->clear_cache();
+                }
+
+                $results[] = $this->result( 'success', 'Elementor', 'Starter Site Settings merged into the active kit and Elementor cache cleared.' );
             } else {
                 $results[] = $this->result( 'warning', 'Elementor', 'No active Elementor kit was found.' );
             }
