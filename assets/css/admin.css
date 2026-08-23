@@ -1,0 +1,60 @@
+.mss-wrap {
+    max-width: 1180px;
+}
+
+.mss-version {
+    font-size: 13px;
+    font-weight: 500;
+    vertical-align: middle;
+    opacity: .65;
+}
+
+.mss-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.mss-card {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 8px;
+    box-sizing: border-box;
+    margin-top: 20px;
+    padding: 20px;
+}
+
+.mss-card h2 {
+    margin-top: 0;
+}
+
+.mss-components {
+    display: grid;
+    gap: 9px;
+    margin: 18px 0;
+}
+
+.mss-components legend {
+    margin-bottom: 8px;
+}
+
+.mss-results {
+    margin: 0;
+}
+
+.mss-result {
+    border-left: 4px solid #8c8f94;
+    margin: 8px 0;
+    padding: 7px 10px;
+}
+
+.mss-success { border-left-color: #00a32a; }
+.mss-warning { border-left-color: #dba617; }
+.mss-error   { border-left-color: #d63638; }
+
+@media (max-width: 782px) {
+    .mss-grid {
+        grid-template-columns: 1fr;
+    }
+}
