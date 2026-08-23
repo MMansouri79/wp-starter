@@ -11,7 +11,7 @@ final class Theme_Manager {
         $theme = Config::get( 'theme', array() );
 
         if ( empty( $theme['slug'] ) ) {
-            return array( $this->result( 'warning', 'Theme', 'No starter theme is configured.' ) );
+            return array( $this->result( 'error', 'Theme', 'No starter theme is configured.' ) );
         }
 
         if ( ! current_user_can( 'install_themes' ) || ! current_user_can( 'switch_themes' ) ) {
@@ -20,48 +20,25 @@ final class Theme_Manager {
 
         $installed = wp_get_theme( $theme['slug'] );
         if ( ! $installed->exists() ) {
-            if ( 'wordpress.org' !== $theme['source'] ) {
-                return array( $this->result( 'warning', $theme['name'], 'Only WordPress.org theme installation is supported right now.' ) );
-            }
+            $relative = isset( $theme['package'] ) ? ltrim( $theme['package'], '/\\' ) : '';
+            $package  = $relative ? MSS_DIR . $relative : '';
 
-            require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
-
-            $package = ! empty( $theme['package_url'] ) ? $theme['package_url'] : '';
-            $direct_error = '';
-
-            if ( $package ) {
-                $result = $this->install_package( $package );
-                if ( true !== $result ) {
-                    $direct_error = 'Direct package: ' . $result;
-                }
-            }
-
-            if ( ! $package || $direct_error ) {
-                require_once ABSPATH . 'wp-admin/includes/theme.php';
-                $api = themes_api(
-                    'theme_information',
-                    array(
-                        'slug'   => $theme['slug'],
-                        'fields' => array( 'sections' => false ),
-                    )
+            if ( ! $package || ! file_exists( $package ) ) {
+                return array(
+                    $this->result(
+                        'error',
+                        $theme['name'],
+                        sprintf(
+                            'Offline theme package is missing: %s. Build a complete Offline Installer from the reference site first.',
+                            $relative ? $relative : '(package path not configured)'
+                        )
+                    ),
                 );
+            }
 
-                if ( is_wp_error( $api ) ) {
-                    $message = 'WordPress.org API: ' . $this->format_wp_error( $api );
-                    if ( $direct_error ) {
-                        $message = $direct_error . ' | ' . $message;
-                    }
-                    return array( $this->result( 'error', $theme['name'], $message ) );
-                }
-
-                if ( empty( $api->download_link ) ) {
-                    return array( $this->result( 'error', $theme['name'], trim( $direct_error . ' | WordPress.org did not return a theme package.', ' |' ) ) );
-                }
-
-                $fallback = $this->install_package( $api->download_link );
-                if ( true !== $fallback ) {
-                    return array( $this->result( 'error', $theme['name'], trim( $direct_error . ' | API package: ' . $fallback, ' |' ) ) );
-                }
+            $result = $this->install_package( $package );
+            if ( true !== $result ) {
+                return array( $this->result( 'error', $theme['name'], $result ) );
             }
         }
 
@@ -77,11 +54,11 @@ final class Theme_Manager {
             return array( $this->result( 'error', $theme['name'], 'Theme was installed but could not be activated.' ) );
         }
 
-        return array( $this->result( 'success', $theme['name'], 'Installed and activated.' ) );
+        return array( $this->result( 'success', $theme['name'], 'Installed and activated from the bundled offline package.' ) );
     }
 
     /**
-     * @param string $package Remote or local package.
+     * @param string $package Local ZIP path.
      * @return true|string
      */
     private function install_package( $package ) {
@@ -98,7 +75,7 @@ final class Theme_Manager {
             return $this->format_wp_error( $skin->result );
         }
         if ( ! $installed ) {
-            return 'Installation did not complete. The server may be unable to download or write the package.';
+            return 'Local theme package installation did not complete.';
         }
 
         wp_clean_themes_cache( true );

@@ -20,9 +20,10 @@ final class Runner {
             return array();
         }
 
-        $profile     = $profiles[ $profile_id ];
-        $definitions = Config::get( 'plugins', array() );
-        $queue       = array();
+        $profile          = $profiles[ $profile_id ];
+        $definitions      = Config::get( 'plugins', array() );
+        $queue            = array();
+        $effective_locale = 'keep' === $site_language ? get_locale() : $site_language;
 
         if ( 'keep' !== $site_language ) {
             $languages = Config::get( 'site_languages', array() );
@@ -43,7 +44,12 @@ final class Runner {
 
         if ( in_array( 'plugins', $components, true ) ) {
             foreach ( $profile['plugins'] as $plugin_id ) {
-                $plugin_name = ! empty( $definitions[ $plugin_id ]['name'] ) ? $definitions[ $plugin_id ]['name'] : $plugin_id;
+                $definition = isset( $definitions[ $plugin_id ] ) ? $definitions[ $plugin_id ] : array();
+                if ( ! empty( $definition['locales'] ) && is_array( $definition['locales'] ) && ! in_array( $effective_locale, $definition['locales'], true ) ) {
+                    continue;
+                }
+
+                $plugin_name = ! empty( $definition['name'] ) ? $definition['name'] : $plugin_id;
                 $queue[]     = array(
                     'type'      => 'plugin',
                     'plugin_id' => $plugin_id,

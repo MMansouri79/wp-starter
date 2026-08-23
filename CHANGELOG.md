@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.0 - 2026-08-23
+
+### Architecture
+- Switch deployment to a fully offline bundle model. Initial Setup no longer contacts WordPress.org or any external API/download host.
+- Add **Site Starter → Offline Installer**, which builds a self-contained installer ZIP directly from the actual theme/plugin files installed on the reference site.
+- Package Hello Elementor, all plugins used by configured profiles, and the installed WordPress language directory into the generated deployment ZIP.
+- Include Elementor Pro and FilterX automatically from their installed reference-site directories instead of requiring manually supplied package ZIPs.
+- Add a bundle manifest recording the actual source plugin/theme versions and confirming `network_required: false`.
+
+### Reliability
+- Make the offline export staged: one dependency package per HTTP request plus a final assembly step.
+- Protect temporary bundle files with randomized private build directories and common Apache/IIS deny files.
+- Keep installer package failures blocking and retryable instead of silently producing incomplete bundles.
+
+### Locale
+- Persian setup now restores `fa_IR` from bundled language files rather than downloading a WordPress language pack.
+- Persian WooCommerce is locale-aware: it is queued for `fa_IR` installs but skipped for English/general installs.
+- One generated installer ZIP can therefore deploy both Persian and non-Persian WordPress sites.
+
+### Safety
+- Generated dependency ZIPs and bundle manifests remain outside Git.
+- Offline bundles contain plugin/theme code from the user's own reference installation, but still do not export database license keys, API credentials, uploads, users, products, orders, or content bodies.
+
 ## 0.4.2 - 2026-08-23
 
 - Add per-install WordPress site-language selection: keep current, Persian (`fa_IR`), or English (`en_US`).

@@ -29,22 +29,70 @@ final class Settings_Manager {
 
         require_once ABSPATH . 'wp-admin/includes/translation-install.php';
 
-        $installed = in_array( 'fa_IR', get_available_languages(), true );
-        if ( ! $installed ) {
-            $downloaded = wp_download_language_pack( 'fa_IR' );
-            if ( false === $downloaded ) {
+        if ( ! in_array( 'fa_IR', get_available_languages(), true ) ) {
+            $packages = Config::get( 'language_packages', array() );
+            $relative = isset( $packages['fa_IR'] ) ? ltrim( $packages['fa_IR'], '/\\' ) : '';
+            $package  = $relative ? MSS_DIR . $relative : '';
+
+            if ( ! $package || ! file_exists( $package ) ) {
                 return array(
                     $this->result(
                         'error',
                         'Language',
-                        'Could not download the Persian WordPress language pack. The server may be blocking outbound WordPress.org requests.'
+                        sprintf(
+                            'The bundled Persian language package is missing: %s. Rebuild the Offline Installer on the Persian reference site.',
+                            $relative ? $relative : '(package path not configured)'
+                        )
                     ),
                 );
             }
+
+            if ( ! wp_mkdir_p( WP_LANG_DIR ) ) {
+                return array( $this->result( 'error', 'Language', 'Could not create the WordPress languages directory.' ) );
+            }
+
+            $extracted = $this->extract_local_zip( $package, WP_LANG_DIR );
+            if ( true !== $extracted ) {
+                return array( $this->result( 'error', 'Language', $extracted ) );
+            }
+        }
+
+        if ( ! in_array( 'fa_IR', get_available_languages(), true ) ) {
+            return array( $this->result( 'error', 'Language', 'The offline language archive was extracted, but WordPress still cannot detect fa_IR.' ) );
         }
 
         update_option( 'WPLANG', 'fa_IR' );
-        return array( $this->result( 'success', 'Language', 'WordPress site language set to Persian (fa_IR).' ) );
+        return array( $this->result( 'success', 'Language', 'WordPress site language set to Persian (fa_IR) using the bundled offline language files.' ) );
+    }
+
+    /**
+     * Extract a local ZIP without making any network request.
+     *
+     * @param string $package ZIP path.
+     * @param string $destination Destination directory.
+     * @return true|string
+     */
+    private function extract_local_zip( $package, $destination ) {
+        if ( class_exists( '\\ZipArchive' ) ) {
+            $zip  = new \ZipArchive();
+            $open = $zip->open( $package );
+            if ( true !== $open ) {
+                return sprintf( 'Could not open the bundled language ZIP (ZipArchive code %s).', (string) $open );
+            }
+
+            $ok = $zip->extractTo( $destination );
+            $zip->close();
+            return $ok ? true : 'Could not extract the bundled language ZIP.';
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/class-pclzip.php';
+        $archive = new \PclZip( $package );
+        $result  = $archive->extract( PCLZIP_OPT_PATH, $destination );
+        if ( 0 === $result ) {
+            return 'PclZip could not extract the bundled language package: ' . wp_strip_all_tags( $archive->errorInfo( true ) );
+        }
+
+        return true;
     }
 
     /** @return array[] */

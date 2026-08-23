@@ -14,6 +14,10 @@ final class Admin_Page {
         add_action( 'admin_post_mss_cancel_setup', array( $this, 'handle_cancel_setup' ) );
         add_action( 'admin_post_mss_skip_setup_step', array( $this, 'handle_skip_setup_step' ) );
         add_action( 'admin_post_mss_download_audit', array( $this, 'handle_audit' ) );
+        add_action( 'admin_post_mss_start_bundle', array( $this, 'handle_start_bundle' ) );
+        add_action( 'admin_post_mss_run_bundle_step', array( $this, 'handle_bundle_step' ) );
+        add_action( 'admin_post_mss_cancel_bundle', array( $this, 'handle_cancel_bundle' ) );
+        add_action( 'admin_post_mss_download_bundle', array( $this, 'handle_download_bundle' ) );
     }
 
     public function register_pages() {
@@ -47,6 +51,15 @@ final class Admin_Page {
 
         add_submenu_page(
             'site-starter',
+            'Offline Installer',
+            'Offline Installer',
+            'manage_options',
+            'site-starter-bundle',
+            array( $this, 'render_bundle' )
+        );
+
+        add_submenu_page(
+            'site-starter',
             'Initial Setup',
             'Initial Setup',
             'manage_options',
@@ -59,6 +72,7 @@ final class Admin_Page {
         $allowed_hooks = array(
             'toplevel_page_site-starter',
             'site-starter_page_site-starter-audit',
+            'site-starter_page_site-starter-bundle',
             'site-starter_page_site-starter-setup',
         );
 
@@ -99,6 +113,12 @@ final class Admin_Page {
                 </section>
 
                 <section class="mss-card">
+                    <h2>Offline Installer</h2>
+                    <p>Run this on the fully configured reference site. Site Starter packages the actual installed theme, plugins and language files into one self-contained installer ZIP.</p>
+                    <p><a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=site-starter-bundle' ) ); ?>">Build Offline Installer</a></p>
+                </section>
+
+                <section class="mss-card">
                     <h2>Initial Setup</h2>
                     <p>Use this only on a fresh or intentionally clean WordPress installation. It installs selected plugins and applies reviewed defaults.</p>
                     <p><a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=site-starter-setup' ) ); ?>">Open Initial Setup</a></p>
@@ -106,20 +126,24 @@ final class Admin_Page {
             </div>
 
             <section class="mss-card">
-                <h2>Bundled plugin packages</h2>
-                <p>Private/premium plugin ZIPs are never committed to Git. Put them in the paths below before building your personal installer ZIP.</p>
-                <ul class="mss-results">
-                    <?php foreach ( $plugins as $plugin ) : ?>
-                        <?php if ( isset( $plugin['source'] ) && 'bundled' === $plugin['source'] ) : ?>
+                <h2>Offline payload status</h2>
+                <?php $is_offline_bundle = file_exists( MSS_DIR . 'bundle-manifest.json' ); ?>
+                <?php if ( ! $is_offline_bundle ) : ?>
+                    <p>This is the <strong>reference/development copy</strong>. Embedded dependency ZIPs are intentionally absent here.</p>
+                    <p>Use <a href="<?php echo esc_url( admin_url( 'admin.php?page=site-starter-bundle' ) ); ?>">Offline Installer</a> on the core site to produce the deployable self-contained ZIP.</p>
+                <?php else : ?>
+                    <p>This copy was generated as a self-contained offline installer.</p>
+                    <ul class="mss-results">
+                        <?php foreach ( $plugins as $plugin ) : ?>
                             <?php $exists = ! empty( $plugin['package'] ) && file_exists( MSS_DIR . ltrim( $plugin['package'], '/\\' ) ); ?>
-                            <li class="mss-result mss-<?php echo $exists ? 'success' : 'warning'; ?>">
+                            <li class="mss-result mss-<?php echo $exists ? 'success' : 'error'; ?>">
                                 <strong><?php echo esc_html( $plugin['name'] ); ?>:</strong>
                                 <?php echo esc_html( isset( $plugin['package'] ) ? $plugin['package'] : '' ); ?>
                                 — <?php echo $exists ? 'present' : 'missing'; ?>
                             </li>
-                        <?php endif; ?>
-                    <?php endforeach; ?>
-                </ul>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
             </section>
 
             <section class="mss-card">
@@ -169,6 +193,156 @@ final class Admin_Page {
         <?php
     }
 
+    public function render_bundle() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
+        $user_id = get_current_user_id();
+        $state   = get_transient( 'mss_bundle_state_' . $user_id );
+        $notice  = get_transient( 'mss_bundle_notice_' . $user_id );
+        if ( false !== $notice ) {
+            delete_transient( 'mss_bundle_notice_' . $user_id );
+        }
+        $builder = new Bundle_Builder();
+        ?>
+        <div class="wrap mss-wrap">
+            <?php $this->page_header( 'Offline Installer', 'Build one self-contained Site Starter ZIP from the actual files installed on this reference site. Destination sites need no internet access.' ); ?>
+
+            <?php if ( is_array( $notice ) ) : ?>
+                <section class="mss-card">
+                    <ul class="mss-results">
+                        <li class="mss-result mss-<?php echo esc_attr( isset( $notice['status'] ) ? $notice['status'] : 'warning' ); ?>">
+                            <strong><?php echo esc_html( isset( $notice['label'] ) ? $notice['label'] : 'Offline Installer' ); ?>:</strong>
+                            <?php echo esc_html( isset( $notice['message'] ) ? $notice['message'] : '' ); ?>
+                        </li>
+                    </ul>
+                </section>
+            <?php endif; ?>
+
+            <?php if ( is_array( $state ) && ! empty( $state['complete'] ) && ! empty( $state['output_file'] ) && file_exists( $state['output_file'] ) ) : ?>
+                <section class="mss-card">
+                    <h2>Offline installer ready</h2>
+                    <p>This ZIP contains Site Starter plus the reference site's actual configured theme/plugin files and installed language files. The destination setup performs no WordPress.org/API/download requests.</p>
+                    <?php if ( ! empty( $state['results'] ) ) : ?>
+                        <details class="mss-progress-results">
+                            <summary>Build results</summary>
+                            <ul class="mss-results">
+                                <?php foreach ( $state['results'] as $row ) : ?>
+                                    <li class="mss-result mss-<?php echo esc_attr( $row['status'] ); ?>">
+                                        <strong><?php echo esc_html( $row['label'] ); ?>:</strong>
+                                        <?php echo esc_html( $row['message'] ); ?>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        </details>
+                    <?php endif; ?>
+
+                    <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                        <input type="hidden" name="action" value="mss_download_bundle">
+                        <?php wp_nonce_field( 'mss_download_bundle' ); ?>
+                        <?php submit_button( 'Download Complete Offline Installer', 'primary', 'submit', false ); ?>
+                    </form>
+                    <form class="mss-cancel-form" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                        <input type="hidden" name="action" value="mss_cancel_bundle">
+                        <?php wp_nonce_field( 'mss_cancel_bundle' ); ?>
+                        <?php submit_button( 'Discard Build', 'secondary', 'submit', false ); ?>
+                    </form>
+                    <p class="description"><strong>Keep this ZIP private.</strong> It may contain premium/proprietary plugin code copied from your own reference installation. Database license keys and credentials are not included.</p>
+                </section>
+
+            <?php elseif ( is_array( $state ) && ! empty( $state['queue'] ) ) : ?>
+                <?php
+                $remaining = count( $state['queue'] );
+                $total     = isset( $state['total'] ) ? max( 1, (int) $state['total'] ) : $remaining;
+                $completed = max( 0, $total - $remaining );
+                $percent   = min( 100, (int) floor( ( $completed / $total ) * 100 ) );
+                $current   = reset( $state['queue'] );
+                $paused    = ! empty( $state['paused'] );
+                ?>
+                <section class="mss-card">
+                    <h2><?php echo $paused ? 'Build needs attention' : 'Building offline installer'; ?></h2>
+                    <p>One theme/plugin/language package is created per request to avoid long gateway timeouts.</p>
+                    <div class="mss-progress" aria-label="Offline installer build progress">
+                        <span style="width: <?php echo esc_attr( (string) $percent ); ?>%;"></span>
+                    </div>
+                    <p><strong><?php echo esc_html( (string) $completed ); ?> / <?php echo esc_html( (string) $total ); ?></strong> steps completed.</p>
+                    <p><strong>Current step:</strong> <?php echo esc_html( isset( $current['label'] ) ? $current['label'] : 'Bundle task' ); ?></p>
+                    <?php if ( $paused ) : ?>
+                        <p class="description"><strong>The current package could not be built, so the export paused.</strong> Fix the missing file/ZIP capability issue and retry. Bundle steps cannot be skipped because that would create an incomplete installer.</p>
+                    <?php else : ?>
+                        <p class="description">The next packaging step starts automatically.</p>
+                    <?php endif; ?>
+
+                    <?php if ( ! empty( $state['results'] ) ) : ?>
+                        <details class="mss-progress-results">
+                            <summary>Completed build results</summary>
+                            <ul class="mss-results">
+                                <?php foreach ( $state['results'] as $row ) : ?>
+                                    <li class="mss-result mss-<?php echo esc_attr( $row['status'] ); ?>">
+                                        <strong><?php echo esc_html( $row['label'] ); ?>:</strong>
+                                        <?php echo esc_html( $row['message'] ); ?>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        </details>
+                    <?php endif; ?>
+
+                    <form id="mss-bundle-step-form" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                        <input type="hidden" name="action" value="mss_run_bundle_step">
+                        <?php wp_nonce_field( 'mss_run_bundle_step' ); ?>
+                        <?php submit_button( $paused ? 'Retry Current Build Step' : 'Continue Build', 'primary', 'submit', false ); ?>
+                    </form>
+                    <form class="mss-cancel-form" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                        <input type="hidden" name="action" value="mss_cancel_bundle">
+                        <?php wp_nonce_field( 'mss_cancel_bundle' ); ?>
+                        <?php submit_button( 'Cancel and Delete Build', 'secondary', 'submit', false ); ?>
+                    </form>
+                </section>
+                <?php if ( ! $paused ) : ?>
+                <script>
+                document.addEventListener('DOMContentLoaded', function () {
+                    window.setTimeout(function () {
+                        var form = document.getElementById('mss-bundle-step-form');
+                        if (form) {
+                            if (typeof form.requestSubmit === 'function') {
+                                form.requestSubmit();
+                            } else {
+                                form.submit();
+                            }
+                        }
+                    }, 900);
+                });
+                </script>
+                <?php endif; ?>
+
+            <?php else : ?>
+                <section class="mss-card">
+                    <h2>Build from this reference site</h2>
+                    <p>This export copies the <strong>actual installed files</strong>, not just plugin names. It packages Hello Elementor, all plugins needed by the configured profiles, Elementor Pro, FilterX, and the installed WordPress language directory into one installable Site Starter ZIP.</p>
+                    <p>The resulting installer is designed for servers with <strong>zero outbound internet access</strong>.</p>
+                    <ul>
+                        <li>WordPress core itself is not bundled. Start from any fresh WordPress installation.</li>
+                        <li>Uploads, products, orders, users and normal site content are not copied.</li>
+                        <li>Database license keys/API credentials are not copied.</li>
+                        <li>Persian language files are copied from this reference site for offline fa_IR setup.</li>
+                    </ul>
+
+                    <?php if ( ! $builder->supported() ) : ?>
+                        <p class="mss-result mss-error"><strong>Cannot build:</strong> No ZIP implementation is available on this server. Site Starter needs PHP ZipArchive or WordPress PclZip.</p>
+                    <?php else : ?>
+                        <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                            <input type="hidden" name="action" value="mss_start_bundle">
+                            <?php wp_nonce_field( 'mss_start_bundle' ); ?>
+                            <?php submit_button( 'Build Complete Offline Installer', 'primary', 'submit', false ); ?>
+                        </form>
+                    <?php endif; ?>
+                </section>
+            <?php endif; ?>
+        </div>
+        <?php
+    }
+
     public function render_setup() {
         if ( ! current_user_can( 'manage_options' ) ) {
             return;
@@ -185,7 +359,7 @@ final class Admin_Page {
         }
         ?>
         <div class="wrap mss-wrap">
-            <?php $this->page_header( 'Initial Setup', 'Apply the reviewed starter baseline to a new or intentionally clean WordPress installation.' ); ?>
+            <?php $this->page_header( 'Initial Setup', 'Apply the reviewed starter baseline from the self-contained offline installer. No external download/API access is required.' ); ?>
 
             <?php if ( is_array( $results ) && ! empty( $results ) && empty( $state ) ) : ?>
                 <section class="mss-card">
@@ -290,7 +464,7 @@ final class Admin_Page {
                                 <option value="<?php echo esc_attr( $locale ); ?>" <?php selected( 'keep', $locale ); ?>><?php echo esc_html( $label ); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <p class="description">Language is independent from the starter profile. Choose Persian when you want WordPress itself to run in fa_IR, English for en_US, or keep the language already used by this installation.</p>
+                        <p class="description">Language is independent from the starter profile. Persian uses the language files bundled from the reference site; English uses en_US; Keep leaves the destination language unchanged. Persian WooCommerce is installed only for fa_IR destinations.</p>
 
                         <label for="mss-profile"><strong>Profile</strong></label>
                         <select name="profile" id="mss-profile">
@@ -316,6 +490,160 @@ final class Admin_Page {
             <?php endif; ?>
         </div>
         <?php
+    }
+
+    public function handle_start_bundle() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'You are not allowed to build a Site Starter offline installer.' );
+        }
+
+        check_admin_referer( 'mss_start_bundle' );
+
+        $builder = new Bundle_Builder();
+        $user_id = get_current_user_id();
+        $old     = get_transient( 'mss_bundle_state_' . $user_id );
+        if ( is_array( $old ) && ! empty( $old['token'] ) ) {
+            $builder->cleanup( $old['token'] );
+        }
+        delete_transient( 'mss_bundle_state_' . $user_id );
+
+        if ( ! $builder->supported() ) {
+            set_transient(
+                'mss_bundle_notice_' . $user_id,
+                array( 'status' => 'error', 'label' => 'Offline Installer', 'message' => 'No ZIP implementation is available. Site Starter needs PHP ZipArchive or WordPress PclZip.' ),
+                10 * MINUTE_IN_SECONDS
+            );
+            wp_safe_redirect( admin_url( 'admin.php?page=site-starter-bundle' ) );
+            exit;
+        }
+
+        $token    = wp_generate_password( 32, false, false );
+        $prepared = $builder->prepare( $token );
+        if ( true !== $prepared ) {
+            set_transient(
+                'mss_bundle_notice_' . $user_id,
+                array( 'status' => 'error', 'label' => 'Offline Installer', 'message' => $prepared ),
+                10 * MINUTE_IN_SECONDS
+            );
+            wp_safe_redirect( admin_url( 'admin.php?page=site-starter-bundle' ) );
+            exit;
+        }
+
+        $queue = $builder->build_queue();
+        set_transient(
+            'mss_bundle_state_' . $user_id,
+            array(
+                'version'    => MSS_VERSION,
+                'token'      => $token,
+                'queue'      => $queue,
+                'total'      => count( $queue ),
+                'results'    => array(),
+                'paused'     => false,
+                'complete'   => false,
+                'started_at' => time(),
+            ),
+            12 * HOUR_IN_SECONDS
+        );
+
+        wp_safe_redirect( admin_url( 'admin.php?page=site-starter-bundle' ) );
+        exit;
+    }
+
+    public function handle_bundle_step() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'You are not allowed to build a Site Starter offline installer.' );
+        }
+
+        check_admin_referer( 'mss_run_bundle_step' );
+
+        $user_id = get_current_user_id();
+        $key     = 'mss_bundle_state_' . $user_id;
+        $state   = get_transient( $key );
+        if ( ! is_array( $state ) || empty( $state['token'] ) || empty( $state['queue'] ) ) {
+            wp_safe_redirect( admin_url( 'admin.php?page=site-starter-bundle' ) );
+            exit;
+        }
+
+        $builder = new Bundle_Builder();
+        $step    = reset( $state['queue'] );
+        $run     = $builder->run_step( $state['token'], $step );
+        $results = isset( $run['results'] ) && is_array( $run['results'] ) ? $run['results'] : array();
+
+        if ( ! isset( $state['results'] ) || ! is_array( $state['results'] ) ) {
+            $state['results'] = array();
+        }
+        $state['results'] = array_merge( $state['results'], $results );
+
+        $failed = false;
+        foreach ( $results as $row ) {
+            if ( ! isset( $row['status'] ) || 'success' !== $row['status'] ) {
+                $failed = true;
+                break;
+            }
+        }
+
+        if ( $failed ) {
+            $state['paused'] = true;
+        } else {
+            $state['paused'] = false;
+            array_shift( $state['queue'] );
+            if ( ! empty( $run['output_file'] ) ) {
+                $state['output_file'] = $run['output_file'];
+                $state['filename']    = isset( $run['filename'] ) ? $run['filename'] : basename( $run['output_file'] );
+            }
+            if ( empty( $state['queue'] ) && ! empty( $state['output_file'] ) && file_exists( $state['output_file'] ) ) {
+                $state['complete'] = true;
+            }
+        }
+
+        set_transient( $key, $state, 12 * HOUR_IN_SECONDS );
+        wp_safe_redirect( admin_url( 'admin.php?page=site-starter-bundle' ) );
+        exit;
+    }
+
+    public function handle_cancel_bundle() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'You are not allowed to cancel a Site Starter bundle build.' );
+        }
+
+        check_admin_referer( 'mss_cancel_bundle' );
+        $user_id = get_current_user_id();
+        $state   = get_transient( 'mss_bundle_state_' . $user_id );
+        if ( is_array( $state ) && ! empty( $state['token'] ) ) {
+            $builder = new Bundle_Builder();
+            $builder->cleanup( $state['token'] );
+        }
+        delete_transient( 'mss_bundle_state_' . $user_id );
+        wp_safe_redirect( admin_url( 'admin.php?page=site-starter-bundle' ) );
+        exit;
+    }
+
+    public function handle_download_bundle() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'You are not allowed to download a Site Starter offline installer.' );
+        }
+
+        check_admin_referer( 'mss_download_bundle' );
+        $user_id = get_current_user_id();
+        $state   = get_transient( 'mss_bundle_state_' . $user_id );
+        if ( ! is_array( $state ) || empty( $state['complete'] ) || empty( $state['output_file'] ) || ! file_exists( $state['output_file'] ) ) {
+            wp_die( 'The completed offline installer ZIP could not be found. Rebuild it from the reference site.' );
+        }
+
+        $builder  = new Bundle_Builder();
+        $expected = realpath( $builder->build_dir( isset( $state['token'] ) ? $state['token'] : '' ) );
+        $file     = realpath( $state['output_file'] );
+        if ( ! $expected || ! $file || 0 !== strpos( $file, $expected . DIRECTORY_SEPARATOR ) ) {
+            wp_die( 'Invalid Site Starter bundle path.' );
+        }
+
+        $filename = ! empty( $state['filename'] ) ? sanitize_file_name( $state['filename'] ) : basename( $file );
+        nocache_headers();
+        header( 'Content-Type: application/zip' );
+        header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+        header( 'Content-Length: ' . filesize( $file ) );
+        readfile( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile -- authenticated binary download.
+        exit;
     }
 
     public function handle_setup() {

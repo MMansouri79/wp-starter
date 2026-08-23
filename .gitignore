@@ -1,5 +1,6 @@
 .DS_Store
 Thumbs.db
 *.log
-/packages/*.zip
+/packages/**/*.zip
 !/packages/.gitkeep
+/bundle-manifest.json

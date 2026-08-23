@@ -9,6 +9,10 @@ final class Plugin_Manager {
     /**
      * Ensure configured plugins are installed and active.
      *
+     * Site Starter 0.5+ is deliberately offline-first. Every dependency must
+     * exist inside the exported installer ZIP. No WordPress.org/API request is
+     * attempted during installation.
+     *
      * @param string[] $plugin_ids Config plugin IDs.
      * @return array[] Result rows.
      */
@@ -18,7 +22,7 @@ final class Plugin_Manager {
 
         foreach ( $plugin_ids as $plugin_id ) {
             if ( empty( $definitions[ $plugin_id ] ) ) {
-                $results[] = $this->result( 'warning', $plugin_id, 'Plugin definition is missing.' );
+                $results[] = $this->result( 'error', $plugin_id, 'Plugin definition is missing.' );
                 continue;
             }
 
@@ -56,83 +60,17 @@ final class Plugin_Manager {
             return $this->result( 'success', $plugin['name'], 'Existing plugin activated.' );
         }
 
-        $source = isset( $plugin['source'] ) ? $plugin['source'] : '';
-
-        if ( 'wordpress.org' === $source ) {
-            return $this->install_from_wordpress_org( $plugin );
-        }
-
-        if ( 'bundled' === $source ) {
-            return $this->install_from_bundled_package( $plugin );
-        }
-
-        return $this->result( 'warning', $plugin['name'], 'Unknown plugin source.' );
-    }
-
-    /**
-     * Install a public plugin without requiring the WordPress.org metadata API.
-     *
-     * The reference environment showed that api.wordpress.org can be blocked
-     * while downloads.wordpress.org still works. Prefer a configured direct
-     * package URL, then fall back to plugins_api() only if needed.
-     *
-     * @param array $plugin Plugin definition.
-     * @return array
-     */
-    private function install_from_wordpress_org( array $plugin ) {
-        $errors = array();
-
-        if ( ! empty( $plugin['package_url'] ) ) {
-            $direct = $this->install_package( $plugin, $plugin['package_url'], false );
-            if ( 'success' === $direct['status'] ) {
-                $direct['message'] = 'Installed and activated from the direct WordPress.org package.';
-                return $direct;
-            }
-
-            $errors[] = 'Direct package: ' . $direct['message'];
-        }
-
-        require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
-        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
-
-        $api = plugins_api(
-            'plugin_information',
-            array(
-                'slug'   => $plugin['slug'],
-                'fields' => array( 'sections' => false ),
-            )
-        );
-
-        if ( is_wp_error( $api ) ) {
-            $errors[] = 'WordPress.org API: ' . $this->format_wp_error( $api );
-            return $this->result( 'error', $plugin['name'], implode( ' | ', $errors ) );
-        }
-
-        if ( empty( $api->download_link ) ) {
-            $errors[] = 'WordPress.org API did not return a download package.';
-            return $this->result( 'error', $plugin['name'], implode( ' | ', $errors ) );
-        }
-
-        $fallback = $this->install_package( $plugin, $api->download_link, false );
-        if ( 'success' === $fallback['status'] ) {
-            $fallback['message'] = 'Installed and activated using the WordPress.org API fallback.';
-            return $fallback;
-        }
-
-        $errors[] = 'API package: ' . $fallback['message'];
-        return $this->result( 'error', $plugin['name'], implode( ' | ', $errors ) );
-    }
-
-    /** @return array */
-    private function install_from_bundled_package( array $plugin ) {
         $relative = isset( $plugin['package'] ) ? ltrim( $plugin['package'], '/\\' ) : '';
         $package  = $relative ? MSS_DIR . $relative : '';
 
         if ( ! $package || ! file_exists( $package ) ) {
             return $this->result(
-                'warning',
+                'error',
                 $plugin['name'],
-                sprintf( 'Bundled package is missing. Add %s to the personal installer build, or install this plugin manually and retry this step.', $relative ? $relative : 'a package path' )
+                sprintf(
+                    'Offline package is missing: %s. Build a complete Offline Installer from the configured reference site first.',
+                    $relative ? $relative : '(package path not configured)'
+                )
             );
         }
 
@@ -140,12 +78,11 @@ final class Plugin_Manager {
     }
 
     /**
-     * @param array        $plugin Plugin definition.
-     * @param string       $package Remote URL or local ZIP path.
-     * @param bool         $normalize_errors Convert failure directly to result row.
+     * @param array  $plugin Plugin definition.
+     * @param string $package Local ZIP path.
      * @return array
      */
-    private function install_package( array $plugin, $package, $normalize_errors = true ) {
+    private function install_package( array $plugin, $package ) {
         require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 
         $skin      = new \Automatic_Upgrader_Skin();
@@ -160,22 +97,15 @@ final class Plugin_Manager {
             return $this->result( 'error', $plugin['name'], $this->format_wp_error( $skin->result ) );
         }
 
-        if ( method_exists( $skin, 'get_errors' ) ) {
-            $skin_errors = $skin->get_errors();
-            if ( is_wp_error( $skin_errors ) && $skin_errors->has_errors() ) {
-                return $this->result( 'error', $plugin['name'], $this->format_wp_error( $skin_errors ) );
-            }
-        }
-
         if ( ! $installed ) {
-            return $this->result( 'error', $plugin['name'], 'Installation did not complete. The server may be unable to download or write the package.' );
+            return $this->result( 'error', $plugin['name'], 'Local package installation did not complete.' );
         }
 
         wp_clean_plugins_cache( true );
 
         $file = isset( $plugin['file'] ) ? $plugin['file'] : '';
         if ( ! $file || ! file_exists( WP_PLUGIN_DIR . '/' . $file ) ) {
-            return $this->result( 'warning', $plugin['name'], 'Installed, but the configured main plugin file was not found. Check the manifest/package directory name.' );
+            return $this->result( 'error', $plugin['name'], 'Package was extracted, but the configured main plugin file was not found.' );
         }
 
         $activated = activate_plugin( $file );
@@ -183,16 +113,10 @@ final class Plugin_Manager {
             return $this->result( 'error', $plugin['name'], $this->format_wp_error( $activated ) );
         }
 
-        return $this->result( 'success', $plugin['name'], 'Installed and activated.' );
+        return $this->result( 'success', $plugin['name'], 'Installed and activated from the bundled offline package.' );
     }
 
-    /**
-     * Include the actual WP_Error code because the stock translated message is
-     * often too generic to diagnose blocked outbound HTTPS or filesystem issues.
-     *
-     * @param \WP_Error $error Error object.
-     * @return string
-     */
+    /** @return string */
     private function format_wp_error( $error ) {
         if ( ! is_wp_error( $error ) ) {
             return 'Unknown WordPress error.';
