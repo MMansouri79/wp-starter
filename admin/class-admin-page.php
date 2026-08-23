@@ -142,10 +142,10 @@ final class Admin_Page {
             <?php $this->page_header( 'Reference Audit', 'Inspect a configured site without copying uploads, content bodies, users, orders, credentials, or arbitrary option values.' ); ?>
 
             <section class="mss-card">
-                <h2>Export Reference Site Audit v2</h2>
+                <h2>Export Reference Site Audit v3</h2>
                 <p>Run this on the fully configured site you want to use as your reference.</p>
-                <p>The JSON includes installed plugins, selected WordPress settings, page names/slugs, portable Elementor Site Kit settings, Code Snippets names/status, theme-mod keys, and candidate plugin option <strong>names only</strong>.</p>
-                <p><strong>It intentionally excludes:</strong> uploads, media, users, page/post bodies, products, orders, arbitrary plugin option values, passwords/API keys, and snippet source code.</p>
+                <p>The JSON includes installed plugins, selected WordPress settings, page names/slugs, portable Elementor Site Kit settings, Code Snippets names/status, theme-mod keys, candidate plugin option names, and values for a small explicitly reviewed safe-option whitelist.</p>
+                <p><strong>It intentionally excludes:</strong> uploads, media, users, page/post bodies, products, orders, arbitrary plugin option values, credentials/license keys, payment settings, client identity/contact data, and snippet source code.</p>
 
                 <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
                     <input type="hidden" name="action" value="mss_download_audit">

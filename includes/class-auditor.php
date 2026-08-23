@@ -10,7 +10,8 @@ final class Auditor {
      * Build a safe audit payload from the current site.
      *
      * Deliberately excludes arbitrary option values, passwords, API keys,
-     * users, content bodies, orders, media and snippet code.
+     * users, content bodies, orders, media and snippet code. Audit v3 may
+     * export values only for the explicit reference-value whitelist.
      *
      * @return array
      */
@@ -41,7 +42,7 @@ final class Auditor {
         $theme = wp_get_theme();
 
         return array(
-            'audit_version' => 2,
+            'audit_version' => 3,
             'generated_at'  => gmdate( 'c' ),
             'site'          => array(
                 'wordpress_version' => get_bloginfo( 'version' ),
@@ -60,9 +61,11 @@ final class Auditor {
             'elementor'                => $this->elementor_data(),
             'code_snippets'            => $this->snippet_inventory(),
             'plugin_option_candidates' => $this->plugin_option_candidates(),
+            'reviewed_plugin_option_values' => $this->reviewed_plugin_option_values(),
             'safety'        => array(
                 'arbitrary_wp_option_values_exported' => false,
                 'candidate_option_values_exported'    => false,
+                'reviewed_plugin_option_values_exported' => true,
                 'users_exported'                      => false,
                 'media_exported'                      => false,
                 'content_bodies_exported'             => false,
@@ -244,6 +247,48 @@ final class Auditor {
             $rows     = $wpdb->get_results( $prepared, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery
 
             $result[ $plugin_id ] = is_array( $rows ) ? $rows : array();
+        }
+
+        return $result;
+    }
+
+
+    /**
+     * Export values only for option names that were explicitly reviewed and
+     * whitelisted in config/starter.php. Missing options are reported without
+     * inventing a value. This output is review material, not an automatic
+     * import source.
+     *
+     * @return array
+     */
+    private function reviewed_plugin_option_values() {
+        $whitelist = Config::get( 'reference_value_whitelist', array() );
+        $result    = array();
+
+        foreach ( $whitelist as $plugin_id => $option_names ) {
+            $rows = array();
+
+            foreach ( (array) $option_names as $option_name ) {
+                $sentinel = new \stdClass();
+                $value    = get_option( $option_name, $sentinel );
+
+                if ( $value === $sentinel ) {
+                    $rows[] = array(
+                        'option_name' => $option_name,
+                        'exists'      => false,
+                    );
+                    continue;
+                }
+
+                $rows[] = array(
+                    'option_name' => $option_name,
+                    'exists'      => true,
+                    'value_type'  => gettype( $value ),
+                    'value'       => $value,
+                );
+            }
+
+            $result[ $plugin_id ] = $rows;
         }
 
         return $result;
