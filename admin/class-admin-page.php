@@ -83,6 +83,7 @@ final class Admin_Page {
         }
 
         $last_run = get_option( 'mss_last_setup_run', array() );
+        $plugins  = Config::get( 'plugins', array() );
         ?>
         <div class="wrap mss-wrap">
             <?php $this->page_header( 'Site Starter', 'Reusable WordPress/Elementor setup without cloning media, users, orders, client content, or an entire old database.' ); ?>
@@ -90,7 +91,7 @@ final class Admin_Page {
             <div class="mss-grid">
                 <section class="mss-card">
                     <h2>Reference Site Audit</h2>
-                    <p>Use this on your existing fully configured reference site. It exports the reusable configuration inventory we need to build your real starter baseline.</p>
+                    <p>Exports the safe inventory needed to refine this starter: plugins, WordPress settings, page names, portable Elementor settings, snippet inventory and plugin option names without their values.</p>
                     <p><a class="button button-secondary" href="<?php echo esc_url( admin_url( 'admin.php?page=site-starter-audit' ) ); ?>">Open Reference Audit</a></p>
                 </section>
 
@@ -100,6 +101,23 @@ final class Admin_Page {
                     <p><a class="button button-primary" href="<?php echo esc_url( admin_url( 'admin.php?page=site-starter-setup' ) ); ?>">Open Initial Setup</a></p>
                 </section>
             </div>
+
+            <section class="mss-card">
+                <h2>Bundled plugin packages</h2>
+                <p>Private/premium plugin ZIPs are never committed to Git. Put them in the paths below before building your personal installer ZIP.</p>
+                <ul class="mss-results">
+                    <?php foreach ( $plugins as $plugin ) : ?>
+                        <?php if ( isset( $plugin['source'] ) && 'bundled' === $plugin['source'] ) : ?>
+                            <?php $exists = ! empty( $plugin['package'] ) && file_exists( MSS_DIR . ltrim( $plugin['package'], '/\\' ) ); ?>
+                            <li class="mss-result mss-<?php echo $exists ? 'success' : 'warning'; ?>">
+                                <strong><?php echo esc_html( $plugin['name'] ); ?>:</strong>
+                                <?php echo esc_html( isset( $plugin['package'] ) ? $plugin['package'] : '' ); ?>
+                                — <?php echo $exists ? 'present' : 'missing'; ?>
+                            </li>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
+                </ul>
+            </section>
 
             <section class="mss-card">
                 <h2>State</h2>
@@ -121,13 +139,13 @@ final class Admin_Page {
         }
         ?>
         <div class="wrap mss-wrap">
-            <?php $this->page_header( 'Reference Audit', 'Inspect a configured site without copying uploads, content, users, orders, or arbitrary database options.' ); ?>
+            <?php $this->page_header( 'Reference Audit', 'Inspect a configured site without copying uploads, content bodies, users, orders, credentials, or arbitrary option values.' ); ?>
 
             <section class="mss-card">
-                <h2>Export Reference Site Audit</h2>
+                <h2>Export Reference Site Audit v2</h2>
                 <p>Run this on the fully configured site you want to use as your reference.</p>
-                <p>The JSON includes installed plugins, selected WordPress settings, selected Elementor options, the active Elementor Kit Site Settings, and Code Snippets names/status.</p>
-                <p><strong>It intentionally excludes:</strong> uploads, media, users, post/page content, products, orders, arbitrary plugin options, and snippet source code.</p>
+                <p>The JSON includes installed plugins, selected WordPress settings, page names/slugs, portable Elementor Site Kit settings, Code Snippets names/status, theme-mod keys, and candidate plugin option <strong>names only</strong>.</p>
+                <p><strong>It intentionally excludes:</strong> uploads, media, users, page/post bodies, products, orders, arbitrary plugin option values, passwords/API keys, and snippet source code.</p>
 
                 <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
                     <input type="hidden" name="action" value="mss_download_audit">
@@ -151,7 +169,7 @@ final class Admin_Page {
         }
         ?>
         <div class="wrap mss-wrap">
-            <?php $this->page_header( 'Initial Setup', 'Apply the starter baseline to a new or intentionally clean WordPress installation.' ); ?>
+            <?php $this->page_header( 'Initial Setup', 'Apply the reviewed starter baseline to a new or intentionally clean WordPress installation.' ); ?>
 
             <?php if ( is_array( $results ) && ! empty( $results ) ) : ?>
                 <section class="mss-card">
@@ -185,10 +203,12 @@ final class Admin_Page {
 
                     <fieldset class="mss-components">
                         <legend><strong>Components</strong></legend>
+                        <label><input type="checkbox" name="components[]" value="theme" checked> Install/activate Hello Elementor theme</label>
                         <label><input type="checkbox" name="components[]" value="plugins" checked> Install/activate profile plugins</label>
-                        <label><input type="checkbox" name="components[]" value="wordpress" checked> Apply WordPress defaults</label>
+                        <label><input type="checkbox" name="components[]" value="wordpress" checked> Apply WordPress baseline</label>
+                        <label><input type="checkbox" name="components[]" value="plugin-settings" checked> Apply reviewed plugin defaults</label>
                         <label><input type="checkbox" name="components[]" value="cleanup" checked> Remove Hello World / Sample Page</label>
-                        <label><input type="checkbox" name="components[]" value="pages" checked> Create starter pages and assign Home/Blog</label>
+                        <label><input type="checkbox" name="components[]" value="pages" checked> Create starter pages</label>
                         <label><input type="checkbox" name="components[]" value="elementor" checked> Apply reviewed Elementor defaults</label>
                     </fieldset>
 
@@ -209,7 +229,7 @@ final class Admin_Page {
         $profile    = isset( $_POST['profile'] ) ? sanitize_key( wp_unslash( $_POST['profile'] ) ) : 'elementor';
         $components = isset( $_POST['components'] ) ? (array) wp_unslash( $_POST['components'] ) : array();
         $components = array_values( array_filter( array_map( 'sanitize_key', $components ) ) );
-        $allowed    = array( 'plugins', 'wordpress', 'cleanup', 'pages', 'elementor' );
+        $allowed    = array( 'theme', 'plugins', 'wordpress', 'plugin-settings', 'cleanup', 'pages', 'elementor' );
         $components = array_values( array_intersect( $components, $allowed ) );
 
         $runner  = new Runner();

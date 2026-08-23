@@ -9,8 +9,8 @@ final class Auditor {
     /**
      * Build a safe audit payload from the current site.
      *
-     * Deliberately excludes arbitrary wp_options, passwords, API keys, users,
-     * content, orders, media and snippet code.
+     * Deliberately excludes arbitrary option values, passwords, API keys,
+     * users, content bodies, orders, media and snippet code.
      *
      * @return array
      */
@@ -19,7 +19,7 @@ final class Auditor {
             require_once ABSPATH . 'wp-admin/includes/plugin.php';
         }
 
-        $plugins = get_plugins();
+        $plugins     = get_plugins();
         $plugin_rows = array();
 
         foreach ( $plugins as $file => $data ) {
@@ -41,7 +41,7 @@ final class Auditor {
         $theme = wp_get_theme();
 
         return array(
-            'audit_version' => 1,
+            'audit_version' => 2,
             'generated_at'  => gmdate( 'c' ),
             'site'          => array(
                 'wordpress_version' => get_bloginfo( 'version' ),
@@ -52,17 +52,21 @@ final class Auditor {
                     'version' => $theme->get( 'Version' ),
                     'slug'    => $theme->get_stylesheet(),
                 ),
+                'theme_mod_keys' => $this->theme_mod_keys(),
             ),
-            'plugins'       => $plugin_rows,
-            'wordpress'     => $this->wordpress_options(),
-            'elementor'     => $this->elementor_data(),
-            'code_snippets' => $this->snippet_inventory(),
+            'plugins'                  => $plugin_rows,
+            'wordpress'                => $this->wordpress_options(),
+            'pages'                    => $this->page_inventory(),
+            'elementor'                => $this->elementor_data(),
+            'code_snippets'            => $this->snippet_inventory(),
+            'plugin_option_candidates' => $this->plugin_option_candidates(),
             'safety'        => array(
-                'arbitrary_wp_options_exported' => false,
-                'users_exported'                => false,
-                'media_exported'                => false,
-                'content_exported'              => false,
-                'snippet_code_exported'         => false,
+                'arbitrary_wp_option_values_exported' => false,
+                'candidate_option_values_exported'    => false,
+                'users_exported'                      => false,
+                'media_exported'                      => false,
+                'content_bodies_exported'             => false,
+                'snippet_code_exported'               => false,
             ),
         );
     }
@@ -98,6 +102,33 @@ final class Auditor {
     }
 
     /** @return array */
+    private function page_inventory() {
+        $pages = get_posts(
+            array(
+                'post_type'      => 'page',
+                'post_status'    => array( 'publish', 'draft', 'private', 'pending' ),
+                'posts_per_page' => -1,
+                'orderby'        => 'menu_order title',
+                'order'          => 'ASC',
+                'fields'         => 'ids',
+                'no_found_rows'  => true,
+            )
+        );
+
+        $rows = array();
+        foreach ( $pages as $page_id ) {
+            $rows[] = array(
+                'title'    => get_the_title( $page_id ),
+                'slug'     => get_post_field( 'post_name', $page_id ),
+                'status'   => get_post_status( $page_id ),
+                'template' => get_page_template_slug( $page_id ),
+            );
+        }
+
+        return $rows;
+    }
+
+    /** @return array */
     private function elementor_data() {
         $option_keys = array(
             'elementor_css_print_method',
@@ -125,7 +156,7 @@ final class Auditor {
         if ( $kit_id > 0 ) {
             $raw = get_post_meta( $kit_id, '_elementor_page_settings', true );
             if ( is_array( $raw ) ) {
-                $kit_settings = $raw;
+                $kit_settings = $this->portable_elementor_kit_settings( $raw );
             }
         }
 
@@ -133,7 +164,32 @@ final class Auditor {
             'active_kit_id' => $kit_id,
             'options'       => $options,
             'kit_settings'  => $kit_settings,
+            'excluded_kit_keys' => array(
+                'site_name',
+                'site_description',
+                'site_logo',
+                'site_favicon',
+                'woocommerce_*_page_id',
+            ),
         );
+    }
+
+    /** @return array */
+    private function portable_elementor_kit_settings( array $settings ) {
+        $excluded_exact = array(
+            'site_name',
+            'site_description',
+            'site_logo',
+            'site_favicon',
+        );
+
+        foreach ( array_keys( $settings ) as $key ) {
+            if ( in_array( $key, $excluded_exact, true ) || 0 === strpos( $key, 'woocommerce_' ) ) {
+                unset( $settings[ $key ] );
+            }
+        }
+
+        return $settings;
     }
 
     /** @return array */
@@ -152,5 +208,50 @@ final class Auditor {
         $rows = $wpdb->get_results( "SELECT id, name, scope, active FROM {$table} ORDER BY name ASC", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery
 
         return is_array( $rows ) ? $rows : array();
+    }
+
+    /** @return array */
+    private function plugin_option_candidates() {
+        global $wpdb;
+
+        $plugins = Config::get( 'plugins', array() );
+        $result  = array();
+
+        foreach ( $plugins as $plugin_id => $definition ) {
+            $prefixes = isset( $definition['option_prefixes'] ) && is_array( $definition['option_prefixes'] )
+                ? array_values( array_filter( $definition['option_prefixes'] ) )
+                : array();
+
+            if ( empty( $prefixes ) ) {
+                continue;
+            }
+
+            $conditions = array();
+            $args       = array();
+
+            foreach ( $prefixes as $prefix ) {
+                $conditions[] = 'option_name LIKE %s';
+                $args[]       = $wpdb->esc_like( $prefix ) . '%';
+            }
+
+            $sql = "SELECT option_name, LENGTH(option_value) AS value_length, autoload
+                    FROM {$wpdb->options}
+                    WHERE " . implode( ' OR ', $conditions ) . '
+                    ORDER BY option_name ASC
+                    LIMIT 500'; // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+            $prepared = $wpdb->prepare( $sql, $args ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $rows     = $wpdb->get_results( $prepared, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery
+
+            $result[ $plugin_id ] = is_array( $rows ) ? $rows : array();
+        }
+
+        return $result;
+    }
+
+    /** @return string[] */
+    private function theme_mod_keys() {
+        $mods = get_theme_mods();
+        return is_array( $mods ) ? array_values( array_keys( $mods ) ) : array();
     }
 }
