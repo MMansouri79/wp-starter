@@ -29,6 +29,11 @@ final class Runner {
         $profile = $profiles[ $profile_id ];
         $results = array();
 
+        if ( in_array( 'theme', $components, true ) ) {
+            $manager = new Theme_Manager();
+            $results = array_merge( $results, $manager->ensure_theme() );
+        }
+
         if ( in_array( 'plugins', $components, true ) ) {
             $manager = new Plugin_Manager();
             $results = array_merge( $results, $manager->ensure_plugins( $profile['plugins'] ) );
@@ -37,6 +42,11 @@ final class Runner {
         if ( in_array( 'wordpress', $components, true ) ) {
             $manager = new Settings_Manager();
             $results = array_merge( $results, $manager->apply_wordpress_defaults() );
+        }
+
+        if ( in_array( 'plugin-settings', $components, true ) ) {
+            $manager = new Plugin_Settings_Manager();
+            $results = array_merge( $results, $manager->apply_defaults() );
         }
 
         if ( in_array( 'cleanup', $components, true ) ) {

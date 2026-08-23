@@ -56,10 +56,21 @@ final class Plugin_Manager {
             return $this->result( 'success', $plugin['name'], 'Existing plugin activated.' );
         }
 
-        if ( 'wordpress.org' !== $plugin['source'] ) {
-            return $this->result( 'warning', $plugin['name'], 'Premium/private package installation is not configured yet.' );
+        $source = isset( $plugin['source'] ) ? $plugin['source'] : '';
+
+        if ( 'wordpress.org' === $source ) {
+            return $this->install_from_wordpress_org( $plugin );
         }
 
+        if ( 'bundled' === $source ) {
+            return $this->install_from_bundled_package( $plugin );
+        }
+
+        return $this->result( 'warning', $plugin['name'], 'Unknown plugin source.' );
+    }
+
+    /** @return array */
+    private function install_from_wordpress_org( array $plugin ) {
         require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
         require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 
@@ -79,9 +90,32 @@ final class Plugin_Manager {
             return $this->result( 'error', $plugin['name'], 'WordPress.org did not return a download package.' );
         }
 
-        $skin     = new \Automatic_Upgrader_Skin();
-        $upgrader = new \Plugin_Upgrader( $skin );
-        $installed = $upgrader->install( $api->download_link );
+        return $this->install_package( $plugin, $api->download_link );
+    }
+
+    /** @return array */
+    private function install_from_bundled_package( array $plugin ) {
+        $relative = isset( $plugin['package'] ) ? ltrim( $plugin['package'], '/\\' ) : '';
+        $package  = $relative ? MSS_DIR . $relative : '';
+
+        if ( ! $package || ! file_exists( $package ) ) {
+            return $this->result(
+                'warning',
+                $plugin['name'],
+                sprintf( 'Bundled package is missing. Add %s before building the installer ZIP.', $relative ? $relative : 'a package path' )
+            );
+        }
+
+        return $this->install_package( $plugin, $package );
+    }
+
+    /** @return array */
+    private function install_package( array $plugin, $package ) {
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+
+        $skin      = new \Automatic_Upgrader_Skin();
+        $upgrader  = new \Plugin_Upgrader( $skin );
+        $installed = $upgrader->install( $package );
 
         if ( is_wp_error( $installed ) ) {
             return $this->result( 'error', $plugin['name'], $installed->get_error_message() );
@@ -93,7 +127,8 @@ final class Plugin_Manager {
 
         wp_clean_plugins_cache( true );
 
-        if ( ! file_exists( WP_PLUGIN_DIR . '/' . $file ) ) {
+        $file = isset( $plugin['file'] ) ? $plugin['file'] : '';
+        if ( ! $file || ! file_exists( WP_PLUGIN_DIR . '/' . $file ) ) {
             return $this->result( 'warning', $plugin['name'], 'Installed, but the configured main plugin file was not found. Check the manifest.' );
         }
 
