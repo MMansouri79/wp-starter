@@ -1,54 +1,89 @@
 # Site Starter
 
-A private WordPress starter plugin for reproducing a reviewed development baseline on clean WordPress installs without cloning media, users, content, orders, or an entire database.
+A private WordPress starter plugin for reproducing a reviewed development baseline on clean WordPress installs without cloning media, users, client content, orders, or an entire old database.
 
-## v0.1.x goals
+## Current baseline: v0.2.0
 
-- Safe Reference Site Audit JSON
-- Elementor and WooCommerce starter profiles
-- Install/activate configured WordPress.org plugins
-- Apply conservative WordPress defaults
-- Remove default WordPress sample content
-- Create starter pages without duplicates
-- Assign static Home and Blog pages
-- Framework for reviewed Elementor Site Settings
-- Idempotent setup behavior
+The first real reference audit established **Hello Elementor** as the reference theme and the following plugin stack:
+
+### Elementor profile
+- Classic Editor
+- Elementor
+- Elementor Pro (bundled/private ZIP)
+
+### Elementor + WooCommerce profile
+- Classic Editor
+- Elementor
+- Elementor Pro (bundled/private ZIP)
+- WooCommerce
+- Persian WooCommerce
+- FilterX (bundled/private ZIP)
+
+Site Starter itself is the installer and is not part of its own target manifest.
 
 ## Install
 
-1. Zip the `site-starter` directory.
+1. Build or download the `site-starter` ZIP.
 2. WordPress Admin → Plugins → Add New → Upload Plugin.
 3. Activate **Site Starter**.
-4. Open **Site Starter → Reference Audit**.
+4. Use the dedicated **Site Starter** admin menu.
 
-## First use on the reference site
+## Reference-site workflow
 
 Do **not** run Initial Setup on the existing reference site.
 
-Use **Download Reference Audit JSON**. The audit intentionally excludes:
+Use **Site Starter → Reference Audit → Download Reference Audit JSON**.
 
+Audit v2 includes:
+- installed plugin inventory
+- selected WordPress settings
+- page titles/slugs/status/template, but not page content
+- portable Elementor Site Kit settings
+- Code Snippets inventory without code
+- theme-mod keys without values
+- candidate plugin option names, lengths and autoload metadata without option values
+
+It intentionally excludes:
 - uploads/media
 - users
-- post/page content
-- WooCommerce orders/customers
-- arbitrary `wp_options`
+- post/page bodies
+- products/orders/customers
+- arbitrary plugin option values
 - Code Snippets source code
-- credentials and API keys by design
+- passwords, API keys and credentials
 
-The audit is used to review which settings should become version-controlled starter defaults.
-
-## First use on a new site
+## New-site workflow
 
 Open **Site Starter → Initial Setup**, choose a profile, select components, and run **Initial Setup**.
 
-## Premium plugins
+Current components:
+- install/activate Hello Elementor
+- install/activate profile plugins
+- apply WordPress baseline
+- apply reviewed plugin settings
+- remove Hello World / Sample Page
+- create starter pages
+- apply reviewed Elementor defaults
 
-v0.1.x only installs plugins from WordPress.org. Premium/private package support will be added after the reference audit defines which packages belong in the baseline. License keys will never be stored in this repository.
+## Private / premium plugins
+
+Private plugin packages use the bundled-package convention:
+
+```text
+packages/
+├── elementor-pro.zip
+└── filterx.zip
+```
+
+Those ZIP files are ignored by Git and are not included in the source repository. Add your legally obtained/current package files before building your personal deployment ZIP.
+
+License activation remains site-specific and is never stored in this repository.
 
 ## Safety principles
 
-1. Whitelist settings. Never clone arbitrary database rows.
-2. Never store credentials or client identifiers.
-3. Setup tasks must be safe to run more than once.
-4. One-time setup and permanent runtime behavior stay separate.
-5. Reference-site extraction is reviewed before it becomes a default.
+1. Whitelist setting values. Never clone arbitrary database rows.
+2. Candidate discovery may export option names, never unreviewed option values.
+3. Never store credentials, license keys or client identifiers.
+4. Setup tasks should be safe to run more than once.
+5. One-time setup and permanent runtime behavior stay separate.
+6. Reference-site extraction is reviewed before it becomes a default.
