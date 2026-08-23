@@ -2,7 +2,7 @@
 
 A private WordPress starter plugin for reproducing a reviewed development baseline on clean WordPress installs without cloning media, users, content, orders, or an entire database.
 
-## v0.1.0 goals
+## v0.1.x goals
 
 - Safe Reference Site Audit JSON
 - Elementor and WooCommerce starter profiles
@@ -19,7 +19,7 @@ A private WordPress starter plugin for reproducing a reviewed development baseli
 1. Zip the `site-starter` directory.
 2. WordPress Admin → Plugins → Add New → Upload Plugin.
 3. Activate **Site Starter**.
-4. Open **Tools → Site Starter**.
+4. Open **Site Starter → Reference Audit**.
 
 ## First use on the reference site
 
@@ -39,11 +39,11 @@ The audit is used to review which settings should become version-controlled star
 
 ## First use on a new site
 
-Open **Tools → Site Starter**, choose a profile, select components, and run **Initial Setup**.
+Open **Site Starter → Initial Setup**, choose a profile, select components, and run **Initial Setup**.
 
 ## Premium plugins
 
-v0.1.0 only installs plugins from WordPress.org. Premium/private package support will be added after the reference audit defines which packages belong in the baseline. License keys will never be stored in this repository.
+v0.1.x only installs plugins from WordPress.org. Premium/private package support will be added after the reference audit defines which packages belong in the baseline. License keys will never be stored in this repository.
 
 ## Safety principles
 

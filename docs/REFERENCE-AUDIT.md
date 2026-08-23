@@ -1,7 +1,7 @@
 # Reference Audit Workflow
 
 1. Install Site Starter on the existing fully configured reference site.
-2. Open Tools → Site Starter.
+2. Open Site Starter → Reference Audit.
 3. Click **Download Reference Audit JSON**.
 4. Review/share that JSON for baseline extraction.
 5. Do not run Initial Setup on the reference site.

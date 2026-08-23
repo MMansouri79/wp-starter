@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 - 2026-08-23
+
+### Changed
+- Promoted Site Starter to its own top-level WordPress admin menu.
+- Split Dashboard, Reference Audit, and Initial Setup into dedicated admin screens.
+- Added clearer reference-site safety guidance and direct dashboard actions.
+
 ## 0.1.0 - 2026-08-23
 
 ### Added
