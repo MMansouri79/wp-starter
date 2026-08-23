@@ -2,7 +2,7 @@
 
 A private WordPress starter plugin for reproducing a reviewed development baseline on clean WordPress installs without cloning media, users, client content, orders, or an entire old database.
 
-## Current baseline: v0.3.0
+## Current baseline: v0.4.0
 
 The real core-site audit established **Hello Elementor** as the reference theme and the following plugin stack:
 
@@ -77,7 +77,20 @@ It intentionally excludes:
 - credentials, license keys and payment settings
 - client identity/contact data
 
-The v3 reviewed values are still review material. They are **not automatically imported** until approved and copied into `plugin_option_defaults`.
+The reviewed v3 values have now been promoted into `plugin_option_defaults` where they are portable and safe. Elementor, WooCommerce and Persian WooCommerce defaults are applied by Initial Setup. FilterX raw automatic-setup data remains excluded because it contains a site-specific database ID.
+
+
+## Reviewed plugin defaults
+
+v0.4.0 promotes the approved Audit v3 values into the actual setup baseline.
+
+- Elementor: portable option values plus the already-reviewed Site Kit defaults
+- WooCommerce: reviewed store behavior, inventory, checkout, price, review, tax-display, shipping-display and image-size defaults
+- Persian WooCommerce: reviewed translation override state
+- FilterX: installation only for now; its raw `filterx_automatic_setup` value is not transplanted because it contains a site-specific `filter_set_id`
+- Elementor Pro: installed from the private package, but no license/connect values are copied
+
+See `docs/PLUGIN-DEFAULTS.md` for the detailed safety boundary.
 
 ## New-site workflow
 

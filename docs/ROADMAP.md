@@ -25,10 +25,11 @@
 - Export only approved safe plugin setting values for final review
 
 ## v0.4.0 — Apply plugin-specific defaults
-- Promote approved audit-v3 values into `plugin_option_defaults`
-- Add plugin-specific adapters where an option requires transformation
-- Add per-setting skip/reset behavior
-- Keep IDs, secrets, payment credentials and site identity excluded
+- ✅ Promote approved audit-v3 Elementor, WooCommerce and Persian WooCommerce values into `plugin_option_defaults`
+- ✅ Keep IDs, secrets, payment credentials and site identity excluded
+- ✅ Reject raw FilterX automatic-setup migration because it contains a site-specific filter-set ID
+- ⏭ Add a portable FilterX adapter in a later release
+- ⏭ Add per-setting skip/reset behavior in a later release
 
 ## v0.5.0 — Deployment packages
 - Improve local ZIP package workflow

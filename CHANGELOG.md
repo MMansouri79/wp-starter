@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 - 2026-08-23
+
+### Added
+- Promoted approved Audit v3 Elementor, WooCommerce and Persian WooCommerce values into the real setup baseline.
+- Added `docs/PLUGIN-DEFAULTS.md` documenting applied values and the safety boundary.
+- Added the audited Hello Elementor footer copyright setting to portable Site Kit defaults.
+
+### Changed
+- Initial Setup now applies 66 reviewed plugin option values when the corresponding plugins are active.
+- WooCommerce behavior now reproduces the confirmed core-site defaults for currency, checkout, inventory, downloads, reviews, shipping display, price formatting, tax display and product image widths.
+
+### Safety
+- FilterX `filterx_automatic_setup` is not copied raw because the audited value contains the site-specific manual filter-set ID `162`.
+- Elementor Pro license/connect values remain excluded.
+- Payment, store identity/contact data, page IDs, logs, generated IDs and onboarding/runtime state remain excluded.
+
 ## 0.3.0 - 2026-08-23
 
 ### Added
