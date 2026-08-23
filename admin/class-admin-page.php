@@ -10,6 +10,8 @@ final class Admin_Page {
         add_action( 'admin_menu', array( $this, 'register_pages' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
         add_action( 'admin_post_mss_run_setup', array( $this, 'handle_setup' ) );
+        add_action( 'admin_post_mss_run_setup_step', array( $this, 'handle_setup_step' ) );
+        add_action( 'admin_post_mss_cancel_setup', array( $this, 'handle_cancel_setup' ) );
         add_action( 'admin_post_mss_download_audit', array( $this, 'handle_audit' ) );
     }
 
@@ -171,15 +173,18 @@ final class Admin_Page {
         }
 
         $profiles = Config::get( 'profiles', array() );
-        $results  = get_transient( 'mss_results_' . get_current_user_id() );
-        if ( false !== $results ) {
-            delete_transient( 'mss_results_' . get_current_user_id() );
+        $user_id  = get_current_user_id();
+        $state    = get_transient( 'mss_setup_state_' . $user_id );
+        $results  = get_transient( 'mss_results_' . $user_id );
+
+        if ( false !== $results && empty( $state ) ) {
+            delete_transient( 'mss_results_' . $user_id );
         }
         ?>
         <div class="wrap mss-wrap">
             <?php $this->page_header( 'Initial Setup', 'Apply the reviewed starter baseline to a new or intentionally clean WordPress installation.' ); ?>
 
-            <?php if ( is_array( $results ) && ! empty( $results ) ) : ?>
+            <?php if ( is_array( $results ) && ! empty( $results ) && empty( $state ) ) : ?>
                 <section class="mss-card">
                     <h2>Last setup result</h2>
                     <ul class="mss-results">
@@ -193,36 +198,96 @@ final class Admin_Page {
                 </section>
             <?php endif; ?>
 
-            <section class="mss-card">
-                <h2>Run Initial Setup</h2>
-                <p><strong>Do not run this on the reference site unless you intentionally want to change that site.</strong></p>
-                <p>Tasks are designed to be idempotent, so existing starter pages and installed plugins are not duplicated.</p>
+            <?php if ( is_array( $state ) && ! empty( $state['queue'] ) ) : ?>
+                <?php
+                $remaining = count( $state['queue'] );
+                $total     = isset( $state['total'] ) ? max( 1, (int) $state['total'] ) : $remaining;
+                $completed = max( 0, $total - $remaining );
+                $percent   = min( 100, (int) floor( ( $completed / $total ) * 100 ) );
+                $current   = reset( $state['queue'] );
+                ?>
+                <section class="mss-card">
+                    <h2>Setup in progress</h2>
+                    <p>Site Starter now performs one potentially slow task per request so hosting gateway limits cannot kill the entire installation at once.</p>
+                    <div class="mss-progress" aria-label="Setup progress">
+                        <span style="width: <?php echo esc_attr( (string) $percent ); ?>%;"></span>
+                    </div>
+                    <p><strong><?php echo esc_html( (string) $completed ); ?> / <?php echo esc_html( (string) $total ); ?></strong> steps completed.</p>
+                    <p><strong>Current step:</strong> <?php echo esc_html( isset( $current['label'] ) ? $current['label'] : 'Setup task' ); ?></p>
+                    <p class="description">The next step starts automatically. If the host times out during a single plugin install, return to this page and the same step can be retried safely.</p>
 
-                <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
-                    <input type="hidden" name="action" value="mss_run_setup">
-                    <?php wp_nonce_field( 'mss_run_setup' ); ?>
+                    <?php if ( ! empty( $state['results'] ) ) : ?>
+                        <details class="mss-progress-results">
+                            <summary>Completed step results</summary>
+                            <ul class="mss-results">
+                                <?php foreach ( $state['results'] as $row ) : ?>
+                                    <li class="mss-result mss-<?php echo esc_attr( $row['status'] ); ?>">
+                                        <strong><?php echo esc_html( $row['label'] ); ?>:</strong>
+                                        <?php echo esc_html( $row['message'] ); ?>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        </details>
+                    <?php endif; ?>
 
-                    <label for="mss-profile"><strong>Profile</strong></label>
-                    <select name="profile" id="mss-profile">
-                        <?php foreach ( $profiles as $id => $profile ) : ?>
-                            <option value="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $profile['label'] ); ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <form id="mss-setup-step-form" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                        <input type="hidden" name="action" value="mss_run_setup_step">
+                        <?php wp_nonce_field( 'mss_run_setup_step' ); ?>
+                        <?php submit_button( 'Continue Current Step', 'primary', 'submit', false ); ?>
+                    </form>
 
-                    <fieldset class="mss-components">
-                        <legend><strong>Components</strong></legend>
-                        <label><input type="checkbox" name="components[]" value="theme" checked> Install/activate Hello Elementor theme</label>
-                        <label><input type="checkbox" name="components[]" value="plugins" checked> Install/activate profile plugins</label>
-                        <label><input type="checkbox" name="components[]" value="wordpress" checked> Apply WordPress baseline</label>
-                        <label><input type="checkbox" name="components[]" value="plugin-settings" checked> Apply reviewed plugin defaults</label>
-                        <label><input type="checkbox" name="components[]" value="cleanup" checked> Remove Hello World / Sample Page</label>
-                        <label><input type="checkbox" name="components[]" value="pages" checked> Create starter pages</label>
-                        <label><input type="checkbox" name="components[]" value="elementor" checked> Apply reviewed Elementor defaults</label>
-                    </fieldset>
+                    <form class="mss-cancel-form" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                        <input type="hidden" name="action" value="mss_cancel_setup">
+                        <?php wp_nonce_field( 'mss_cancel_setup' ); ?>
+                        <?php submit_button( 'Cancel Setup', 'secondary', 'submit', false ); ?>
+                    </form>
+                </section>
+                <script>
+                document.addEventListener('DOMContentLoaded', function () {
+                    window.setTimeout(function () {
+                        var form = document.getElementById('mss-setup-step-form');
+                        if (form) {
+                            if (typeof form.requestSubmit === 'function') {
+                                form.requestSubmit();
+                            } else {
+                                form.submit();
+                            }
+                        }
+                    }, 900);
+                });
+                </script>
+            <?php else : ?>
+                <section class="mss-card">
+                    <h2>Run Initial Setup</h2>
+                    <p><strong>Do not run this on the reference site unless you intentionally want to change that site.</strong></p>
+                    <p>Tasks are idempotent and are now processed in separate requests. Existing starter pages and installed plugins are not duplicated.</p>
 
-                    <?php submit_button( 'Run Initial Setup', 'primary', 'submit', false ); ?>
-                </form>
-            </section>
+                    <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                        <input type="hidden" name="action" value="mss_run_setup">
+                        <?php wp_nonce_field( 'mss_run_setup' ); ?>
+
+                        <label for="mss-profile"><strong>Profile</strong></label>
+                        <select name="profile" id="mss-profile">
+                            <?php foreach ( $profiles as $id => $profile ) : ?>
+                                <option value="<?php echo esc_attr( $id ); ?>"><?php echo esc_html( $profile['label'] ); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+
+                        <fieldset class="mss-components">
+                            <legend><strong>Components</strong></legend>
+                            <label><input type="checkbox" name="components[]" value="theme" checked> Install/activate Hello Elementor theme</label>
+                            <label><input type="checkbox" name="components[]" value="plugins" checked> Install/activate profile plugins</label>
+                            <label><input type="checkbox" name="components[]" value="wordpress" checked> Apply WordPress baseline</label>
+                            <label><input type="checkbox" name="components[]" value="plugin-settings" checked> Apply reviewed plugin defaults</label>
+                            <label><input type="checkbox" name="components[]" value="cleanup" checked> Remove Hello World / Sample Page</label>
+                            <label><input type="checkbox" name="components[]" value="pages" checked> Create starter pages</label>
+                            <label><input type="checkbox" name="components[]" value="elementor" checked> Apply reviewed Elementor defaults</label>
+                        </fieldset>
+
+                        <?php submit_button( 'Run Initial Setup', 'primary', 'submit', false ); ?>
+                    </form>
+                </section>
+            <?php endif; ?>
         </div>
         <?php
     }
@@ -240,10 +305,105 @@ final class Admin_Page {
         $allowed    = array( 'theme', 'plugins', 'wordpress', 'plugin-settings', 'cleanup', 'pages', 'elementor' );
         $components = array_values( array_intersect( $components, $allowed ) );
 
-        $runner  = new Runner();
-        $results = $runner->run( $profile, $components );
+        $runner = new Runner();
+        $queue  = $runner->build_queue( $profile, $components );
+        $user_id = get_current_user_id();
 
-        set_transient( 'mss_results_' . get_current_user_id(), $results, MINUTE_IN_SECONDS );
+        if ( empty( $queue ) ) {
+            set_transient(
+                'mss_results_' . $user_id,
+                array(
+                    array(
+                        'status'  => 'error',
+                        'label'   => 'Setup',
+                        'message' => 'Unknown starter profile or no setup components were selected.',
+                    ),
+                ),
+                10 * MINUTE_IN_SECONDS
+            );
+            wp_safe_redirect( admin_url( 'admin.php?page=site-starter-setup' ) );
+            exit;
+        }
+
+        delete_transient( 'mss_results_' . $user_id );
+        set_transient(
+            'mss_setup_state_' . $user_id,
+            array(
+                'version'    => MSS_VERSION,
+                'profile'    => $profile,
+                'components' => $components,
+                'queue'      => $queue,
+                'total'      => count( $queue ),
+                'results'    => array(),
+                'started_at' => time(),
+            ),
+            6 * HOUR_IN_SECONDS
+        );
+
+        wp_safe_redirect( admin_url( 'admin.php?page=site-starter-setup' ) );
+        exit;
+    }
+
+    public function handle_setup_step() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'You are not allowed to run Site Starter.' );
+        }
+
+        check_admin_referer( 'mss_run_setup_step' );
+
+        $user_id = get_current_user_id();
+        $key     = 'mss_setup_state_' . $user_id;
+        $state   = get_transient( $key );
+
+        if ( ! is_array( $state ) || empty( $state['queue'] ) || empty( $state['profile'] ) ) {
+            wp_safe_redirect( admin_url( 'admin.php?page=site-starter-setup' ) );
+            exit;
+        }
+
+        $step    = reset( $state['queue'] );
+        $runner  = new Runner();
+        $results = $runner->run_step( $state['profile'], $step );
+
+        if ( ! isset( $state['results'] ) || ! is_array( $state['results'] ) ) {
+            $state['results'] = array();
+        }
+        $state['results'] = array_merge( $state['results'], $results );
+
+        array_shift( $state['queue'] );
+
+        if ( empty( $state['queue'] ) ) {
+            $runner->finish( $state['profile'], isset( $state['components'] ) ? (array) $state['components'] : array() );
+            set_transient( 'mss_results_' . $user_id, $state['results'], 10 * MINUTE_IN_SECONDS );
+            delete_transient( $key );
+        } else {
+            set_transient( $key, $state, 6 * HOUR_IN_SECONDS );
+        }
+
+        wp_safe_redirect( admin_url( 'admin.php?page=site-starter-setup' ) );
+        exit;
+    }
+
+    public function handle_cancel_setup() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'You are not allowed to cancel Site Starter setup.' );
+        }
+
+        check_admin_referer( 'mss_cancel_setup' );
+
+        $user_id = get_current_user_id();
+        delete_transient( 'mss_setup_state_' . $user_id );
+        set_transient(
+            'mss_results_' . $user_id,
+            array(
+                array(
+                    'status'  => 'warning',
+                    'label'   => 'Setup',
+                    'message' => 'Setup was cancelled. Completed idempotent steps were left in place.',
+                ),
+            ),
+            10 * MINUTE_IN_SECONDS
+        );
+
         wp_safe_redirect( admin_url( 'admin.php?page=site-starter-setup' ) );
         exit;
     }

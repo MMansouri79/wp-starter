@@ -58,3 +58,38 @@
         grid-template-columns: 1fr;
     }
 }
+
+.mss-progress {
+    background: #dcdcde;
+    border-radius: 999px;
+    height: 12px;
+    margin: 16px 0 8px;
+    overflow: hidden;
+    width: 100%;
+}
+
+.mss-progress span {
+    background: #2271b1;
+    display: block;
+    height: 100%;
+    transition: width .2s ease;
+}
+
+.mss-progress-results {
+    margin: 16px 0;
+}
+
+.mss-progress-results summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.mss-cancel-form {
+    display: inline-block;
+    margin-left: 8px;
+}
+
+#mss-setup-step-form {
+    display: inline-block;
+}
