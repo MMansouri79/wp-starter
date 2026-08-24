@@ -8,6 +8,11 @@ import { PackageRegistry, defaultLibraryDir } from "./registry.js";
 import type {
   ConfigSnapshotFile,
   ConfigSnapshotInspection,
+  ConfigSnapshotComparison,
+  SnapshotBinaryChange,
+  SnapshotValueChange,
+  SnapshotPageChange,
+  SnapshotAdapterStructureChange,
   ConfigSnapshotRecord,
   SnapshotPluginRequirement,
   SnapshotRequirement,
@@ -147,6 +152,42 @@ async function readFullConfigExport(zipPath: string): Promise<any> {
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
+}
+
+
+function stableValue(value: unknown): string {
+  if (value === undefined) return "__undefined__";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj).sort().map((key) => `${JSON.stringify(key)}:${stableValue(obj[key])}`).join(",")}}`;
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  return stableValue(left) === stableValue(right);
+}
+
+function summarizeKinds<T extends { kind: "added" | "removed" | "changed" }>(changes: T[]) {
+  return {
+    added: changes.filter((change) => change.kind === "added").length,
+    removed: changes.filter((change) => change.kind === "removed").length,
+    changed: changes.filter((change) => change.kind === "changed").length,
+    total: changes.length
+  };
+}
+
+function compareValueRecords(scope: string, left: Record<string, unknown>, right: Record<string, unknown>, prefix = ""): SnapshotValueChange[] {
+  const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
+  const changes: SnapshotValueChange[] = [];
+  for (const key of keys) {
+    const leftHas = Object.prototype.hasOwnProperty.call(left, key);
+    const rightHas = Object.prototype.hasOwnProperty.call(right, key);
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (!leftHas && rightHas) changes.push({ kind: "added", scope, path, after: right[key] });
+    else if (leftHas && !rightHas) changes.push({ kind: "removed", scope, path, before: left[key] });
+    else if (!valuesEqual(left[key], right[key])) changes.push({ kind: "changed", scope, path, before: left[key], after: right[key] });
+  }
+  return changes;
 }
 
 export class ConfigSnapshotRegistry {
@@ -372,6 +413,110 @@ export class ConfigSnapshotRegistry {
         activePlugins: plugins.length,
         portableAdapters: adapters.filter((adapter) => adapter.status === "portable").length,
         deferredAdapters: adapters.filter((adapter) => adapter.status === "deferred").length
+      }
+    };
+  }
+
+
+  async compare(leftId: string, rightId: string): Promise<ConfigSnapshotComparison> {
+    if (!leftId || !rightId) throw new BuilderError("invalid_comparison", "Two configuration snapshot IDs are required.");
+    if (leftId === rightId) throw new BuilderError("invalid_comparison", "Choose two different configuration snapshots to compare.");
+
+    const [left, right] = await Promise.all([this.inspect(leftId), this.inspect(rightId)]);
+
+    const binaryChanges: SnapshotBinaryChange[] = [];
+    const leftWp = { slug: "wordpress", name: "WordPress", version: left.source.wordpressVersion, variant: left.source.locale };
+    const rightWp = { slug: "wordpress", name: "WordPress", version: right.source.wordpressVersion, variant: right.source.locale };
+    if (!valuesEqual(leftWp, rightWp)) binaryChanges.push({ kind: "changed", packageKind: "wordpress", key: "wordpress", before: leftWp, after: rightWp });
+
+    const leftTheme = left.source.theme;
+    const rightTheme = right.source.theme;
+    const leftThemeCoord = { slug: leftTheme.slug, name: leftTheme.name, version: leftTheme.version };
+    const rightThemeCoord = { slug: rightTheme.slug, name: rightTheme.name, version: rightTheme.version };
+    if (!valuesEqual(leftThemeCoord, rightThemeCoord)) binaryChanges.push({ kind: "changed", packageKind: "theme", key: "theme", before: leftThemeCoord, after: rightThemeCoord });
+
+    const leftPlugins = new Map(left.source.plugins.map((plugin) => [plugin.slug, plugin]));
+    const rightPlugins = new Map(right.source.plugins.map((plugin) => [plugin.slug, plugin]));
+    const pluginSlugs = [...new Set([...leftPlugins.keys(), ...rightPlugins.keys()])].sort();
+    for (const slug of pluginSlugs) {
+      const before = leftPlugins.get(slug);
+      const after = rightPlugins.get(slug);
+      if (!before && after) {
+        binaryChanges.push({ kind: "added", packageKind: "plugin", key: slug, after: { slug, name: after.name, version: after.version } });
+      } else if (before && !after) {
+        binaryChanges.push({ kind: "removed", packageKind: "plugin", key: slug, before: { slug, name: before.name, version: before.version } });
+      } else if (before && after && before.version !== after.version) {
+        binaryChanges.push({ kind: "changed", packageKind: "plugin", key: slug, before: { slug, name: before.name, version: before.version }, after: { slug, name: after.name, version: after.version } });
+      }
+    }
+
+    const configurationChanges: SnapshotValueChange[] = [
+      ...compareValueRecords("WordPress", left.wordpress.options, right.wordpress.options)
+    ];
+    if (left.wordpress.permalinkStructure !== right.wordpress.permalinkStructure) {
+      configurationChanges.push({ kind: "changed", scope: "WordPress", path: "permalink_structure", before: left.wordpress.permalinkStructure, after: right.wordpress.permalinkStructure });
+    }
+    if (left.wordpress.cleanupDefaultContent !== right.wordpress.cleanupDefaultContent) {
+      configurationChanges.push({ kind: "changed", scope: "WordPress", path: "cleanup_default_content", before: left.wordpress.cleanupDefaultContent, after: right.wordpress.cleanupDefaultContent });
+    }
+
+    const leftAdapters = new Map(left.adapters.map((adapter) => [adapter.key, adapter]));
+    const rightAdapters = new Map(right.adapters.map((adapter) => [adapter.key, adapter]));
+    const adapterKeys = [...new Set([...leftAdapters.keys(), ...rightAdapters.keys()])].sort();
+    const adapterStructureChanges: SnapshotAdapterStructureChange[] = [];
+    for (const key of adapterKeys) {
+      const before = leftAdapters.get(key);
+      const after = rightAdapters.get(key);
+      const label = after?.label || before?.label || adapterLabel(key);
+      if (!before && after) {
+        adapterStructureChanges.push({ kind: "added", key, label, after: { status: after.status, reason: after.reason } });
+      } else if (before && !after) {
+        adapterStructureChanges.push({ kind: "removed", key, label, before: { status: before.status, reason: before.reason } });
+      } else if (before && after) {
+        if (before.status !== after.status || before.reason !== after.reason) {
+          adapterStructureChanges.push({ kind: "changed", key, label, before: { status: before.status, reason: before.reason }, after: { status: after.status, reason: after.reason } });
+        }
+        const beforeSections = new Map(before.sections.map((section) => [section.key, section]));
+        const afterSections = new Map(after.sections.map((section) => [section.key, section]));
+        const sectionKeys = [...new Set([...beforeSections.keys(), ...afterSections.keys()])].sort();
+        for (const sectionKey of sectionKeys) {
+          configurationChanges.push(...compareValueRecords(label, beforeSections.get(sectionKey)?.values || {}, afterSections.get(sectionKey)?.values || {}, sectionKey));
+        }
+        configurationChanges.push(...compareValueRecords(label, before.details || {}, after.details || {}, "metadata"));
+      }
+    }
+
+    const leftPages = new Map(left.wordpress.pages.map((page) => [page.slug, page]));
+    const rightPages = new Map(right.wordpress.pages.map((page) => [page.slug, page]));
+    const pageSlugs = [...new Set([...leftPages.keys(), ...rightPages.keys()])].sort();
+    const pageChanges: SnapshotPageChange[] = [];
+    for (const slug of pageSlugs) {
+      const before = leftPages.get(slug);
+      const after = rightPages.get(slug);
+      if (!before && after) pageChanges.push({ kind: "added", slug, after });
+      else if (before && !after) pageChanges.push({ kind: "removed", slug, before });
+      else if (before && after && !valuesEqual(before, after)) pageChanges.push({ kind: "changed", slug, before, after });
+    }
+
+    const safetyChanges = compareValueRecords("Safety", left.safety, right.safety);
+    const binarySummary = summarizeKinds(binaryChanges);
+    const configurationSummary = summarizeKinds(configurationChanges);
+    const structuralAll = [...pageChanges, ...adapterStructureChanges];
+    const structureSummary = summarizeKinds(structuralAll);
+
+    return {
+      left: { id: left.snapshotId, name: left.name, generatedAt: left.generatedAt },
+      right: { id: right.snapshotId, name: right.name, generatedAt: right.generatedAt },
+      binary: { changes: binaryChanges, ...binarySummary },
+      configuration: { changes: configurationChanges, ...configurationSummary },
+      structures: { pages: pageChanges, adapters: adapterStructureChanges, ...structureSummary },
+      safety: { changes: safetyChanges, total: safetyChanges.length },
+      summary: {
+        binary: binaryChanges.length,
+        configuration: configurationChanges.length,
+        structures: structuralAll.length,
+        safety: safetyChanges.length,
+        total: binaryChanges.length + configurationChanges.length + structuralAll.length + safetyChanges.length
       }
     };
   }

@@ -146,3 +146,95 @@ test("imports a configuration snapshot, ignores exporter infrastructure, and rep
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test("compares snapshots across binaries, portable configuration, structures, and safety", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "wp-starter-compare-"));
+  try {
+    const makeSnapshot = async (folder, generatedAt, raw) => {
+      const dir = path.join(temp, folder);
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, "starter-config.json"), JSON.stringify({
+        schema_version: 1,
+        exporter_version: "comparison-test",
+        generated_at: generatedAt,
+        ...raw
+      }, null, 2));
+      await writeFile(path.join(dir, "export-manifest.json"), "{}\n");
+      const zip = path.join(temp, `${folder}.zip`);
+      await zipDir(dir, zip);
+      return zip;
+    };
+
+    const leftZip = await makeSnapshot("left", "2026-08-24T05:00:00+00:00", {
+      source: {
+        wordpress_version: "7.1", php_version: "8.3.33", locale: "fa_IR",
+        theme: { slug: "hello-elementor", name: "Hello Elementor", version: "3.4.9" },
+        plugins: [
+          { file: "elementor/elementor.php", name: "Elementor", version: "4.0.8", active: true },
+          { file: "filterx/filterx.php", name: "FilterX", version: "0.6.1", active: true }
+        ]
+      },
+      wordpress: {
+        options: { blog_public: 1, date_format: "F j, Y" }, permalink_structure: "/old/%postname%/", cleanup_default_content: true,
+        pages: [{ title: "Home", slug: "home" }, { title: "About", slug: "about" }]
+      },
+      adapters: {
+        elementor: { options: { elementor_beta: "no" }, kit_settings: { container_width: 1400 } },
+        filterx: { status: "deferred", reason: "contains IDs" }
+      },
+      safety: { users_exported: false, uploads_exported: false }
+    });
+
+    const rightZip = await makeSnapshot("right", "2026-08-24T06:00:00+00:00", {
+      source: {
+        wordpress_version: "7.1", php_version: "8.3.33", locale: "en_US",
+        theme: { slug: "hello-elementor", name: "Hello Elementor", version: "3.5.0" },
+        plugins: [
+          { file: "elementor/elementor.php", name: "Elementor", version: "4.2.1", active: true },
+          { file: "woocommerce/woocommerce.php", name: "WooCommerce", version: "10.9.4", active: true }
+        ]
+      },
+      wordpress: {
+        options: { blog_public: 0, time_format: "H:i" }, permalink_structure: "/new/%postname%/", cleanup_default_content: true,
+        pages: [{ title: "Homepage", slug: "home" }, { title: "Contact", slug: "contact" }]
+      },
+      adapters: {
+        elementor: { options: { elementor_beta: "yes" }, kit_settings: { container_width: 1280 } },
+        woocommerce: { options: { woocommerce_currency: "EUR" } }
+      },
+      safety: { users_exported: false, uploads_exported: true }
+    });
+
+    const registry = new ConfigSnapshotRegistry(path.join(temp, "library"));
+    const left = await registry.add(leftZip, { id: "baseline", name: "Baseline" });
+    const right = await registry.add(rightZip, { id: "target", name: "Target" });
+    const comparison = await registry.compare(left.record.id, right.record.id);
+
+    assert.equal(comparison.left.name, "Baseline");
+    assert.equal(comparison.right.name, "Target");
+    assert.equal(comparison.binary.total, 5);
+    assert.equal(comparison.binary.changes.find((c) => c.key === "wordpress")?.kind, "changed");
+    assert.equal(comparison.binary.changes.find((c) => c.key === "elementor")?.after?.version, "4.2.1");
+    assert.equal(comparison.binary.changes.find((c) => c.key === "filterx")?.kind, "removed");
+    assert.equal(comparison.binary.changes.find((c) => c.key === "woocommerce")?.kind, "added");
+
+    assert.equal(comparison.configuration.total, 6);
+    assert.equal(comparison.configuration.changes.some((c) => c.scope === "WordPress" && c.path === "blog_public" && c.kind === "changed"), true);
+    assert.equal(comparison.configuration.changes.some((c) => c.scope === "Elementor" && c.path === "kit_settings.container_width"), true);
+
+    assert.equal(comparison.structures.total, 5);
+    assert.equal(comparison.structures.pages.find((c) => c.slug === "home")?.kind, "changed");
+    assert.equal(comparison.structures.pages.find((c) => c.slug === "about")?.kind, "removed");
+    assert.equal(comparison.structures.pages.find((c) => c.slug === "contact")?.kind, "added");
+    assert.equal(comparison.structures.adapters.find((c) => c.key === "filterx")?.kind, "removed");
+    assert.equal(comparison.structures.adapters.find((c) => c.key === "woocommerce")?.kind, "added");
+
+    assert.equal(comparison.safety.total, 1);
+    assert.equal(comparison.safety.changes[0].path, "uploads_exported");
+    assert.equal(comparison.summary.total, 17);
+
+    await assert.rejects(() => registry.compare("baseline", "baseline"), (error) => error?.code === "invalid_comparison");
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});

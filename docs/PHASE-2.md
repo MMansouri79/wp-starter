@@ -1,14 +1,12 @@
 # Phase 2 — Portable Configuration Engine
 
-**Status: IN PROGRESS as of v0.1.0-alpha.15.**
+**Status: IN PROGRESS as of v0.1.0-alpha.16.**
 
 Phase 2 moves WP Starter from a reliable offline package installer to a portable configuration system. The rule is strict: configuration is transported only when an adapter can define what is reusable, what must be remapped, and what must be excluded.
 
-## Milestone 2.1 — Configuration Inspector
+## Milestone 2.1 — Configuration Inspector ✅
 
-The first Phase 2 milestone is read-only visibility. Before adding more migration behavior, the Builder must make each snapshot understandable.
-
-The inspector exposes:
+The read-only Inspector exposes:
 
 - source WordPress/PHP/locale/theme/plugin versions,
 - exact package-library availability,
@@ -17,12 +15,23 @@ The inspector exposes:
 - deferred adapter reasons,
 - exporter safety/exclusion flags.
 
-This gives larger-site testing a concrete diff surface. Missing portability is visible instead of being inferred from a failed build.
+The GUI now separates this into Overview, Packages, WordPress, Structures, Adapters, and Safety tabs so larger snapshots remain readable.
+
+## Milestone 2.2 — Snapshot Comparison ✅
+
+Two imported snapshots can now be compared as baseline → target. The comparison deliberately separates four categories:
+
+1. **Binary changes** — WordPress version/locale, theme version, plugin additions/removals/version changes.
+2. **Configuration changes** — portable WordPress values, permalink/cleanup behavior, and adapter option/settings values.
+3. **Structural changes** — starter pages and adapter capability/status changes. This category will later contain templates, layouts, taxonomies, FilterX filter objects, and other remapped structures.
+4. **Safety-boundary changes** — changes to what the exporter includes or deliberately excludes.
+
+The comparison engine is available both through the GUI and the CLI `config compare` command.
 
 ## Next milestones
 
-1. **Snapshot comparison and diagnostics** — compare two exports and show added/removed/changed portable values.
-2. **Adapter contracts and remapping** — formalize export/import/validate/remap hooks for Elementor, WooCommerce, FilterX, and future plugins.
-3. **Portable structures/layouts** — move object-backed structures such as Elementor templates and FilterX definitions without copying destination-specific database IDs.
+1. **Adapter contracts and remapping** — formalize export/import/validate/remap hooks for Elementor, WooCommerce, FilterX, and future plugins.
+2. **Portable structures/layouts** — move object-backed structures such as Elementor templates and FilterX definitions without copying destination-specific database IDs.
+3. **Larger-site validation** — compare reference and reproduced sites using the inspection/diff engine and turn every unexplained difference into an adapter requirement.
 
 Raw database cloning, credential migration, and arbitrary `wp_options` copying remain outside the architecture.

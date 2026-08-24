@@ -104,6 +104,84 @@ export interface SnapshotAdapterInspection {
   details: Record<string, unknown>;
 }
 
+export type SnapshotChangeKind = "added" | "removed" | "changed";
+
+export interface SnapshotBinaryCoordinate {
+  slug: string;
+  name: string;
+  version: string;
+  variant?: string;
+}
+
+export interface SnapshotBinaryChange {
+  kind: SnapshotChangeKind;
+  packageKind: PackageKind;
+  key: string;
+  before?: SnapshotBinaryCoordinate;
+  after?: SnapshotBinaryCoordinate;
+}
+
+export interface SnapshotValueChange {
+  kind: SnapshotChangeKind;
+  scope: string;
+  path: string;
+  before?: unknown;
+  after?: unknown;
+}
+
+export interface SnapshotPageChange {
+  kind: SnapshotChangeKind;
+  slug: string;
+  before?: { title: string; slug: string };
+  after?: { title: string; slug: string };
+}
+
+export interface SnapshotAdapterStructureChange {
+  kind: SnapshotChangeKind;
+  key: string;
+  label: string;
+  before?: { status: SnapshotAdapterStatus; reason?: string };
+  after?: { status: SnapshotAdapterStatus; reason?: string };
+}
+
+export interface ConfigSnapshotComparison {
+  left: { id: string; name: string; generatedAt: string };
+  right: { id: string; name: string; generatedAt: string };
+  binary: {
+    changes: SnapshotBinaryChange[];
+    added: number;
+    removed: number;
+    changed: number;
+    total: number;
+  };
+  configuration: {
+    changes: SnapshotValueChange[];
+    added: number;
+    removed: number;
+    changed: number;
+    total: number;
+  };
+  structures: {
+    pages: SnapshotPageChange[];
+    adapters: SnapshotAdapterStructureChange[];
+    added: number;
+    removed: number;
+    changed: number;
+    total: number;
+  };
+  safety: {
+    changes: SnapshotValueChange[];
+    total: number;
+  };
+  summary: {
+    binary: number;
+    configuration: number;
+    structures: number;
+    safety: number;
+    total: number;
+  };
+}
+
 export interface ConfigSnapshotInspection {
   snapshotId: string;
   name: string;

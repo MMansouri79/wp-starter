@@ -19,7 +19,7 @@ import {
   PackageRegistry
 } from "../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.15";
+const VERSION = "0.1.0-alpha.16";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
 const publicDir = path.join(here, "public");
@@ -328,6 +328,13 @@ async function api(req, res, url) {
   if (req.method === "GET" && url.pathname.startsWith("/api/configs/") && url.pathname.endsWith("/check")) {
     const id = decodeURIComponent(url.pathname.slice("/api/configs/".length, -"/check".length));
     json(res, 200, await new ConfigSnapshotRegistry(libraryRoot).requirements(id));
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/configs/compare") {
+    const left = String(url.searchParams.get("left") || "").trim();
+    const right = String(url.searchParams.get("right") || "").trim();
+    json(res, 200, await new ConfigSnapshotRegistry(libraryRoot).compare(left, right));
     return true;
   }
 

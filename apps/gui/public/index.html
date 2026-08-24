@@ -48,6 +48,11 @@
           <div class="panel-head"><div><h2>Configuration Snapshots</h2><p>Import a ZIP exported by WP Starter Exporter.</p></div><label class="primary file-button">+ Import Config<input id="config-file" type="file" accept=".zip"></label></div>
           <div id="configs-list" class="cards"></div>
         </div>
+        <div class="panel">
+          <div class="panel-head"><div><h2>Compare Snapshots</h2><p>Separate binary, configuration, and structural changes between two exports.</p></div><button id="compare-configs" class="primary">Compare</button></div>
+          <div class="compare-picker"><label>Earlier / baseline<select id="compare-left"></select></label><div class="compare-arrow">→</div><label>Later / target<select id="compare-right"></select></label></div>
+          <small id="compare-help" class="field-help">Import at least two snapshots to compare them.</small>
+        </div>
       </section>
 
       <section class="view" id="view-profiles">
@@ -94,6 +99,15 @@
       <button id="close-inspector" class="secondary">Close</button>
     </div>
     <div id="inspector-body" class="inspector-body"><div class="empty">Loading snapshot…</div></div>
+  </dialog>
+
+
+  <dialog id="config-comparison" class="inspector-dialog comparison-dialog">
+    <div class="inspector-head">
+      <div><span class="eyebrow">Snapshot Comparison</span><h2 id="comparison-title">Compare configurations</h2><p id="comparison-meta"></p></div>
+      <button id="close-comparison" class="secondary">Close</button>
+    </div>
+    <div id="comparison-body" class="inspector-body"><div class="empty">Choose two snapshots to compare.</div></div>
   </dialog>
 
   <script src="/app.js"></script>

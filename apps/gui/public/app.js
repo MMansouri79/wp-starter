@@ -64,6 +64,8 @@ function renderPackages() {
 function render() {
   const previousConfig = $("#build-config")?.value ?? "";
   const previousProfile = $("#profile-select")?.value ?? "";
+  const previousCompareLeft = $("#compare-left")?.value ?? "";
+  const previousCompareRight = $("#compare-right")?.value ?? "";
   $("#version").textContent = `GUI ${state.version}`;
   $("#library").textContent = state.library;
   $("#stat-packages").textContent = state.packages.length;
@@ -73,6 +75,18 @@ function render() {
   renderPackages();
 
   $("#configs-list").innerHTML = state.configs.map(c => `<div class="card"><div><strong>${esc(c.name)}</strong><small>${esc(c.id)} · WP ${esc(c.wordpressVersion)} · ${esc(c.locale)} · ${esc(c.theme.slug)}@${esc(c.theme.version)} · ${c.plugins.length} plugins</small></div><div class="action-list"><button class="secondary inspect-config" data-id="${escAttr(c.id)}">Inspect</button><button class="secondary check-config" data-id="${escAttr(c.id)}">Check packages</button></div></div>`).join("") || `<div class="empty">No configuration snapshots yet. You can still create package-only builds.</div>`;
+
+  const compareOpts = state.configs.map(c => `<option value="${escAttr(c.id)}">${esc(c.name)} · ${esc(c.generatedAt ? new Date(c.generatedAt).toLocaleString() : c.id)}</option>`).join("");
+  $("#compare-left").innerHTML = compareOpts || `<option value="">No snapshots</option>`;
+  $("#compare-right").innerHTML = compareOpts || `<option value="">No snapshots</option>`;
+  const ids = state.configs.map(c => c.id);
+  if (ids.includes(previousCompareLeft)) $("#compare-left").value = previousCompareLeft;
+  else if (ids.length) $("#compare-left").value = ids[0];
+  if (ids.includes(previousCompareRight) && previousCompareRight !== $("#compare-left").value) $("#compare-right").value = previousCompareRight;
+  else if (ids.length > 1) $("#compare-right").value = ids[ids.length - 1];
+  else if (ids.length) $("#compare-right").value = ids[0];
+  $("#compare-configs").disabled = ids.length < 2;
+  $("#compare-help").textContent = ids.length < 2 ? "Import at least two snapshots to compare them." : "Comparison direction is baseline → target. Swap the selections to reverse it.";
 
   const configOpts = [`<option value="">No snapshot — packages only</option>`, ...state.configs.map(c => `<option value="${escAttr(c.id)}">${esc(c.name)} (${esc(c.id)})</option>`)].join("");
   $("#build-config").innerHTML = configOpts;
@@ -155,6 +169,38 @@ function safetyState(key, value) {
   return value ? ["Included", false] : ["Excluded", true];
 }
 
+function bindInspectTabs(root) {
+  const buttons = root.querySelectorAll(".inspect-tab");
+  const panels = root.querySelectorAll(".inspect-tab-panel");
+  buttons.forEach(button => {
+    button.onclick = () => {
+      const target = button.dataset.tab;
+      buttons.forEach(item => item.classList.toggle("active", item === button));
+      panels.forEach(panel => panel.classList.toggle("active", panel.dataset.tab === target));
+    };
+  });
+}
+
+function changeChip(kind) {
+  const label = kind === "added" ? "Added" : kind === "removed" ? "Removed" : "Changed";
+  return `<span class="change-chip ${escAttr(kind)}">${label}</span>`;
+}
+
+function coordinateText(value) {
+  if (!value) return "—";
+  return `${value.name || value.slug || "Package"} ${value.version || ""}${value.variant ? ` · ${value.variant}` : ""}`.trim();
+}
+
+function diffValue(value) {
+  if (value === undefined) return `<span class="diff-none">—</span>`;
+  return `<code>${esc(valueText(value))}</code>`;
+}
+
+function diffTable(rows, columns) {
+  if (!rows.length) return `<div class="empty compact-empty">No changes in this category.</div>`;
+  return `<div class="table-wrap"><table class="diff-table"><thead><tr>${columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
+}
+
 async function inspectConfig(id) {
   const dialog = $("#config-inspector");
   $("#inspector-title").textContent = "Loading snapshot…";
@@ -185,26 +231,98 @@ async function inspectConfig(id) {
     }).join("") || `<div class="empty">No safety manifest was exported.</div>`;
 
     $("#inspector-body").innerHTML = `
-      <div class="inspect-stats">
-        <div><span>WordPress options</span><strong>${i.totals.wordpressOptions}</strong></div>
-        <div><span>Adapter options</span><strong>${i.totals.adapterOptions}</strong></div>
-        <div><span>Adapter settings</span><strong>${i.totals.adapterSettings}</strong></div>
-        <div><span>Starter pages</span><strong>${i.totals.pages}</strong></div>
-        <div><span>Portable adapters</span><strong>${i.totals.portableAdapters}</strong></div>
-        <div><span>Deferred adapters</span><strong>${i.totals.deferredAdapters}</strong></div>
+      <div class="inspect-tabs" role="tablist">
+        <button class="inspect-tab active" data-tab="overview">Overview</button>
+        <button class="inspect-tab" data-tab="packages">Packages</button>
+        <button class="inspect-tab" data-tab="wordpress">WordPress</button>
+        <button class="inspect-tab" data-tab="structures">Structures</button>
+        <button class="inspect-tab" data-tab="adapters">Adapters</button>
+        <button class="inspect-tab" data-tab="safety">Safety</button>
       </div>
 
-      <section class="inspect-section"><h3>Source environment</h3><div class="source-grid"><div><span>WordPress</span><strong>${esc(i.source.wordpressVersion)}</strong></div><div><span>PHP</span><strong>${esc(i.source.phpVersion)}</strong></div><div><span>Locale</span><strong>${esc(i.source.locale)}</strong></div><div><span>Theme</span><strong>${esc(i.source.theme.name)} ${esc(i.source.theme.version)}</strong></div></div><div class="entity-list">${pluginRows}</div></section>
+      <div class="inspect-tab-panel active" data-tab="overview">
+        <div class="inspect-stats">
+          <div><span>WordPress options</span><strong>${i.totals.wordpressOptions}</strong></div>
+          <div><span>Adapter options</span><strong>${i.totals.adapterOptions}</strong></div>
+          <div><span>Adapter settings</span><strong>${i.totals.adapterSettings}</strong></div>
+          <div><span>Starter pages</span><strong>${i.totals.pages}</strong></div>
+          <div><span>Portable adapters</span><strong>${i.totals.portableAdapters}</strong></div>
+          <div><span>Deferred adapters</span><strong>${i.totals.deferredAdapters}</strong></div>
+        </div>
+        <section class="inspect-section"><h3>Source environment</h3><div class="source-grid"><div><span>WordPress</span><strong>${esc(i.source.wordpressVersion)}</strong></div><div><span>PHP</span><strong>${esc(i.source.phpVersion)}</strong></div><div><span>Locale</span><strong>${esc(i.source.locale)}</strong></div><div><span>Theme</span><strong>${esc(i.source.theme.name)} ${esc(i.source.theme.version)}</strong></div></div><div class="entity-list">${pluginRows}</div></section>
+      </div>
 
-      <section class="inspect-section"><div class="section-title"><h3>Package requirements</h3><span>${data.requirements.available} available · ${data.requirements.missing} missing</span></div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Type</th><th>Package</th><th>Version</th></tr></thead><tbody>${reqRows}</tbody></table></div></section>
+      <div class="inspect-tab-panel" data-tab="packages">
+        <section class="inspect-section"><div class="section-title"><h3>Exact package requirements</h3><span>${data.requirements.available} available · ${data.requirements.missing} missing</span></div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Type</th><th>Package</th><th>Version</th></tr></thead><tbody>${reqRows}</tbody></table></div></section>
+      </div>
 
-      <section class="inspect-section"><div class="section-title"><h3>WordPress</h3><span>${i.wordpress.optionCount} options</span></div><div class="inspect-note"><span>Permalink</span><code>${esc(i.wordpress.permalinkStructure || "default")}</code><span>Default-content cleanup</span><strong>${i.wordpress.cleanupDefaultContent ? "Enabled" : "Disabled"}</strong></div><div class="entity-list">${pageRows}</div><details class="inspect-details"><summary>Portable WordPress options <span>${i.wordpress.optionCount}</span></summary>${renderKeyValues(i.wordpress.options)}</details></section>
+      <div class="inspect-tab-panel" data-tab="wordpress">
+        <section class="inspect-section"><div class="section-title"><h3>Portable WordPress configuration</h3><span>${i.wordpress.optionCount} options</span></div><div class="inspect-note"><span>Permalink</span><code>${esc(i.wordpress.permalinkStructure || "default")}</code><span>Default-content cleanup</span><strong>${i.wordpress.cleanupDefaultContent ? "Enabled" : "Disabled"}</strong></div>${renderKeyValues(i.wordpress.options)}</section>
+      </div>
 
-      <section class="inspect-section"><div class="section-title"><h3>Plugin adapters</h3><span>Portable data only</span></div><div class="adapter-grid">${adapterCards}</div></section>
+      <div class="inspect-tab-panel" data-tab="structures">
+        <section class="inspect-section"><div class="section-title"><h3>Starter pages</h3><span>${i.wordpress.pages.length} portable page definitions</span></div><div class="entity-list">${pageRows}</div></section>
+        <section class="inspect-section"><div class="section-title"><h3>Portable object structures</h3><span>Phase 2</span></div><p class="muted">Template, layout, taxonomy, and plugin-object structures will appear here as their adapters become portable.</p></section>
+      </div>
 
-      <section class="inspect-section"><div class="section-title"><h3>Safety boundary</h3><span>What the exporter deliberately did not clone</span></div><div class="safety-grid">${safety}</div></section>`;
+      <div class="inspect-tab-panel" data-tab="adapters">
+        <section class="inspect-section"><div class="section-title"><h3>Plugin adapters</h3><span>Portable data only</span></div><div class="adapter-grid">${adapterCards}</div></section>
+      </div>
+
+      <div class="inspect-tab-panel" data-tab="safety">
+        <section class="inspect-section"><div class="section-title"><h3>Safety boundary</h3><span>What the exporter deliberately did not clone</span></div><div class="safety-grid">${safety}</div></section>
+      </div>`;
+    bindInspectTabs($("#inspector-body"));
   } catch (e) {
     $("#inspector-body").innerHTML = `<div class="flash error">${esc(e.message)}</div>`;
+  }
+}
+
+async function compareConfigs() {
+  const left = $("#compare-left").value;
+  const right = $("#compare-right").value;
+  if (!left || !right) return flash("Choose two snapshots first.", true);
+  if (left === right) return flash("Choose two different snapshots to compare.", true);
+
+  const dialog = $("#config-comparison");
+  $("#comparison-title").textContent = "Comparing snapshots…";
+  $("#comparison-meta").textContent = `${left} → ${right}`;
+  $("#comparison-body").innerHTML = `<div class="empty">Calculating configuration differences…</div>`;
+  if (!dialog.open) dialog.showModal();
+  try {
+    const c = await request(`/api/configs/compare?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`);
+    $("#comparison-title").textContent = `${c.left.name} → ${c.right.name}`;
+    $("#comparison-meta").textContent = `${c.left.id} → ${c.right.id} · ${c.summary.total} total changes`;
+
+    const binaryRows = c.binary.changes.map(change => `<tr><td>${changeChip(change.kind)}</td><td>${esc(change.packageKind)}</td><td><code>${esc(change.key)}</code></td><td>${esc(coordinateText(change.before))}</td><td>${esc(coordinateText(change.after))}</td></tr>`);
+    const configRows = c.configuration.changes.map(change => `<tr><td>${changeChip(change.kind)}</td><td>${esc(change.scope)}</td><td><code>${esc(change.path)}</code></td><td>${diffValue(change.before)}</td><td>${diffValue(change.after)}</td></tr>`);
+    const pageRows = c.structures.pages.map(change => `<tr><td>${changeChip(change.kind)}</td><td>Page</td><td><code>${esc(change.slug)}</code></td><td>${change.before ? esc(change.before.title) : "—"}</td><td>${change.after ? esc(change.after.title) : "—"}</td></tr>`);
+    const adapterRows = c.structures.adapters.map(change => `<tr><td>${changeChip(change.kind)}</td><td>Adapter</td><td><code>${esc(change.key)}</code></td><td>${change.before ? `${esc(change.before.status)}${change.before.reason ? ` · ${esc(change.before.reason)}` : ""}` : "—"}</td><td>${change.after ? `${esc(change.after.status)}${change.after.reason ? ` · ${esc(change.after.reason)}` : ""}` : "—"}</td></tr>`);
+    const safetyRows = c.safety.changes.map(change => `<tr><td>${changeChip(change.kind)}</td><td>${esc(change.path)}</td><td>${diffValue(change.before)}</td><td>${diffValue(change.after)}</td></tr>`);
+
+    const unchanged = c.summary.total === 0 ? `<div class="comparison-clean"><strong>No differences detected.</strong><span>These snapshots are equivalent within the current portability model.</span></div>` : "";
+    $("#comparison-body").innerHTML = `
+      <div class="compare-summary">
+        <div><span>Binary changes</span><strong>${c.summary.binary}</strong></div>
+        <div><span>Configuration</span><strong>${c.summary.configuration}</strong></div>
+        <div><span>Structures</span><strong>${c.summary.structures}</strong></div>
+        <div><span>Safety</span><strong>${c.summary.safety}</strong></div>
+        <div class="total"><span>Total</span><strong>${c.summary.total}</strong></div>
+      </div>
+      ${unchanged}
+      <div class="inspect-tabs" role="tablist">
+        <button class="inspect-tab active" data-tab="binary">Binaries <span>${c.summary.binary}</span></button>
+        <button class="inspect-tab" data-tab="configuration">Settings <span>${c.summary.configuration}</span></button>
+        <button class="inspect-tab" data-tab="structures">Structures <span>${c.summary.structures}</span></button>
+        <button class="inspect-tab" data-tab="safety">Safety <span>${c.summary.safety}</span></button>
+      </div>
+      <div class="inspect-tab-panel active" data-tab="binary"><section class="inspect-section"><div class="section-title"><h3>Binary/package changes</h3><span>Software versions and active packages</span></div>${diffTable(binaryRows, ["Change", "Type", "Package", "Before", "After"])}</section></div>
+      <div class="inspect-tab-panel" data-tab="configuration"><section class="inspect-section"><div class="section-title"><h3>Configuration changes</h3><span>Portable values only</span></div>${diffTable(configRows, ["Change", "Scope", "Path", "Before", "After"])}</section></div>
+      <div class="inspect-tab-panel" data-tab="structures"><section class="inspect-section"><div class="section-title"><h3>Structural changes</h3><span>Objects and adapter capabilities</span></div>${diffTable([...pageRows, ...adapterRows], ["Change", "Type", "Object", "Before", "After"])}</section></div>
+      <div class="inspect-tab-panel" data-tab="safety"><section class="inspect-section"><div class="section-title"><h3>Safety-boundary changes</h3><span>Exporter inclusion/exclusion policy</span></div>${diffTable(safetyRows, ["Change", "Field", "Before", "After"])}</section></div>`;
+    bindInspectTabs($("#comparison-body"));
+  } catch (e) {
+    $("#comparison-body").innerHTML = `<div class="flash error">${esc(e.message)}</div>`;
   }
 }
 
@@ -457,4 +575,7 @@ $("#new-profile").onclick = () => { resetProfileEditor(); goView("build"); };
 $("#build-button").onclick = build;
 $("#close-inspector").onclick = () => $("#config-inspector").close();
 $("#config-inspector").addEventListener("click", e => { if (e.target === $("#config-inspector")) $("#config-inspector").close(); });
+$("#compare-configs").onclick = compareConfigs;
+$("#close-comparison").onclick = () => $("#config-comparison").close();
+$("#config-comparison").addEventListener("click", e => { if (e.target === $("#config-comparison")) $("#config-comparison").close(); });
 refresh().catch(e => flash(e.message, true));

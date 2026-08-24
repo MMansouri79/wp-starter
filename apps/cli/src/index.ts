@@ -14,7 +14,7 @@ import {
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.15";
+const VERSION = "0.1.0-alpha.16";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;
@@ -28,6 +28,7 @@ Usage:
   wp-starter config add <starter-config.zip> [--id <id>] [--name <name>] [--library <dir>] [--replace]
   wp-starter config list [--library <dir>]
   wp-starter config check <id> [--library <dir>]
+  wp-starter config compare <left-id> <right-id> [--library <dir>]
   wp-starter config remove <id> [--library <dir>]
   wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--wordpress-version <version>] [--wordpress-variant <locale>] [--theme-version <version>] [--plugin-version <slug=version>]... [--exclude-plugin <slug>]... [--library <dir>] [--replace]
   wp-starter profile check <profile.json> [--library <dir>]
@@ -134,6 +135,35 @@ async function handlePackage(): Promise<void> {
     return;
   }
 
+  if (action === "compare") {
+    const right = process.argv[5];
+    if (!input || input.startsWith("--") || !right || right.startsWith("--")) usage();
+    const comparison = await registry.compare(input, right);
+    console.log(`${comparison.left.name}  ->  ${comparison.right.name}`);
+    console.table([
+      { Category: "Binary", Changes: comparison.summary.binary },
+      { Category: "Configuration", Changes: comparison.summary.configuration },
+      { Category: "Structures", Changes: comparison.summary.structures },
+      { Category: "Safety", Changes: comparison.summary.safety }
+    ]);
+    if (comparison.binary.changes.length) {
+      console.log("\nBinary changes:");
+      console.table(comparison.binary.changes.map((change) => ({
+        Change: change.kind,
+        Type: change.packageKind,
+        Package: change.key,
+        Before: change.before ? `${change.before.slug}@${change.before.version}${change.before.variant ? ` (${change.before.variant})` : ""}` : "",
+        After: change.after ? `${change.after.slug}@${change.after.version}${change.after.variant ? ` (${change.after.variant})` : ""}` : ""
+      })));
+    }
+    if (comparison.configuration.changes.length) {
+      console.log("\nConfiguration changes:");
+      console.table(comparison.configuration.changes.map((change) => ({ Change: change.kind, Scope: change.scope, Path: change.path })));
+    }
+    console.log(`\nTotal changes: ${comparison.summary.total}`);
+    return;
+  }
+
   if (action === "remove") {
     const kind = getKind(getArg("--type"));
     const slug = getArg("--slug");
@@ -211,6 +241,35 @@ async function handleConfig(): Promise<void> {
   if (action === "check") {
     if (!input || input.startsWith("--")) usage();
     await printRequirementReport(registry, input);
+    return;
+  }
+
+  if (action === "compare") {
+    const right = process.argv[5];
+    if (!input || input.startsWith("--") || !right || right.startsWith("--")) usage();
+    const comparison = await registry.compare(input, right);
+    console.log(`${comparison.left.name}  ->  ${comparison.right.name}`);
+    console.table([
+      { Category: "Binary", Changes: comparison.summary.binary },
+      { Category: "Configuration", Changes: comparison.summary.configuration },
+      { Category: "Structures", Changes: comparison.summary.structures },
+      { Category: "Safety", Changes: comparison.summary.safety }
+    ]);
+    if (comparison.binary.changes.length) {
+      console.log("\nBinary changes:");
+      console.table(comparison.binary.changes.map((change) => ({
+        Change: change.kind,
+        Type: change.packageKind,
+        Package: change.key,
+        Before: change.before ? `${change.before.slug}@${change.before.version}${change.before.variant ? ` (${change.before.variant})` : ""}` : "",
+        After: change.after ? `${change.after.slug}@${change.after.version}${change.after.variant ? ` (${change.after.variant})` : ""}` : ""
+      })));
+    }
+    if (comparison.configuration.changes.length) {
+      console.log("\nConfiguration changes:");
+      console.table(comparison.configuration.changes.map((change) => ({ Change: change.kind, Scope: change.scope, Path: change.path })));
+    }
+    console.log(`\nTotal changes: ${comparison.summary.total}`);
     return;
   }
 

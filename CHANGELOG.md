@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0-alpha.16 - 2026-08-24
+
+### Phase 2: Snapshot Comparison
+
+- Added a Builder Core snapshot-comparison engine that separates binary, portable configuration, structural, and safety-boundary changes.
+- Binary comparison detects WordPress locale/version changes, theme changes, plugin additions/removals, and plugin version changes.
+- Configuration comparison detects added/removed/changed WordPress options, permalink/cleanup behavior, and portable adapter values.
+- Structural comparison currently covers starter pages plus adapter availability/status changes and is designed to accept templates/layouts/object sets later in Phase 2.
+- Added a GUI Compare Snapshots workflow with baseline/target selectors, category summaries, before/after values, and direction-aware diffs.
+- Added a CLI `config compare <left-id> <right-id>` debugging command.
+- Split the Configuration Inspector into Overview, Packages, WordPress, Structures, Adapters, and Safety tabs.
+- Added regression coverage for the comparison engine and GUI comparison API.
+
 ## 0.1.0-alpha.15 - 2026-08-24
 
 ### Phase 2: Configuration Inspector

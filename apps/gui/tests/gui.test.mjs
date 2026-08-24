@@ -218,3 +218,53 @@ test("GUI can create a package-only profile and expose build progress", async ()
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("GUI compares two configuration snapshots through the Phase 2 comparison API", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wp-starter-gui-compare-"));
+  const library = path.join(root, "library");
+  const previous = process.env.WP_STARTER_HOME;
+  process.env.WP_STARTER_HOME = library;
+  const { createGuiServer } = await import(`../index.mjs?compare-test=${Date.now()}`);
+  const server = createGuiServer();
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const makeConfig = async (name, generatedAt, elementorVersion, containerWidth) => {
+      const dir = path.join(root, name); await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, "starter-config.json"), JSON.stringify({
+        schema_version: 1, exporter_version: "gui-compare", generated_at: generatedAt,
+        source: {
+          wordpress_version: "7.1", php_version: "8.3.33", locale: "en_US",
+          theme: { slug: "hello-elementor", name: "Hello Elementor", version: "3.4.9" },
+          plugins: [{ file: "elementor/elementor.php", name: "Elementor", version: elementorVersion, active: true }]
+        },
+        wordpress: { options: { blog_public: 1 }, pages: [{ title: "Home", slug: "home" }] },
+        adapters: { elementor: { kit_settings: { container_width: containerWidth } } },
+        safety: { users_exported: false }
+      }));
+      await writeFile(path.join(dir, "export-manifest.json"), "{}");
+      const zip = path.join(root, `${name}.zip`); await zipDir(dir, zip); return zip;
+    };
+    const leftZip = await makeConfig("compare-left", "2026-08-24T05:00:00+00:00", "4.0.8", 1400);
+    const rightZip = await makeConfig("compare-right", "2026-08-24T06:00:00+00:00", "4.2.1", 1280);
+    const uploadConfig = async (file) => fetch(`${baseUrl}/api/configs?filename=${encodeURIComponent(path.basename(file))}`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: await readFile(file) });
+    assert.equal((await uploadConfig(leftZip)).status, 200);
+    assert.equal((await uploadConfig(rightZip)).status, 200);
+
+    const compareRes = await fetch(`${baseUrl}/api/configs/compare?left=snapshot-20260824050000&right=snapshot-20260824060000`);
+    assert.equal(compareRes.status, 200);
+    const comparison = await compareRes.json();
+    assert.equal(comparison.summary.binary, 1);
+    assert.equal(comparison.summary.configuration, 1);
+    assert.equal(comparison.binary.changes[0].key, "elementor");
+    assert.equal(comparison.configuration.changes[0].path, "kit_settings.container_width");
+
+    const html = await (await fetch(`${baseUrl}/`)).text();
+    assert.match(html, /Compare Snapshots/);
+    assert.match(html, /Snapshot Comparison/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});

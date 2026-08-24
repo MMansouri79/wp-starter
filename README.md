@@ -32,18 +32,11 @@ The Phase 1 build pipeline provides:
 
 ## Phase 2 status
 
-**Phase 2 started in v0.1.0-alpha.15.** The first milestone is the Configuration Inspector: a read-only view of what a reference snapshot actually contains, what is portable today, what is deferred, and what the exporter deliberately excluded.
+**Phase 2 is in progress as of v0.1.0-alpha.16.** Configuration inspection and snapshot comparison are now implemented.
 
-In the GUI, open **Configurations → Inspect** to review:
+In the GUI, open **Configurations → Inspect** to review a snapshot through Overview, Packages, WordPress, Structures, Adapters, and Safety tabs. Use **Configurations → Compare Snapshots** to compare a baseline export against a target export. The diff keeps software/package changes separate from portable setting changes and object/structure changes.
 
-- source WordPress/PHP/locale/theme/plugins,
-- exact package requirement availability,
-- WordPress portable options and starter pages,
-- adapter payloads such as Elementor Site Kit and WooCommerce options,
-- deferred adapters such as FilterX with the reason they are not yet portable,
-- safety boundaries for users, uploads, credentials, arbitrary options, raw database data, and site-specific IDs.
-
-Phase 2 will build comparison, adapter contracts/remapping, and portable object-backed structures on top of this inspection model.
+The comparison model currently covers WordPress/theme/plugin coordinates, WordPress options and permalink behavior, adapter values, starter pages, adapter status, and exporter safety boundaries. Phase 2 continues with formal adapter remapping and portable object-backed structures such as Elementor templates and FilterX definitions.
 
 ## Quick start
 
@@ -67,6 +60,7 @@ Import a configuration export from the reference site and immediately compare it
 node apps/cli/dist/index.js config add C:\Exports\starter-config.zip
 node apps/cli/dist/index.js config list
 node apps/cli/dist/index.js config check snapshot-20260824050124
+node apps/cli/dist/index.js config compare snapshot-old snapshot-new
 ```
 
 The requirement report marks the exact WordPress core, theme and active plugin versions as `OK` or `MISSING`. Builder/exporter infrastructure plugins are intentionally ignored.
