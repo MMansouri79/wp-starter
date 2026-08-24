@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { ConfigSnapshotRegistry, PackageRegistry, loadProfile } from "../dist/index.js";
+import { ConfigSnapshotRegistry, PackageRegistry, createProfileFromSnapshot, loadProfile } from "../dist/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +75,29 @@ test("imports a configuration snapshot, ignores exporter infrastructure, and rep
     assert.equal(report.available, 3);
     assert.equal(report.missing, 1);
     assert.equal(report.requirements.find((r) => r.slug === "filterx")?.status, "missing");
+
+    await assert.rejects(
+      () => createProfileFromSnapshot(imported.record.id, { libraryDir: library }),
+      (error) => error?.code === "missing_profile_packages"
+    );
+
+    const filterx = path.join(temp, "filterx/filterx");
+    await mkdir(filterx, { recursive: true });
+    await writeFile(path.join(filterx, "filterx.php"), "<?php\n/*\nPlugin Name: FilterX\nVersion: 0.6.1\n*/\n");
+    const filterxZip = path.join(temp, "filterx.zip");
+    await zipDir(path.join(temp, "filterx"), filterxZip);
+    await packages.add(filterxZip);
+
+    const generated = await createProfileFromSnapshot(imported.record.id, {
+      libraryDir: library,
+      name: "generated-from-snapshot"
+    });
+    assert.equal(generated.schemaVersion, 3);
+    assert.equal(generated.name, "generated-from-snapshot");
+    assert.equal(generated.wordpress.version, "7.1");
+    assert.equal(generated.theme.slug, "hello-elementor");
+    assert.deepEqual(generated.plugins.map((plugin) => plugin.slug).sort(), ["elementor", "filterx"]);
+    assert.equal(generated.config.id, imported.record.id);
 
     const profilePath = path.join(temp, "profile.json");
     await writeFile(profilePath, JSON.stringify({

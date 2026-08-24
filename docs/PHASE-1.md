@@ -19,6 +19,15 @@ wp-starter package list
 
 The profile references `slug + version`; it does not care where the original ZIP came from or what the ZIP was named.
 
+After a reference configuration snapshot has `Missing: 0`, the CLI can generate the initial build profile automatically:
+
+```bash
+wp-starter profile create snapshot-20260824050124 --name ecommerce-fa --output C:\WP-Starter\profiles\ecommerce-fa.json
+wp-starter profile check C:\WP-Starter\profiles\ecommerce-fa.json
+```
+
+Generation is strict: it refuses to produce a build-ready profile while any exact package required by the snapshot is absent.
+
 ## Inputs
 
 - exact WordPress package selected from the local library

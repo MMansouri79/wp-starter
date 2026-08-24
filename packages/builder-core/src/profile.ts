@@ -4,7 +4,7 @@ import { BuilderError } from "./errors.js";
 import { exists } from "./fs-utils.js";
 import { PackageRegistry, defaultLibraryDir } from "./registry.js";
 import { ConfigSnapshotRegistry } from "./snapshot.js";
-import type { BuildProfile } from "./types.js";
+import type { BuildProfile, ProfileDocumentV3 } from "./types.js";
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim() === "") {
@@ -216,4 +216,56 @@ export async function loadProfile(profilePath: string, options: LoadProfileOptio
   }
 
   return profile;
+}
+
+
+export interface CreateProfileFromSnapshotOptions {
+  libraryDir?: string;
+  name?: string;
+}
+
+/**
+ * Create a schema v3 profile pinned to the exact package coordinates recorded
+ * by a configuration snapshot. The snapshot is treated as the source of truth
+ * for the initial profile, while the generated JSON remains editable later so
+ * a developer can deliberately move individual package versions forward.
+ */
+export async function createProfileFromSnapshot(
+  snapshotId: string,
+  options: CreateProfileFromSnapshotOptions = {}
+): Promise<ProfileDocumentV3> {
+  if (typeof snapshotId !== "string" || snapshotId.trim() === "") {
+    throw new BuilderError("invalid_profile", "A non-empty configuration snapshot ID is required.");
+  }
+
+  const libraryDir = path.resolve(options.libraryDir || defaultLibraryDir());
+  const snapshots = new ConfigSnapshotRegistry(libraryDir);
+  const snapshot = await snapshots.resolve(snapshotId);
+  const report = await snapshots.requirements(snapshotId, new PackageRegistry(libraryDir));
+
+  if (report.missing > 0) {
+    const missing = report.requirements
+      .filter((item) => item.status === "missing")
+      .map((item) => `${item.kind}:${item.slug}@${item.version}`)
+      .join(", ");
+    throw new BuilderError(
+      "missing_profile_packages",
+      `Cannot create a build-ready profile because ${report.missing} required package(s) are missing: ${missing}`
+    );
+  }
+
+  return {
+    schemaVersion: 3,
+    name: options.name?.trim() || snapshot.id,
+    locale: snapshot.locale,
+    wordpress: { version: snapshot.wordpressVersion },
+    theme: { slug: snapshot.theme.slug, version: snapshot.theme.version },
+    plugins: snapshot.plugins.map((plugin) => ({
+      slug: plugin.slug,
+      version: plugin.version,
+      required: true
+    })),
+    config: { id: snapshot.id },
+    languageArchives: []
+  };
 }

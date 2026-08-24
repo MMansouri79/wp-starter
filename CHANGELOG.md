@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.4
+
+### Snapshot-to-profile generation
+
+- Added `profile create` to generate a schema v3 build profile directly from an imported configuration snapshot.
+- Profile generation refuses to continue until every exact WordPress/theme/plugin requirement from the snapshot exists in the local package library.
+- Generated profiles pin the reference WordPress version, theme version, active plugin versions, locale, and configuration snapshot ID while remaining editable for deliberate later upgrades.
+- Added `profile check` to resolve and validate every profile input before a build starts.
+- Added overwrite protection for generated profile files.
+- Added tests proving profile generation fails when packages are missing and succeeds when the package library is complete.
+
 ## 0.1.0-alpha.3
 
 ### Configuration snapshot registry

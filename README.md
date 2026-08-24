@@ -19,6 +19,7 @@ The Phase 1 build pipeline currently provides:
 - multiple package versions side by side
 - SHA-256 integrity tracking
 - schema v2/v3 profiles referencing exact package coordinates and configuration snapshot IDs instead of ZIP paths
+- automatic schema v3 profile generation from a fully satisfied configuration snapshot
 - local ZIP-only WordPress/plugin/theme assembly
 - configuration snapshot registry with source requirement matching
 - offline distribution builder
@@ -53,22 +54,17 @@ node apps/cli/dist/index.js config check snapshot-20260824050124
 
 The requirement report marks the exact WordPress core, theme and active plugin versions as `OK` or `MISSING`. Builder/exporter infrastructure plugins are intentionally ignored.
 
-Create a schema v3 profile that pins exact binary versions and references a stored configuration snapshot:
+Once `config check` reports `Missing: 0`, generate the initial schema v3 profile directly from that snapshot:
 
-```json
-{
-  "schemaVersion": 3,
-  "name": "ecommerce-fa",
-  "locale": "fa_IR",
-  "wordpress": { "version": "7.1" },
-  "theme": { "slug": "hello-elementor", "version": "3.4.9" },
-  "plugins": [
-    { "slug": "elementor", "version": "4.0.8" },
-    { "slug": "elementor-pro", "version": "4.0.4" }
-  ],
-  "config": { "id": "snapshot-20260824050124" }
-}
+```bash
+node apps/cli/dist/index.js profile create snapshot-20260824050124 \
+  --name ecommerce-fa \
+  --output C:\WP-Starter\profiles\ecommerce-fa.json
+
+node apps/cli/dist/index.js profile check C:\WP-Starter\profiles\ecommerce-fa.json
 ```
+
+The generated profile pins the exact WordPress, theme, and active plugin versions from the reference export. It is an ordinary JSON profile and can later be deliberately edited to move individual package versions forward.
 
 Then build:
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from "node:path";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   buildStarter,
@@ -8,11 +9,12 @@ import {
   inspectPackage,
   loadProfile,
   PackageRegistry,
-  ConfigSnapshotRegistry
+  ConfigSnapshotRegistry,
+  createProfileFromSnapshot
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.3";
+const VERSION = "0.1.0-alpha.4";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;
@@ -27,6 +29,8 @@ Usage:
   wp-starter config list [--library <dir>]
   wp-starter config check <id> [--library <dir>]
   wp-starter config remove <id> [--library <dir>]
+  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--library <dir>] [--replace]
+  wp-starter profile check <profile.json> [--library <dir>]
   wp-starter library path [--library <dir>]
   wp-starter build --profile <profile.json> --output <starter.zip> [--library <dir>]
 
@@ -208,6 +212,73 @@ async function handleConfig(): Promise<void> {
   usage();
 }
 
+async function fileExists(target: string): Promise<boolean> {
+  try {
+    await access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function handleProfile(): Promise<void> {
+  const action = process.argv[3];
+  const input = process.argv[4];
+
+  if (action === "create") {
+    if (!input || input.startsWith("--")) usage();
+    const output = getArg("--output");
+    if (!output) usage();
+
+    const absoluteOutput = path.resolve(output);
+    if (await fileExists(absoluteOutput) && !hasFlag("--replace")) {
+      throw new BuilderError(
+        "profile_exists",
+        `Profile already exists: ${absoluteOutput}. Use --replace only if you intend to overwrite it.`
+      );
+    }
+
+    const profile = await createProfileFromSnapshot(input, {
+      libraryDir: libraryDir(),
+      name: getArg("--name") ?? undefined
+    });
+
+    await mkdir(path.dirname(absoluteOutput), { recursive: true });
+    await writeFile(absoluteOutput, JSON.stringify(profile, null, 2) + "\n", "utf8");
+
+    console.log(`Created profile: ${profile.name}`);
+    console.log(`Output: ${absoluteOutput}`);
+    console.log(`Config: ${profile.config.id}`);
+    console.log(`Locale: ${profile.locale}`);
+    console.log(`WordPress: ${profile.wordpress.version}`);
+    console.log(`Theme: ${profile.theme.slug}@${profile.theme.version}`);
+    console.log(`Plugins: ${profile.plugins.length}`);
+    return;
+  }
+
+  if (action === "check") {
+    if (!input || input.startsWith("--")) usage();
+    const profile = await loadProfile(input, { libraryDir: libraryDir() });
+    console.log(`Profile: ${profile.name}`);
+    console.log(`Schema: ${profile.schemaVersion}`);
+    console.log(`Locale: ${profile.locale}`);
+    console.log(`WordPress: ${profile.wordpress.version}`);
+    console.log(`Theme: ${profile.theme.slug}@${profile.theme.version}`);
+    console.table(profile.plugins
+      .filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale))
+      .map((plugin) => ({
+        Slug: plugin.slug,
+        Version: plugin.version,
+        "Main file": plugin.file,
+        Required: plugin.required !== false ? "yes" : "no"
+      })));
+    console.log("Profile inputs resolve successfully.");
+    return;
+  }
+
+  usage();
+}
+
 async function handleBuild(): Promise<void> {
   const profilePath = getArg("--profile");
   const outputPath = getArg("--output");
@@ -248,6 +319,11 @@ async function main(): Promise<void> {
 
   if (command === "config") {
     await handleConfig();
+    return;
+  }
+
+  if (command === "profile") {
+    await handleProfile();
     return;
   }
 

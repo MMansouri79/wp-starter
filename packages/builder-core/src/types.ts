@@ -103,6 +103,23 @@ export interface LanguageArchiveRef {
   zip: string;
 }
 
+
+export interface ProfileDocumentV3 {
+  schemaVersion: 3;
+  name: string;
+  locale: string;
+  wordpress: { version: string };
+  theme: { slug: string; version: string };
+  plugins: Array<{
+    slug: string;
+    version: string;
+    required?: boolean;
+    locales?: string[];
+  }>;
+  config: { id: string };
+  languageArchives?: LanguageArchiveRef[];
+}
+
 export interface BuildProfile {
   schemaVersion: 1 | 2 | 3;
   name: string;
