@@ -99,6 +99,15 @@ test("imports a configuration snapshot, ignores exporter infrastructure, and rep
     assert.deepEqual(generated.plugins.map((plugin) => plugin.slug).sort(), ["elementor", "filterx"]);
     assert.equal(generated.config.id, imported.record.id);
 
+    const overridden = await createProfileFromSnapshot(imported.record.id, {
+      libraryDir: library,
+      name: "english-test",
+      locale: "en_US",
+      excludePlugins: ["filterx"]
+    });
+    assert.equal(overridden.locale, "en_US");
+    assert.deepEqual(overridden.plugins.map((plugin) => plugin.slug), ["elementor"]);
+
     const profilePath = path.join(temp, "profile.json");
     await writeFile(profilePath, JSON.stringify({
       schemaVersion: 3,

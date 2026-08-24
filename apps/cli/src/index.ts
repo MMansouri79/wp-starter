@@ -14,7 +14,7 @@ import {
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.4";
+const VERSION = "0.1.0-alpha.5";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;
@@ -29,7 +29,7 @@ Usage:
   wp-starter config list [--library <dir>]
   wp-starter config check <id> [--library <dir>]
   wp-starter config remove <id> [--library <dir>]
-  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--library <dir>] [--replace]
+  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--exclude-plugin <slug>]... [--library <dir>] [--replace]
   wp-starter profile check <profile.json> [--library <dir>]
   wp-starter library path [--library <dir>]
   wp-starter build --profile <profile.json> --output <starter.zip> [--library <dir>]
@@ -50,6 +50,14 @@ function getArg(name: string): string | null {
 
 function hasFlag(name: string): boolean {
   return process.argv.includes(name);
+}
+
+function getArgs(name: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < process.argv.length - 1; i++) {
+    if (process.argv[i] === name) values.push(process.argv[i + 1]);
+  }
+  return values;
 }
 
 function getKind(value: string | null): PackageKind | undefined {
@@ -240,7 +248,9 @@ async function handleProfile(): Promise<void> {
 
     const profile = await createProfileFromSnapshot(input, {
       libraryDir: libraryDir(),
-      name: getArg("--name") ?? undefined
+      name: getArg("--name") ?? undefined,
+      locale: getArg("--locale") ?? undefined,
+      excludePlugins: getArgs("--exclude-plugin")
     });
 
     await mkdir(path.dirname(absoluteOutput), { recursive: true });

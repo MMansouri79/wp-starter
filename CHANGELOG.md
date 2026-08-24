@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.5
+
+### Profile locale overrides and selective plugin builds
+
+- Added `--locale <locale>` to `profile create` so destination language is independent from the reference snapshot locale.
+- Added repeatable `--exclude-plugin <slug>` to generate test or alternate profiles without selected reference-site plugins.
+- Excluded plugins no longer block profile generation if their exact package is absent from the local library.
+- Bootstrap now applies Elementor, WooCommerce, and Persian WooCommerce adapter options only when the corresponding plugin is actually active.
+- Updated bootstrap version and tests for locale override and plugin exclusion behavior.
+
 ## 0.1.0-alpha.4
 
 ### Snapshot-to-profile generation

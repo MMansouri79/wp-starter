@@ -222,6 +222,8 @@ export async function loadProfile(profilePath: string, options: LoadProfileOptio
 export interface CreateProfileFromSnapshotOptions {
   libraryDir?: string;
   name?: string;
+  locale?: string;
+  excludePlugins?: string[];
 }
 
 /**
@@ -242,29 +244,38 @@ export async function createProfileFromSnapshot(
   const snapshots = new ConfigSnapshotRegistry(libraryDir);
   const snapshot = await snapshots.resolve(snapshotId);
   const report = await snapshots.requirements(snapshotId, new PackageRegistry(libraryDir));
+  const excluded = new Set((options.excludePlugins ?? []).map((slug) => slug.trim()).filter(Boolean));
+  const relevantRequirements = report.requirements.filter((item) => item.kind !== "plugin" || !excluded.has(item.slug));
+  const missingRequirements = relevantRequirements.filter((item) => item.status === "missing");
 
-  if (report.missing > 0) {
-    const missing = report.requirements
-      .filter((item) => item.status === "missing")
+  if (missingRequirements.length > 0) {
+    const missing = missingRequirements
       .map((item) => `${item.kind}:${item.slug}@${item.version}`)
       .join(", ");
     throw new BuilderError(
       "missing_profile_packages",
-      `Cannot create a build-ready profile because ${report.missing} required package(s) are missing: ${missing}`
+      `Cannot create a build-ready profile because ${missingRequirements.length} required package(s) are missing: ${missing}`
     );
+  }
+
+  const locale = options.locale?.trim() || snapshot.locale;
+  if (!locale) {
+    throw new BuilderError("invalid_profile", "Profile locale cannot be empty.");
   }
 
   return {
     schemaVersion: 3,
     name: options.name?.trim() || snapshot.id,
-    locale: snapshot.locale,
+    locale,
     wordpress: { version: snapshot.wordpressVersion },
     theme: { slug: snapshot.theme.slug, version: snapshot.theme.version },
-    plugins: snapshot.plugins.map((plugin) => ({
-      slug: plugin.slug,
-      version: plugin.version,
-      required: true
-    })),
+    plugins: snapshot.plugins
+      .filter((plugin) => !excluded.has(plugin.slug))
+      .map((plugin) => ({
+        slug: plugin.slug,
+        version: plugin.version,
+        required: true
+      })),
     config: { id: snapshot.id },
     languageArchives: []
   };

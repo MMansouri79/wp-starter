@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Applies a bundled starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.2
+ * Version: 0.1.0-alpha.5
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -123,9 +123,19 @@ final class MMS_WP_Starter_Bootstrap {
             self::cleanup_default_content();
         }
 
-        self::apply_option_group( (array) ( $config['adapters']['elementor']['options'] ?? array() ) );
-        self::apply_option_group( (array) ( $config['adapters']['woocommerce']['options'] ?? array() ) );
-        self::apply_option_group( (array) ( $config['adapters']['persian_woocommerce']['options'] ?? array() ) );
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+        if ( is_plugin_active( 'elementor/elementor.php' ) ) {
+            self::apply_option_group( (array) ( $config['adapters']['elementor']['options'] ?? array() ) );
+        }
+
+        if ( is_plugin_active( 'woocommerce/woocommerce.php' ) ) {
+            self::apply_option_group( (array) ( $config['adapters']['woocommerce']['options'] ?? array() ) );
+        }
+
+        if ( is_plugin_active( 'persian-woocommerce/woocommerce-persian.php' ) ) {
+            self::apply_option_group( (array) ( $config['adapters']['persian_woocommerce']['options'] ?? array() ) );
+        }
 
         if ( class_exists( 'WC_Install' ) && method_exists( 'WC_Install', 'create_pages' ) ) {
             WC_Install::create_pages();
