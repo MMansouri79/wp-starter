@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0-alpha.3
+
+### Configuration snapshot registry
+
+- Added a local registry for exported `starter-config.zip` snapshots.
+- Added `config add`, `config list`, `config check`, and `config remove` CLI commands.
+- Added exact requirement matching between a reference snapshot and the local WordPress/theme/plugin package library.
+- Infrastructure plugins such as WP Starter Exporter and legacy Site Starter are excluded from target requirements.
+- Added schema v3 profiles that reference a configuration snapshot by stable ID instead of a raw ZIP path.
+- Verified the real `starter-config-20260824-050124.zip` export imports successfully and yields the expected WordPress 7.1, Hello Elementor 3.4.9, and six target plugin requirements.
+- Added UTF-8 console setup to Windows launchers for Persian/non-ASCII plugin names.
+- Added tests for snapshot import, requirement matching, infrastructure exclusion, and schema v3 profile resolution.
+
 ## 0.1.0-alpha.2
 
 ### Generic package registry

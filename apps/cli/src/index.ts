@@ -7,11 +7,12 @@ import {
   defaultLibraryDir,
   inspectPackage,
   loadProfile,
-  PackageRegistry
+  PackageRegistry,
+  ConfigSnapshotRegistry
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.2";
+const VERSION = "0.1.0-alpha.3";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;
@@ -22,6 +23,10 @@ Usage:
   wp-starter package inspect <package.zip> [--type plugin|theme|wordpress]
   wp-starter package list [--type plugin|theme|wordpress] [--library <dir>]
   wp-starter package remove --type <type> --slug <slug> --version <version> [--library <dir>]
+  wp-starter config add <starter-config.zip> [--id <id>] [--name <name>] [--library <dir>] [--replace]
+  wp-starter config list [--library <dir>]
+  wp-starter config check <id> [--library <dir>]
+  wp-starter config remove <id> [--library <dir>]
   wp-starter library path [--library <dir>]
   wp-starter build --profile <profile.json> --output <starter.zip> [--library <dir>]
 
@@ -127,6 +132,82 @@ async function handlePackage(): Promise<void> {
   usage();
 }
 
+
+async function printRequirementReport(registry: ConfigSnapshotRegistry, id: string): Promise<void> {
+  const report = await registry.requirements(id);
+  const rows = report.requirements.map((item) => ({
+    Status: item.status === "available" ? "OK" : "MISSING",
+    Type: item.kind,
+    Slug: item.slug,
+    Version: item.version,
+    Name: item.name
+  }));
+  console.table(rows);
+  console.log(`Available: ${report.available}`);
+  console.log(`Missing: ${report.missing}`);
+}
+
+async function handleConfig(): Promise<void> {
+  const action = process.argv[3];
+  const input = process.argv[4];
+  const registry = new ConfigSnapshotRegistry(libraryDir());
+
+  if (action === "add") {
+    if (!input || input.startsWith("--")) usage();
+    const result = await registry.add(input, {
+      id: getArg("--id") ?? undefined,
+      name: getArg("--name") ?? undefined,
+      replace: hasFlag("--replace")
+    });
+    const record = result.record;
+    console.log(`${result.replaced ? "Replaced" : result.added ? "Imported" : "Already present"}: ${record.id}`);
+    console.log(`Name: ${record.name}`);
+    console.log(`WordPress: ${record.wordpressVersion}`);
+    console.log(`Locale: ${record.locale}`);
+    console.log(`Theme: ${record.theme.slug}@${record.theme.version}`);
+    console.log(`Plugins: ${record.plugins.length}`);
+    console.log(`SHA-256: ${record.sha256}`);
+    console.log(`Library: ${registry.root}`);
+    console.log("");
+    console.log("Package requirements:");
+    await printRequirementReport(registry, record.id);
+    return;
+  }
+
+  if (action === "list") {
+    const records = await registry.list();
+    if (records.length === 0) {
+      console.log(`No configuration snapshots in ${registry.root}`);
+      return;
+    }
+    console.table(records.map((record) => ({
+      ID: record.id,
+      Name: record.name,
+      WordPress: record.wordpressVersion,
+      Locale: record.locale,
+      Theme: `${record.theme.slug}@${record.theme.version}`,
+      Plugins: record.plugins.length
+    })));
+    console.log(`Library: ${registry.root}`);
+    return;
+  }
+
+  if (action === "check") {
+    if (!input || input.startsWith("--")) usage();
+    await printRequirementReport(registry, input);
+    return;
+  }
+
+  if (action === "remove") {
+    if (!input || input.startsWith("--")) usage();
+    const removed = await registry.remove(input);
+    console.log(`Removed configuration snapshot: ${removed.id}`);
+    return;
+  }
+
+  usage();
+}
+
 async function handleBuild(): Promise<void> {
   const profilePath = getArg("--profile");
   const outputPath = getArg("--output");
@@ -142,7 +223,7 @@ async function handleBuild(): Promise<void> {
   console.log(`Building profile: ${profile.name}`);
   console.log(`Locale: ${profile.locale}`);
   console.log(`Plugins: ${profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale)).length}`);
-  if (profile.schemaVersion === 2) console.log(`Package library: ${library}`);
+  if (profile.schemaVersion >= 2) console.log(`Package library: ${library}`);
 
   const result = await buildStarter({
     profile,
@@ -162,6 +243,11 @@ async function main(): Promise<void> {
 
   if (command === "package") {
     await handlePackage();
+    return;
+  }
+
+  if (command === "config") {
+    await handleConfig();
     return;
   }
 

@@ -18,9 +18,9 @@ The Phase 1 build pipeline currently provides:
 - automatic package inspection and version detection
 - multiple package versions side by side
 - SHA-256 integrity tracking
-- schema v2 profiles referencing exact package coordinates instead of ZIP paths
+- schema v2/v3 profiles referencing exact package coordinates and configuration snapshot IDs instead of ZIP paths
 - local ZIP-only WordPress/plugin/theme assembly
-- configuration-export ZIP
+- configuration snapshot registry with source requirement matching
 - offline distribution builder
 - build manifest + SHA-256 hashes
 - MU-plugin bootstrap with staged provisioning
@@ -43,7 +43,34 @@ node apps/cli/dist/index.js package list
 
 The package ZIP filename is irrelevant. The builder reads the WordPress/plugin/theme metadata from the package itself.
 
-Create a schema v2 profile that pins exact versions and build:
+Import a configuration export from the reference site and immediately compare it against the local package library:
+
+```bash
+node apps/cli/dist/index.js config add C:\Exports\starter-config.zip
+node apps/cli/dist/index.js config list
+node apps/cli/dist/index.js config check snapshot-20260824050124
+```
+
+The requirement report marks the exact WordPress core, theme and active plugin versions as `OK` or `MISSING`. Builder/exporter infrastructure plugins are intentionally ignored.
+
+Create a schema v3 profile that pins exact binary versions and references a stored configuration snapshot:
+
+```json
+{
+  "schemaVersion": 3,
+  "name": "ecommerce-fa",
+  "locale": "fa_IR",
+  "wordpress": { "version": "7.1" },
+  "theme": { "slug": "hello-elementor", "version": "3.4.9" },
+  "plugins": [
+    { "slug": "elementor", "version": "4.0.8" },
+    { "slug": "elementor-pro", "version": "4.0.4" }
+  ],
+  "config": { "id": "snapshot-20260824050124" }
+}
+```
+
+Then build:
 
 ```bash
 node apps/cli/dist/index.js build \

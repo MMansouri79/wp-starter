@@ -1,5 +1,7 @@
 export type PackageKind = "wordpress" | "theme" | "plugin";
 
+export type SnapshotRequirementStatus = "available" | "missing";
+
 export interface PackageInspection {
   kind: PackageKind;
   slug: string;
@@ -36,6 +38,50 @@ export interface RegistryFile {
   packages: PackageRecord[];
 }
 
+
+export interface SnapshotPluginRequirement {
+  slug: string;
+  name: string;
+  version: string;
+  file: string;
+  active: true;
+}
+
+export interface ConfigSnapshotRecord {
+  id: string;
+  name: string;
+  generatedAt: string;
+  wordpressVersion: string;
+  locale: string;
+  theme: { slug: string; name: string; version: string };
+  plugins: SnapshotPluginRequirement[];
+  zip: string;
+  sha256: string;
+  sourceFilename: string;
+  addedAt: string;
+}
+
+export interface ConfigSnapshotFile {
+  schemaVersion: 1;
+  snapshots: ConfigSnapshotRecord[];
+}
+
+export interface SnapshotRequirement {
+  kind: PackageKind;
+  slug: string;
+  version: string;
+  name: string;
+  status: SnapshotRequirementStatus;
+}
+
+export interface SnapshotRequirementReport {
+  snapshotId: string;
+  locale: string;
+  requirements: SnapshotRequirement[];
+  available: number;
+  missing: number;
+}
+
 export interface ArtifactRef {
   version: string;
   zip: string;
@@ -58,7 +104,7 @@ export interface LanguageArchiveRef {
 }
 
 export interface BuildProfile {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   name: string;
   locale: string;
   wordpress: ArtifactRef;

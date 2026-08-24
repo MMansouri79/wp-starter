@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "name": "ecommerce-fa",
   "locale": "fa_IR",
   "wordpress": {
@@ -10,43 +10,15 @@
     "version": "3.4.9"
   },
   "plugins": [
-    {
-      "slug": "classic-editor",
-      "version": "1.7.0",
-      "required": true
-    },
-    {
-      "slug": "elementor",
-      "version": "4.0.8",
-      "required": true
-    },
-    {
-      "slug": "elementor-pro",
-      "version": "4.0.4",
-      "required": true
-    },
-    {
-      "slug": "woocommerce",
-      "version": "10.9.4",
-      "required": true
-    },
-    {
-      "slug": "persian-woocommerce",
-      "version": "10.0.4",
-      "required": true,
-      "locales": ["fa_IR"]
-    },
-    {
-      "slug": "filterx",
-      "version": "0.6.1",
-      "required": true
-    }
+    { "slug": "classic-editor", "version": "1.7.0", "required": true },
+    { "slug": "elementor", "version": "4.0.8", "required": true },
+    { "slug": "elementor-pro", "version": "4.0.4", "required": true },
+    { "slug": "woocommerce", "version": "10.9.4", "required": true },
+    { "slug": "persian-woocommerce", "version": "10.0.4", "required": true, "locales": ["fa_IR"] },
+    { "slug": "filterx", "version": "0.6.1", "required": true }
   ],
-  "configExport": "../exports/core-config.zip",
-  "languageArchives": [
-    {
-      "locale": "fa_IR",
-      "zip": "../private-packages/languages/fa_IR.zip"
-    }
-  ]
+  "config": {
+    "id": "snapshot-20260824050124"
+  },
+  "languageArchives": []
 }
