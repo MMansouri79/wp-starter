@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.14 - 2026-08-24
+
+- Marked Phase 1 core build/deployment validation complete after clean snapshot and package-only Plesk installs both passed.
+- Added a dedicated Profiles workspace to the local GUI.
+- Added profile Edit, Duplicate, Build, and Delete actions without hand-editing JSON.
+- Profile renames now replace the previous saved profile file instead of leaving stale copies.
+- Added persistent build-history metadata sidecars with source profile, locale, configuration mode, SHA-256, and timestamps.
+- Added a dedicated Build History workspace with Download, Build Again, and Delete actions.
+- Added regression coverage for profile retrieval/deletion and persisted build history.
+
 ## 0.1.0-alpha.13 - 2026-08-24
 
 - Added real asynchronous build jobs to the local GUI with stage-by-stage progress reporting and a visible progress bar.

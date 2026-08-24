@@ -19,7 +19,7 @@ import {
   PackageRegistry
 } from "../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.13";
+const VERSION = "0.1.0-alpha.14";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
 const publicDir = path.join(here, "public");
@@ -97,6 +97,7 @@ async function listProfiles() {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
     try {
       const raw = JSON.parse(await readFile(path.join(profilesDir, entry.name), "utf8"));
+      const info = await stat(path.join(profilesDir, entry.name));
       output.push({
         name: String(raw.name || entry.name.replace(/\.json$/i, "")),
         file: entry.name,
@@ -104,7 +105,8 @@ async function listProfiles() {
         wordpress: raw.wordpress ? `${String(raw.wordpress.version || "")}${raw.wordpress.variant ? ` (${raw.wordpress.variant})` : ""}` : "",
         theme: raw.theme ? `${raw.theme.slug}@${raw.theme.version}` : "WordPress default",
         plugins: Array.isArray(raw.plugins) ? raw.plugins.length : 0,
-        config: String(raw.config?.id || "")
+        config: String(raw.config?.id || ""),
+        updatedAt: info.mtime.toISOString()
       });
     } catch {
       // Invalid manual files remain on disk; validation reports them when selected.
@@ -119,8 +121,24 @@ async function listBuilds() {
   const output = [];
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".zip")) continue;
-    const info = await stat(path.join(buildsDir, entry.name));
-    output.push({ file: entry.name, size: info.size, modifiedAt: info.mtime.toISOString() });
+    const target = path.join(buildsDir, entry.name);
+    const info = await stat(target);
+    let meta = {};
+    try {
+      meta = JSON.parse(await readFile(`${target}.json`, "utf8"));
+    } catch {
+      // Builds made before alpha.14 have no sidecar metadata.
+    }
+    output.push({
+      file: entry.name,
+      size: info.size,
+      modifiedAt: info.mtime.toISOString(),
+      profile: String(meta.profile || ""),
+      profileFile: String(meta.profileFile || ""),
+      locale: String(meta.locale || ""),
+      sha256: String(meta.sha256 || ""),
+      configurationEnabled: meta.configurationEnabled === true
+    });
   }
   return output.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
@@ -196,6 +214,16 @@ async function performBuild(profileFile, onProgress) {
   const outputName = `${safeName(profile.name, "starter")}-${timestamp}.zip`;
   const outputZip = path.join(buildsDir, outputName);
   const result = await buildStarter({ profile, outputZip, bootstrapFile, builderVersion: VERSION, onProgress });
+  await writeFile(`${outputZip}.json`, JSON.stringify({
+    schemaVersion: 1,
+    file: outputName,
+    profile: profile.name,
+    profileFile: safeProfile,
+    locale: profile.locale,
+    sha256: result.sha256,
+    configurationEnabled: result.manifest.configurationEnabled === true,
+    createdAt: new Date().toISOString()
+  }, null, 2) + "\n", "utf8");
   return {
     file: outputName,
     sha256: result.sha256,
@@ -311,7 +339,46 @@ async function api(req, res, url) {
     const filename = `${safeName(name, "profile")}.json`;
     const target = path.join(profilesDir, filename);
     await writeFile(target, JSON.stringify(profile, null, 2) + "\n", "utf8");
+    const sourceFile = path.basename(String(body.sourceFile || ""));
+    if (sourceFile && sourceFile.endsWith(".json") && sourceFile !== filename) {
+      await rm(path.join(profilesDir, sourceFile), { force: true });
+    }
     json(res, 200, { profile, file: filename });
+    return true;
+  }
+
+  if (url.pathname.startsWith("/api/profiles/") && req.method === "GET") {
+    const filename = path.basename(decodeURIComponent(url.pathname.slice("/api/profiles/".length)));
+    const target = path.join(profilesDir, filename);
+    if (!filename.endsWith(".json") || path.dirname(target) !== profilesDir) {
+      throw new BuilderError("invalid_request", "Invalid profile filename.");
+    }
+    await loadProfile(target, { libraryDir: libraryRoot });
+    const profile = JSON.parse(await readFile(target, "utf8"));
+    json(res, 200, { profile, file: filename });
+    return true;
+  }
+
+  if (url.pathname.startsWith("/api/profiles/") && req.method === "DELETE") {
+    const filename = path.basename(decodeURIComponent(url.pathname.slice("/api/profiles/".length)));
+    const target = path.join(profilesDir, filename);
+    if (!filename.endsWith(".json") || path.dirname(target) !== profilesDir) {
+      throw new BuilderError("invalid_request", "Invalid profile filename.");
+    }
+    await rm(target, { force: true });
+    json(res, 200, { removed: filename });
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/api/builds") {
+    const filename = path.basename(String(url.searchParams.get("file") || ""));
+    const target = path.join(buildsDir, filename);
+    if (!filename.endsWith(".zip") || path.dirname(target) !== buildsDir) {
+      throw new BuilderError("invalid_request", "A valid build filename is required.");
+    }
+    await rm(target, { force: true });
+    await rm(`${target}.json`, { force: true });
+    json(res, 200, { removed: filename });
     return true;
   }
 

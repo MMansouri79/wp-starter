@@ -30,6 +30,8 @@ test("GUI serves the workspace and local API", async () => {
     const html = await htmlResponse.text();
     assert.match(html, /WP Starter Builder/);
     assert.match(html, /Package Library/);
+    assert.match(html, /Saved Profiles/);
+    assert.match(html, /Build History/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME;
@@ -95,6 +97,16 @@ test("GUI profile API can pin package versions and localized WordPress variants"
     assert.equal(profileData.profile.schemaVersion, 5);
     assert.equal(profileData.profile.wordpress.variant, "en_US");
     assert.equal(profileData.profile.plugins[0].version, "4.2.1");
+
+    const renamedRes = await fetch(`${baseUrl}/api/profiles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      configId: "snapshot-20260824050124", name: "renamed-profile", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", themeVersion: "3.4.9", pluginVersions: { elementor: "4.2.1" }, sourceFile: profileData.file
+    }) });
+    assert.equal(renamedRes.status, 200);
+    const renamedData = await renamedRes.json();
+    assert.equal(renamedData.file, "renamed-profile.json");
+    const renamedState = await (await fetch(`${baseUrl}/api/state`)).json();
+    assert.equal(renamedState.profiles.length, 1);
+    assert.equal(renamedState.profiles[0].file, "renamed-profile.json");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;
@@ -172,6 +184,27 @@ test("GUI can create a package-only profile and expose build progress", async ()
     assert.equal(job.percent, 100);
     assert.equal(job.result.manifest.configurationEnabled, false);
     assert.equal(job.result.manifest.theme, null);
+
+    const profileGet = await fetch(`${baseUrl}/api/profiles/${encodeURIComponent(profileData.file)}`);
+    assert.equal(profileGet.status, 200);
+    const rawProfile = await profileGet.json();
+    assert.equal(rawProfile.profile.name, "packages-only");
+    assert.equal(rawProfile.profile.config, null);
+
+    const stateAfterBuild = await (await fetch(`${baseUrl}/api/state`)).json();
+    assert.equal(stateAfterBuild.builds.length, 1);
+    assert.equal(stateAfterBuild.builds[0].profile, "packages-only");
+    assert.equal(stateAfterBuild.builds[0].profileFile, profileData.file);
+    assert.equal(stateAfterBuild.builds[0].configurationEnabled, false);
+    assert.match(stateAfterBuild.builds[0].sha256, /^[a-f0-9]{64}$/);
+
+    const deleteBuild = await fetch(`${baseUrl}/api/builds?file=${encodeURIComponent(stateAfterBuild.builds[0].file)}`, { method: "DELETE" });
+    assert.equal(deleteBuild.status, 200);
+    const deleteProfile = await fetch(`${baseUrl}/api/profiles/${encodeURIComponent(profileData.file)}`, { method: "DELETE" });
+    assert.equal(deleteProfile.status, 200);
+    const finalState = await (await fetch(`${baseUrl}/api/state`)).json();
+    assert.equal(finalState.builds.length, 0);
+    assert.equal(finalState.profiles.length, 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;

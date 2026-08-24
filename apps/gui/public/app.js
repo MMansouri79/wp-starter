@@ -1,11 +1,14 @@
 const $ = (s) => document.querySelector(s);
 let state = null;
 let currentReport = null;
+let currentEditingProfileFile = "";
 const titles = {
   overview: ["Overview", "Your local WordPress starter workspace."],
   packages: ["Packages", "Manage versioned WordPress, theme, and plugin ZIPs."],
   configs: ["Configurations", "Reference-site exports and their package requirements."],
-  build: ["Build", "Choose exact package versions and generate a complete offline WordPress ZIP."]
+  profiles: ["Profiles", "Manage reusable, version-pinned build profiles."],
+  build: ["Build", "Choose exact package versions and generate a complete offline WordPress ZIP."],
+  builds: ["Build History", "Review, download, rebuild, or remove generated distributions."]
 };
 
 function flash(message, error = false) {
@@ -79,9 +82,19 @@ function render() {
   $("#profile-select").innerHTML = profileOpts || `<option value="">No profiles created</option>`;
   if (state.profiles.some(p => p.file === previousProfile)) $("#profile-select").value = previousProfile;
 
-  $("#profiles-list").innerHTML = state.profiles.map(p => `<div class="card"><div><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins · ${p.config ? esc(p.config) : "No snapshot"}</small></div></div>`).join("") || `<div class="empty">No profiles yet.</div>`;
-  $("#recent-builds").innerHTML = state.builds.slice(0, 5).map(b => `<div class="card"><div><strong>${esc(b.file)}</strong><small>${fmtBytes(b.size)} · ${new Date(b.modifiedAt).toLocaleString()}</small></div><a class="secondary" href="/download/${encodeURIComponent(b.file)}">Download</a></div>`).join("") || `<div class="empty">No builds yet.</div>`;
+  $("#profiles-manager").innerHTML = state.profiles.map(p => `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`).join("") || `<div class="empty">No profiles yet. Create one from the Build page.</div>`;
+
+  const buildCard = (b, compact = false) => `<div class="build-card"><div><strong>${esc(b.file)}</strong><small>${b.profile ? `Profile: ${esc(b.profile)} · ` : ""}${b.locale ? `${esc(b.locale)} · ` : ""}${b.configurationEnabled ? "Snapshot" : "Packages only"} · ${fmtBytes(b.size)} · ${new Date(b.modifiedAt).toLocaleString()}</small>${!compact && b.sha256 ? `<code class="hash">${esc(b.sha256)}</code>` : ""}</div><div class="build-card-actions"><a class="tiny primary-ish" href="/download/${encodeURIComponent(b.file)}">Download</a>${b.profileFile ? `<button class="tiny rebuild" data-profile="${escAttr(b.profileFile)}">Build again</button>` : ""}${compact ? "" : `<button class="tiny danger delete-build" data-file="${escAttr(b.file)}">Delete</button>`}</div></div>`;
+  $("#recent-builds").innerHTML = state.builds.slice(0, 5).map(b => buildCard(b, true)).join("") || `<div class="empty">No builds yet.</div>`;
+  $("#build-history").innerHTML = state.builds.map(b => buildCard(b, false)).join("") || `<div class="empty">No builds yet.</div>`;
+
   document.querySelectorAll(".check-config").forEach(btn => btn.onclick = () => checkConfig(btn.dataset.id));
+  document.querySelectorAll(".edit-profile").forEach(btn => btn.onclick = () => loadProfileIntoEditor(btn.dataset.file, false));
+  document.querySelectorAll(".duplicate-profile").forEach(btn => btn.onclick = () => loadProfileIntoEditor(btn.dataset.file, true));
+  document.querySelectorAll(".delete-profile").forEach(btn => btn.onclick = () => deleteProfile(btn.dataset.file));
+  document.querySelectorAll(".build-profile-now").forEach(btn => btn.onclick = () => buildProfileFile(btn.dataset.file));
+  document.querySelectorAll(".rebuild").forEach(btn => btn.onclick = () => buildProfileFile(btn.dataset.profile));
+  document.querySelectorAll(".delete-build").forEach(btn => btn.onclick = () => deleteBuild(btn.dataset.file));
   loadBuildSelection($("#build-config").value);
 }
 
@@ -197,15 +210,96 @@ async function createProfile() {
     wordpressVariant: wp.variant,
     themeSlug: theme.slug,
     themeVersion: theme.version,
-    pluginVersions
+    pluginVersions,
+    sourceFile: currentEditingProfileFile
   };
   try {
     setBusy(true);
     const data = await request("/api/profiles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     flash(`Profile ${data.profile.name} saved${configId ? "." : " without a configuration snapshot."}`);
+    currentEditingProfileFile = "";
+    $("#cancel-profile-edit").classList.add("hidden");
+    $("#create-profile").textContent = "Save Profile";
     await refresh();
     $("#profile-select").value = data.file;
   } catch (e) { flash(e.message, true); } finally { setBusy(false); }
+}
+
+function goView(view) {
+  document.querySelectorAll(".nav").forEach(x => x.classList.toggle("active", x.dataset.view === view));
+  document.querySelectorAll(".view").forEach(x => x.classList.toggle("active", x.id === `view-${view}`));
+  $("#title").textContent = titles[view][0];
+  $("#subtitle").textContent = titles[view][1];
+}
+
+async function loadProfileIntoEditor(file, duplicate = false) {
+  try {
+    const data = await request(`/api/profiles/${encodeURIComponent(file)}`);
+    const profile = data.profile;
+    currentEditingProfileFile = duplicate ? "" : file;
+    $("#build-config").value = profile.config?.id || "";
+    $("#build-name").dataset.changed = "1";
+    $("#build-locale").dataset.changed = "1";
+    $("#build-name").value = duplicate ? `${profile.name}-copy` : profile.name;
+    $("#build-locale").value = profile.locale || "en_US";
+    await loadBuildSelection(profile.config?.id || "");
+
+    const wpValue = JSON.stringify({ version: profile.wordpress.version, variant: profile.wordpress.variant || "en_US" });
+    if ([...$("#build-wordpress").options].some(o => o.value === wpValue)) $("#build-wordpress").value = wpValue;
+    const themeValue = profile.theme ? JSON.stringify({ slug: profile.theme.slug, version: profile.theme.version }) : "";
+    if ([...$("#build-theme").options].some(o => o.value === themeValue)) $("#build-theme").value = themeValue;
+
+    const selected = new Map((profile.plugins || []).map(p => [p.slug, p.version]));
+    document.querySelectorAll("#build-plugins .package-choice").forEach(row => {
+      const input = row.querySelector('input[type="checkbox"]');
+      const select = row.querySelector(".plugin-version");
+      const version = selected.get(input.value);
+      input.checked = !!version;
+      if (version && [...select.options].some(o => o.value === version)) select.value = version;
+    });
+
+    $("#cancel-profile-edit").classList.toggle("hidden", duplicate);
+    $("#create-profile").textContent = duplicate ? "Save Copy" : "Save Changes";
+    goView("build");
+    flash(duplicate ? `Duplicating ${profile.name}. Choose a new name and save.` : `Editing ${profile.name}.`);
+  } catch (e) { flash(e.message, true); }
+}
+
+function resetProfileEditor() {
+  currentEditingProfileFile = "";
+  $("#build-name").dataset.changed = "";
+  $("#build-locale").dataset.changed = "";
+  $("#build-config").value = "";
+  $("#cancel-profile-edit").classList.add("hidden");
+  $("#create-profile").textContent = "Save Profile";
+  loadBuildSelection("");
+}
+
+async function deleteProfile(file) {
+  const profile = state.profiles.find(p => p.file === file);
+  if (!confirm(`Delete profile ${profile?.name || file}? Generated build ZIPs will not be deleted.`)) return;
+  try {
+    await request(`/api/profiles/${encodeURIComponent(file)}`, { method: "DELETE" });
+    if (currentEditingProfileFile === file) resetProfileEditor();
+    flash(`Deleted ${profile?.name || file}.`);
+    await refresh();
+  } catch (e) { flash(e.message, true); }
+}
+
+async function deleteBuild(file) {
+  if (!confirm(`Delete generated build ${file}?`)) return;
+  try {
+    await request(`/api/builds?file=${encodeURIComponent(file)}`, { method: "DELETE" });
+    flash(`Deleted ${file}.`);
+    await refresh();
+  } catch (e) { flash(e.message, true); }
+}
+
+async function buildProfileFile(file) {
+  if (!state.profiles.some(p => p.file === file)) return flash("That profile no longer exists.", true);
+  goView("build");
+  $("#profile-select").value = file;
+  await build();
 }
 
 function showBuildProgress(percent, message, status = "running", detail = "") {
@@ -255,15 +349,7 @@ async function build() {
 }
 function setBusy(on) { document.body.classList.toggle("busy", on); }
 
-document.querySelectorAll(".nav").forEach(btn => btn.onclick = () => {
-  document.querySelectorAll(".nav").forEach(x => x.classList.remove("active"));
-  document.querySelectorAll(".view").forEach(x => x.classList.remove("active"));
-  btn.classList.add("active");
-  const v = btn.dataset.view;
-  $("#view-" + v).classList.add("active");
-  $("#title").textContent = titles[v][0];
-  $("#subtitle").textContent = titles[v][1];
-});
+document.querySelectorAll(".nav").forEach(btn => btn.onclick = () => goView(btn.dataset.view));
 $("#refresh").onclick = () => refresh().catch(e => flash(e.message, true));
 $("#package-file").onchange = e => uploadFiles([...e.target.files], "packages").catch(e => flash(e.message, true));
 $("#config-file").onchange = e => uploadFiles([...e.target.files], "configs").catch(e => flash(e.message, true));
@@ -275,5 +361,7 @@ $("#build-config").onchange = e => loadBuildSelection(e.target.value);
 $("#build-name").oninput = e => e.target.dataset.changed = "1";
 $("#build-locale").oninput = e => { e.target.dataset.changed = "1"; selectWordPressForLocale(); };
 $("#create-profile").onclick = createProfile;
+$("#cancel-profile-edit").onclick = resetProfileEditor;
+$("#new-profile").onclick = () => { resetProfileEditor(); goView("build"); };
 $("#build-button").onclick = build;
 refresh().catch(e => flash(e.message, true));

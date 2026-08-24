@@ -14,7 +14,9 @@
         <button class="nav active" data-view="overview">Overview</button>
         <button class="nav" data-view="packages">Packages</button>
         <button class="nav" data-view="configs">Configurations</button>
+        <button class="nav" data-view="profiles">Profiles</button>
         <button class="nav" data-view="build">Build</button>
+        <button class="nav" data-view="builds">Build History</button>
       </nav>
       <div class="sidebar-foot"><span id="version"></span><code id="library"></code></div>
     </aside>
@@ -48,6 +50,13 @@
         </div>
       </section>
 
+      <section class="view" id="view-profiles">
+        <div class="panel">
+          <div class="panel-head"><div><h2>Saved Profiles</h2><p>Reusable, version-pinned build definitions. Edit one without changing your package library or configuration snapshots.</p></div><button id="new-profile" class="primary">+ New Profile</button></div>
+          <div id="profiles-manager" class="profile-grid"></div>
+        </div>
+      </section>
+
       <section class="view" id="view-build">
         <div class="grid-two">
           <div class="panel">
@@ -58,7 +67,7 @@
             <label>WordPress package<select id="build-wordpress"></select></label>
             <label>Theme package<select id="build-theme"></select></label>
             <div class="field"><span class="label">Plugins and versions</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div></div>
-            <button id="create-profile" class="primary full">Create / Update Profile</button>
+            <div class="profile-actions"><button id="create-profile" class="primary">Save Profile</button><button id="cancel-profile-edit" class="secondary hidden">Cancel Edit</button></div>
           </div>
           <div class="panel">
             <h2>Build Offline WordPress ZIP</h2>
@@ -68,7 +77,13 @@
             <div id="build-result" class="result hidden"></div>
           </div>
         </div>
-        <div class="panel"><h2>Saved Profiles</h2><div id="profiles-list" class="cards"></div></div>
+      </section>
+
+      <section class="view" id="view-builds">
+        <div class="panel">
+          <div class="panel-head"><div><h2>Build History</h2><p>Generated offline distributions stay in your local library until you remove them.</p></div></div>
+          <div id="build-history" class="build-history"></div>
+        </div>
       </section>
     </main>
   </div>

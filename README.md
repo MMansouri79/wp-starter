@@ -12,7 +12,9 @@ No part of the generated starter distribution needs WordPress.org or internet ac
 
 ## Phase 1 status
 
-The Phase 1 build pipeline currently provides:
+**Phase 1 is complete as of v0.1.0-alpha.14.** The build pipeline was validated with clean snapshot-based and package-only deployments on a real Plesk-hosted WordPress installation.
+
+The Phase 1 build pipeline provides:
 
 - generic local package registry for arbitrary WordPress/plugin/theme ZIPs
 - automatic package inspection and version detection
@@ -148,3 +150,8 @@ The Build screen is a profile editor: choose the configuration snapshot, destina
 The Build screen now allows **No snapshot — packages only**. In this mode the profile is assembled directly from the local package library and the generated starter installs the selected packages without applying reference-site settings. A custom theme is optional; choosing **Use WordPress default theme** leaves the theme shipped with the selected WordPress distribution untouched.
 
 Builds now run as local asynchronous jobs. The GUI polls the same Builder Core job and shows actual stage progress while WordPress core, theme, plugins, configuration, manifest and final ZIP are processed.
+
+
+## Alpha.14: profile management and build history
+
+The local GUI now treats profiles as first-class reusable objects instead of burying them below the Build form. Saved profiles can be edited, duplicated, built directly, renamed, or deleted. Generated builds now persist sidecar metadata so Build History can show the source profile, locale, snapshot/package-only mode, SHA-256, timestamp, and provide Download / Build Again / Delete actions.

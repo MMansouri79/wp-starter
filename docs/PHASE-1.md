@@ -1,5 +1,7 @@
 # Phase 1: Core Build System
 
+**Status: COMPLETE as of v0.1.0-alpha.14.** Clean snapshot-based and package-only deployments were both validated on a real Plesk-hosted WordPress installation.
+
 ## Objective
 
 Produce a complete WordPress distribution ZIP from local inputs only.
