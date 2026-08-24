@@ -8,7 +8,8 @@
     "build": "tsc -b packages/builder-core apps/cli",
     "test": "npm run build && node --test packages/builder-core/tests/*.test.mjs",
     "lint:php": "php scripts/lint-php.php",
-    "check": "npm run build && npm run test && npm run lint:php"
+    "check": "npm run build && npm run test && npm run lint:php",
+    "package:builder": "npm run build && node scripts/package-builder.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

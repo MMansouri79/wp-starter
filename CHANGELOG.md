@@ -13,6 +13,8 @@
 - Preserved schema v1 profile compatibility during Phase 1 migration.
 - Added end-to-end tests proving a schema v2 profile resolves and builds entirely from the local registry.
 - Preserved original plugin/theme installation directory names when assembling arbitrary packages.
+- Added repeatable standalone Builder release packaging with the correct bootstrap directory layout.
+- Added `wp-starter.cmd` and `wp-starter.ps1` Windows command launchers.
 
 ## 0.1.0-alpha.1
 
