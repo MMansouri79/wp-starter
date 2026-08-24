@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.9
+
+### Direct local package extraction on WordPress hosts
+
+- Replaced bundled theme/plugin extraction through WordPress `unzip_file()` with a direct, path-safe `ZipArchive` extractor when the PHP extension is available.
+- Fixes Plesk-style environments where `unzip_file()` could report success but the expected theme/plugin files never appeared in the real `wp-content` destination.
+- Keeps a WordPress Filesystem/PclZip fallback for servers without `ZipArchive`.
+- Adds archive-entry and destination diagnostics if a normalized payload still cannot be discovered after extraction.
+- Preserves checksum verification before extraction and rejects absolute or traversal paths inside bundled archives.
+
 ## 0.1.0-alpha.8
 
 ### Canonical plugin/theme payloads
