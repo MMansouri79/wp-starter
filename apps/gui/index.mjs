@@ -2,6 +2,7 @@
 import http from "node:http";
 import path from "node:path";
 import os from "node:os";
+import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
@@ -11,13 +12,14 @@ import {
   buildStarter,
   BuilderError,
   ConfigSnapshotRegistry,
+  createProfileFromPackages,
   createProfileFromSnapshot,
   defaultLibraryDir,
   loadProfile,
   PackageRegistry
 } from "../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.12";
+const VERSION = "0.1.0-alpha.13";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
 const publicDir = path.join(here, "public");
@@ -25,6 +27,7 @@ const bootstrapFile = path.join(repoRoot, "wordpress/bootstrap/site-starter-boot
 const libraryRoot = path.resolve(process.env.WP_STARTER_HOME?.trim() || defaultLibraryDir());
 const profilesDir = path.join(libraryRoot, "profiles");
 const buildsDir = path.join(libraryRoot, "builds");
+const buildJobs = new Map();
 
 function json(res, status, value) {
   const body = JSON.stringify(value, null, 2);
@@ -48,6 +51,10 @@ function text(res, status, value, contentType = "text/plain; charset=utf-8") {
 function safeName(value, fallback) {
   const cleaned = String(value).trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return cleaned || fallback;
+}
+
+function isInfrastructurePackage(record) {
+  return record.kind === "plugin" && ["wp-starter-builder", "wp-starter-exporter", "site-starter"].includes(record.slug);
 }
 
 async function readJsonBody(req, maxBytes = 1024 * 1024) {
@@ -95,7 +102,7 @@ async function listProfiles() {
         file: entry.name,
         locale: String(raw.locale || ""),
         wordpress: raw.wordpress ? `${String(raw.wordpress.version || "")}${raw.wordpress.variant ? ` (${raw.wordpress.variant})` : ""}` : "",
-        theme: raw.theme ? `${raw.theme.slug}@${raw.theme.version}` : "",
+        theme: raw.theme ? `${raw.theme.slug}@${raw.theme.version}` : "WordPress default",
         plugins: Array.isArray(raw.plugins) ? raw.plugins.length : 0,
         config: String(raw.config?.id || "")
       });
@@ -119,7 +126,7 @@ async function listBuilds() {
 }
 
 async function state() {
-  const packages = await new PackageRegistry(libraryRoot).list();
+  const packages = (await new PackageRegistry(libraryRoot).list()).filter((record) => !isInfrastructurePackage(record));
   const configs = await new ConfigSnapshotRegistry(libraryRoot).list();
   return {
     version: VERSION,
@@ -143,6 +150,103 @@ async function serveFile(res, target, contentType) {
   } catch {
     text(res, 404, "Not found");
   }
+}
+
+async function createOrUpdateProfile(body) {
+  const configId = String(body.configId || "").trim();
+  const name = String(body.name || configId || "profile").trim();
+  const locale = String(body.locale || "").trim() || "en_US";
+  const pluginVersions = body.pluginVersions && typeof body.pluginVersions === "object" ? body.pluginVersions : {};
+
+  if (configId) {
+    const excludedPlugins = Array.isArray(body.excludedPlugins) ? body.excludedPlugins.map(String) : [];
+    return createProfileFromSnapshot(configId, {
+      libraryDir: libraryRoot,
+      name,
+      locale,
+      excludePlugins: excludedPlugins,
+      wordpressVersion: String(body.wordpressVersion || "").trim() || undefined,
+      wordpressVariant: String(body.wordpressVariant || "").trim() || undefined,
+      themeVersion: String(body.themeVersion || "").trim() || undefined,
+      pluginVersions
+    });
+  }
+
+  return createProfileFromPackages({
+    libraryDir: libraryRoot,
+    name,
+    locale,
+    wordpressVersion: String(body.wordpressVersion || "").trim(),
+    wordpressVariant: String(body.wordpressVariant || "").trim(),
+    themeSlug: String(body.themeSlug || "").trim() || null,
+    themeVersion: String(body.themeVersion || "").trim() || null,
+    plugins: pluginVersions
+  });
+}
+
+async function performBuild(profileFile, onProgress) {
+  const safeProfile = safeName(String(profileFile || ""), "");
+  if (!safeProfile || !safeProfile.endsWith(".json")) {
+    throw new BuilderError("invalid_request", "A valid profileFile is required.");
+  }
+  const profilePath = path.join(profilesDir, safeProfile);
+  const profile = await loadProfile(profilePath, { libraryDir: libraryRoot });
+  await mkdir(buildsDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  const outputName = `${safeName(profile.name, "starter")}-${timestamp}.zip`;
+  const outputZip = path.join(buildsDir, outputName);
+  const result = await buildStarter({ profile, outputZip, bootstrapFile, builderVersion: VERSION, onProgress });
+  return {
+    file: outputName,
+    sha256: result.sha256,
+    manifest: result.manifest,
+    download: `/download/${encodeURIComponent(outputName)}`
+  };
+}
+
+function startBuildJob(profileFile) {
+  const id = randomUUID();
+  const job = {
+    id,
+    status: "queued",
+    percent: 0,
+    stage: "queued",
+    message: "Build queued…",
+    createdAt: new Date().toISOString(),
+    result: null,
+    error: null
+  };
+  buildJobs.set(id, job);
+
+  setTimeout(async () => {
+    try {
+      job.status = "running";
+      job.message = "Starting build…";
+      job.result = await performBuild(profileFile, (progress) => {
+        job.percent = progress.percent;
+        job.stage = progress.stage;
+        job.message = progress.message;
+        job.current = progress.current;
+        job.total = progress.total;
+      });
+      job.status = "complete";
+      job.percent = 100;
+      job.stage = "complete";
+      job.message = "Build complete.";
+      job.completedAt = new Date().toISOString();
+    } catch (error) {
+      job.status = "failed";
+      job.stage = "failed";
+      job.message = error instanceof Error ? error.message : String(error);
+      job.error = {
+        code: error instanceof BuilderError ? error.code : "internal_error",
+        message: job.message
+      };
+      job.completedAt = new Date().toISOString();
+    }
+  }, 0);
+
+  return job;
 }
 
 async function api(req, res, url) {
@@ -171,7 +275,7 @@ async function api(req, res, url) {
     const slug = url.searchParams.get("slug");
     const version = url.searchParams.get("version");
     const variant = url.searchParams.get("variant") || undefined;
-    if (!(["plugin", "theme", "wordpress"].includes(kind)) || !slug || !version) {
+    if (!( ["plugin", "theme", "wordpress"].includes(kind) ) || !slug || !version) {
       throw new BuilderError("invalid_request", "kind, slug and version are required.");
     }
     json(res, 200, await new PackageRegistry(libraryRoot).remove(kind, slug, version, variant));
@@ -201,21 +305,8 @@ async function api(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/profiles") {
     const body = await readJsonBody(req);
-    const configId = String(body.configId || "").trim();
-    const name = String(body.name || configId || "profile").trim();
-    const locale = String(body.locale || "").trim() || undefined;
-    const excludedPlugins = Array.isArray(body.excludedPlugins) ? body.excludedPlugins.map(String) : [];
-    const pluginVersions = body.pluginVersions && typeof body.pluginVersions === "object" ? body.pluginVersions : {};
-    const profile = await createProfileFromSnapshot(configId, {
-      libraryDir: libraryRoot,
-      name,
-      locale,
-      excludePlugins: excludedPlugins,
-      wordpressVersion: String(body.wordpressVersion || "").trim() || undefined,
-      wordpressVariant: String(body.wordpressVariant || "").trim() || undefined,
-      themeVersion: String(body.themeVersion || "").trim() || undefined,
-      pluginVersions
-    });
+    const name = String(body.name || body.configId || "profile").trim();
+    const profile = await createOrUpdateProfile(body);
     await mkdir(profilesDir, { recursive: true });
     const filename = `${safeName(name, "profile")}.json`;
     const target = path.join(profilesDir, filename);
@@ -226,23 +317,23 @@ async function api(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/build") {
     const body = await readJsonBody(req);
-    const profileFile = safeName(String(body.profileFile || ""), "");
-    if (!profileFile || !profileFile.endsWith(".json")) {
-      throw new BuilderError("invalid_request", "A valid profileFile is required.");
-    }
-    const profilePath = path.join(profilesDir, profileFile);
-    const profile = await loadProfile(profilePath, { libraryDir: libraryRoot });
-    await mkdir(buildsDir, { recursive: true });
-    const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
-    const outputName = `${safeName(profile.name, "starter")}-${timestamp}.zip`;
-    const outputZip = path.join(buildsDir, outputName);
-    const result = await buildStarter({ profile, outputZip, bootstrapFile, builderVersion: VERSION });
-    json(res, 200, {
-      file: outputName,
-      sha256: result.sha256,
-      manifest: result.manifest,
-      download: `/download/${encodeURIComponent(outputName)}`
-    });
+    json(res, 200, await performBuild(body.profileFile));
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/build-jobs") {
+    const body = await readJsonBody(req);
+    const profileFile = String(body.profileFile || "");
+    const job = startBuildJob(profileFile);
+    json(res, 202, { id: job.id, status: job.status });
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname.startsWith("/api/build-jobs/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/build-jobs/".length));
+    const job = buildJobs.get(id);
+    if (!job) throw new BuilderError("build_job_not_found", "Build job was not found or has expired.");
+    json(res, 200, job);
     return true;
   }
 

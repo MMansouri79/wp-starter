@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.10
+ * Version: 0.1.0-alpha.13
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -43,12 +43,22 @@ final class MMS_WP_Starter_Bootstrap {
             delete_option( self::COMPLETE_OPTION );
         }
 
-        $config = self::read_json( WP_CONTENT_DIR . '/starter-package/starter-config.json' );
-        $build  = self::read_json( WP_CONTENT_DIR . '/starter-package/starter-build.json' );
-
-        if ( is_wp_error( $config ) || is_wp_error( $build ) ) {
-            self::fail( is_wp_error( $config ) ? $config->get_error_message() : $build->get_error_message() );
+        $build = self::read_json( WP_CONTENT_DIR . '/starter-package/starter-build.json' );
+        if ( is_wp_error( $build ) ) {
+            self::fail( $build->get_error_message() );
             return;
+        }
+
+        $configuration_enabled = array_key_exists( 'configurationEnabled', $build )
+            ? ! empty( $build['configurationEnabled'] )
+            : file_exists( WP_CONTENT_DIR . '/starter-package/starter-config.json' );
+        $config = array();
+        if ( $configuration_enabled ) {
+            $config = self::read_json( WP_CONTENT_DIR . '/starter-package/starter-config.json' );
+            if ( is_wp_error( $config ) ) {
+                self::fail( $config->get_error_message() );
+                return;
+            }
         }
 
         if ( 2 > absint( $build['schemaVersion'] ?? 0 ) ) {
@@ -151,10 +161,22 @@ final class MMS_WP_Starter_Bootstrap {
         }
 
         if ( 'configure' === $phase ) {
-            $result = self::apply_configuration( $config, $build );
-            if ( is_wp_error( $result ) ) {
-                self::fail( $result->get_error_message() );
-                return;
+            if ( $configuration_enabled ) {
+                $result = self::apply_configuration( $config, $build );
+                if ( is_wp_error( $result ) ) {
+                    self::fail( $result->get_error_message() );
+                    return;
+                }
+            } else {
+                update_option(
+                    self::REPORT_OPTION,
+                    array(
+                        'verification' => array( 'checked' => 0, 'mismatches' => 0 ),
+                        'woocommerce_duplicates_removed' => 0,
+                        'configuration_skipped' => true,
+                    ),
+                    false
+                );
             }
 
             self::save_state( array( 'phase' => 'complete' ) );
@@ -328,10 +350,13 @@ final class MMS_WP_Starter_Bootstrap {
     }
 
     private static function install_theme( array $build ) {
-        $theme_data = (array) ( $build['theme'] ?? array() );
+        $theme_data = isset( $build['theme'] ) && is_array( $build['theme'] ) ? $build['theme'] : array();
         $slug       = isset( $theme_data['slug'] ) ? sanitize_key( $theme_data['slug'] ) : '';
+
+        // Package-only profiles may deliberately use whichever theme ships with
+        // the selected WordPress distribution.
         if ( '' === $slug ) {
-            return new WP_Error( 'starter_theme_invalid', 'Starter theme slug is missing.' );
+            return true;
         }
 
         $theme = wp_get_theme( $slug );
@@ -346,8 +371,25 @@ final class MMS_WP_Starter_Bootstrap {
                 return $result;
             }
 
-            $theme = wp_get_theme( $slug );
-            if ( ! $theme->exists() ) {
+            // Some hosts briefly expose stale theme-directory caches on the
+            // same request that wrote the files. Verify the actual style.css,
+            // clear WordPress/stat caches, and retry before surfacing an error.
+            $theme_dir = trailingslashit( get_theme_root() ) . $slug;
+            for ( $attempt = 0; $attempt < 4; $attempt++ ) {
+                clearstatcache( true, $theme_dir . '/style.css' );
+                if ( function_exists( 'wp_clean_themes_cache' ) ) {
+                    wp_clean_themes_cache( true );
+                }
+
+                $theme = wp_get_theme( $slug );
+                if ( $theme->exists() || is_file( $theme_dir . '/style.css' ) ) {
+                    break;
+                }
+
+                usleep( 150000 * ( $attempt + 1 ) );
+            }
+
+            if ( ! $theme->exists() && ! is_file( $theme_dir . '/style.css' ) ) {
                 $found = array_keys( wp_get_themes() );
                 return new WP_Error(
                     'starter_theme_install_failed',
@@ -359,6 +401,9 @@ final class MMS_WP_Starter_Bootstrap {
             }
         }
 
+        if ( function_exists( 'wp_clean_themes_cache' ) ) {
+            wp_clean_themes_cache( true );
+        }
         switch_theme( $slug );
         return true;
     }
@@ -755,6 +800,11 @@ final class MMS_WP_Starter_Bootstrap {
 
         if ( get_option( self::COMPLETE_OPTION ) ) {
             $report = get_option( self::REPORT_OPTION, array() );
+            if ( ! empty( $report['configuration_skipped'] ) ) {
+                echo '<div class="notice notice-success is-dismissible"><p><strong>WP Starter:</strong> package installation completed. Configuration snapshot was intentionally skipped.</p></div>';
+                return;
+            }
+
             $verified = isset( $report['verification']['checked'] ) ? absint( $report['verification']['checked'] ) : 0;
             $duplicates = isset( $report['woocommerce_duplicates_removed'] ) ? absint( $report['woocommerce_duplicates_removed'] ) : 0;
             printf(

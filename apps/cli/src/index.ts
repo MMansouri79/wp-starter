@@ -14,7 +14,7 @@ import {
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.12";
+const VERSION = "0.1.0-alpha.13";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;
@@ -274,7 +274,7 @@ async function handleProfile(): Promise<void> {
     console.log(`Config: ${profile.config.id}`);
     console.log(`Locale: ${profile.locale}`);
     console.log(`WordPress: ${profile.wordpress.version}${profile.wordpress.variant ? ` (${profile.wordpress.variant})` : ""}`);
-    console.log(`Theme: ${profile.theme.slug}@${profile.theme.version}`);
+    console.log(`Theme: ${profile.theme ? `${profile.theme.slug}@${profile.theme.version}` : "WordPress default"}`);
     console.log(`Plugins: ${profile.plugins.length}`);
     return;
   }
@@ -286,7 +286,7 @@ async function handleProfile(): Promise<void> {
     console.log(`Schema: ${profile.schemaVersion}`);
     console.log(`Locale: ${profile.locale}`);
     console.log(`WordPress: ${profile.wordpress.version}${profile.wordpress.variant ? ` (${profile.wordpress.variant})` : ""}`);
-    console.log(`Theme: ${profile.theme.slug}@${profile.theme.version}`);
+    console.log(`Theme: ${profile.theme ? `${profile.theme.slug}@${profile.theme.version}` : "WordPress default"}`);
     console.table(profile.plugins
       .filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale))
       .map((plugin) => ({

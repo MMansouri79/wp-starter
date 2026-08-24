@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0-alpha.13 - 2026-08-24
+
+- Added real asynchronous build jobs to the local GUI with stage-by-stage progress reporting and a visible progress bar.
+- Added profile schema v5, allowing configuration snapshots to be optional and custom themes to be optional.
+- Added package-only builds that install selected WordPress/plugin/theme packages without applying exported WordPress/plugin settings.
+- Added a GUI “No snapshot — packages only” mode that can select arbitrary plugins directly from the local library.
+- Added “Use WordPress default theme” for package-only profiles.
+- Added manifest schema v3 with explicit `configurationEnabled`, nullable theme, and nullable config metadata.
+- Bootstrap now skips configuration cleanly when a build intentionally has no snapshot.
+- Hardened theme discovery after extraction by clearing WordPress/stat caches and retrying briefly, avoiding transient first-refresh theme errors seen on Plesk.
+- Infrastructure packages such as WP Starter Bootstrap/Exporter are hidden from the normal GUI package library.
+- Added regression tests for package-only builds and GUI build-progress jobs.
+
 ## 0.1.0-alpha.10
 
 ### Verified configuration and deterministic default-page ownership

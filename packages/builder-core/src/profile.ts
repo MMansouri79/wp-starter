@@ -4,7 +4,7 @@ import { BuilderError } from "./errors.js";
 import { exists } from "./fs-utils.js";
 import { PackageRegistry, defaultLibraryDir } from "./registry.js";
 import { ConfigSnapshotRegistry } from "./snapshot.js";
-import type { BuildProfile, ProfileDocumentV3, ProfileDocumentV4 } from "./types.js";
+import type { BuildProfile, ProfileDocumentV3, ProfileDocumentV4, ProfileDocumentV5 } from "./types.js";
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.trim() === "") {
@@ -17,13 +17,17 @@ export interface LoadProfileOptions {
   libraryDir?: string;
 }
 
-async function resolveRegistryArtifacts(raw: any, libraryDir: string): Promise<{ wordpress: any; theme: any; plugins: any[] }> {
+async function resolveRegistryArtifacts(raw: any, libraryDir: string): Promise<{ wordpress: any; theme: any | null; plugins: any[] }> {
   const registry = new PackageRegistry(libraryDir);
   const wordpressVariant = typeof raw.wordpress?.variant === "string" && raw.wordpress.variant.trim()
     ? raw.wordpress.variant.trim()
     : undefined;
   const wordpress = await registry.resolve("wordpress", "wordpress", raw.wordpress.version, wordpressVariant);
-  const theme = await registry.resolve("theme", raw.theme.slug, raw.theme.version);
+
+  let theme = null;
+  if (raw.theme) {
+    theme = await registry.resolve("theme", raw.theme.slug, raw.theme.version);
+  }
 
   const plugins = [];
   for (let index = 0; index < raw.plugins.length; index++) {
@@ -119,7 +123,7 @@ async function loadSchema2(raw: any, absolute: string, options: LoadProfileOptio
     name: raw.name,
     locale: raw.locale,
     wordpress: { version: raw.wordpress.version, variant: wordpress.variant, zip: wordpress.absoluteZip },
-    theme: { slug: theme.installDir, version: raw.theme.version, zip: theme.absoluteZip },
+    theme: theme ? { slug: theme.installDir, version: raw.theme.version, zip: theme.absoluteZip } : null,
     plugins,
     configExport: resolveLocal(raw.configExport),
     languageArchives: Array.isArray(raw.languageArchives)
@@ -131,19 +135,28 @@ async function loadSchema2(raw: any, absolute: string, options: LoadProfileOptio
   };
 }
 
-async function loadSchemaRegistryProfile(raw: any, absolute: string, options: LoadProfileOptions, schemaVersion: 3 | 4): Promise<BuildProfile> {
+async function loadSchemaRegistryProfile(
+  raw: any,
+  absolute: string,
+  options: LoadProfileOptions,
+  schemaVersion: 3 | 4 | 5
+): Promise<BuildProfile> {
   requireString(raw.name, "name");
   requireString(raw.locale, "locale");
   requireString(raw.wordpress?.version, "wordpress.version");
-  if (schemaVersion === 4) requireString(raw.wordpress?.variant, "wordpress.variant");
-  requireString(raw.theme?.slug, "theme.slug");
-  requireString(raw.theme?.version, "theme.version");
-  requireString(raw.config?.id, "config.id");
+  if (schemaVersion >= 4) requireString(raw.wordpress?.variant, "wordpress.variant");
+  if (schemaVersion < 5 || raw.theme !== null) {
+    requireString(raw.theme?.slug, "theme.slug");
+    requireString(raw.theme?.version, "theme.version");
+  }
+  if (schemaVersion < 5 || raw.config !== null) {
+    requireString(raw.config?.id, "config.id");
+  }
   if (!Array.isArray(raw.plugins)) throw new BuilderError("invalid_profile", "plugins must be an array.");
 
   const libraryDir = path.resolve(options.libraryDir || defaultLibraryDir());
   const { wordpress, theme, plugins } = await resolveRegistryArtifacts(raw, libraryDir);
-  const snapshot = await new ConfigSnapshotRegistry(libraryDir).resolve(raw.config.id);
+  const snapshot = raw.config?.id ? await new ConfigSnapshotRegistry(libraryDir).resolve(raw.config.id) : null;
   const base = path.dirname(absolute);
   const resolveLocal = (input: string) => path.resolve(base, input);
 
@@ -152,9 +165,9 @@ async function loadSchemaRegistryProfile(raw: any, absolute: string, options: Lo
     name: raw.name,
     locale: raw.locale,
     wordpress: { version: raw.wordpress.version, variant: wordpress.variant, zip: wordpress.absoluteZip },
-    theme: { slug: theme.installDir, version: raw.theme.version, zip: theme.absoluteZip },
+    theme: theme ? { slug: theme.installDir, version: raw.theme.version, zip: theme.absoluteZip } : null,
     plugins,
-    configExport: snapshot.absoluteZip,
+    configExport: snapshot ? snapshot.absoluteZip : null,
     languageArchives: Array.isArray(raw.languageArchives)
       ? raw.languageArchives.map((archive: any, index: number) => ({
           locale: requireString(archive.locale, `languageArchives[${index}].locale`),
@@ -178,12 +191,13 @@ export async function loadProfile(profilePath: string, options: LoadProfileOptio
   else if (raw.schemaVersion === 2) profile = await loadSchema2(raw, absolute, options);
   else if (raw.schemaVersion === 3) profile = await loadSchemaRegistryProfile(raw, absolute, options, 3);
   else if (raw.schemaVersion === 4) profile = await loadSchemaRegistryProfile(raw, absolute, options, 4);
-  else throw new BuilderError("invalid_profile", "Only profile schemaVersion 1, 2, 3 and 4 are supported.");
+  else if (raw.schemaVersion === 5) profile = await loadSchemaRegistryProfile(raw, absolute, options, 5);
+  else throw new BuilderError("invalid_profile", "Only profile schemaVersion 1 through 5 are supported.");
 
   const requiredPaths = [
     profile.wordpress.zip,
-    profile.theme.zip,
-    profile.configExport,
+    ...(profile.theme ? [profile.theme.zip] : []),
+    ...(profile.configExport ? [profile.configExport] : []),
     ...profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale)).map((plugin) => plugin.zip),
     ...(profile.languageArchives ?? []).filter((archive) => archive.locale === profile.locale).map((archive) => archive.zip)
   ];
@@ -208,7 +222,7 @@ export interface CreateProfileFromSnapshotOptions {
 export async function createProfileFromSnapshot(
   snapshotId: string,
   options: CreateProfileFromSnapshotOptions = {}
-): Promise<ProfileDocumentV4> {
+): Promise<ProfileDocumentV5> {
   if (typeof snapshotId !== "string" || snapshotId.trim() === "") {
     throw new BuilderError("invalid_profile", "A non-empty configuration snapshot ID is required.");
   }
@@ -245,7 +259,7 @@ export async function createProfileFromSnapshot(
   }
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     name: options.name?.trim() || snapshot.id,
     locale,
     wordpress: { version: wordpressVersion, variant: wordpressVariant },
@@ -256,4 +270,56 @@ export async function createProfileFromSnapshot(
   };
 }
 
-export type { ProfileDocumentV3 };
+export interface CreateProfileFromPackagesOptions {
+  libraryDir?: string;
+  name: string;
+  locale: string;
+  wordpressVersion: string;
+  wordpressVariant: string;
+  themeSlug?: string | null;
+  themeVersion?: string | null;
+  plugins?: Record<string, string>;
+}
+
+export async function createProfileFromPackages(options: CreateProfileFromPackagesOptions): Promise<ProfileDocumentV5> {
+  const libraryDir = path.resolve(options.libraryDir || defaultLibraryDir());
+  const packages = new PackageRegistry(libraryDir);
+  const name = requireString(options.name, "name").trim();
+  const locale = requireString(options.locale, "locale").trim();
+  const wordpressVersion = requireString(options.wordpressVersion, "wordpressVersion").trim();
+  const wordpressVariant = requireString(options.wordpressVariant, "wordpressVariant").trim();
+
+  await packages.resolve("wordpress", "wordpress", wordpressVersion, wordpressVariant);
+
+  let theme: { slug: string; version: string } | null = null;
+  const themeSlug = String(options.themeSlug || "").trim();
+  const themeVersion = String(options.themeVersion || "").trim();
+  if (themeSlug || themeVersion) {
+    if (!themeSlug || !themeVersion) throw new BuilderError("invalid_profile", "Both theme slug and theme version are required when a theme is selected.");
+    await packages.resolve("theme", themeSlug, themeVersion);
+    theme = { slug: themeSlug, version: themeVersion };
+  }
+
+  const plugins = [];
+  for (const [slugRaw, versionRaw] of Object.entries(options.plugins ?? {})) {
+    const slug = String(slugRaw).trim();
+    const version = String(versionRaw).trim();
+    if (!slug || !version) continue;
+    await packages.resolve("plugin", slug, version);
+    plugins.push({ slug, version, required: true });
+  }
+  plugins.sort((a, b) => a.slug.localeCompare(b.slug));
+
+  return {
+    schemaVersion: 5,
+    name,
+    locale,
+    wordpress: { version: wordpressVersion, variant: wordpressVariant },
+    theme,
+    plugins,
+    config: null,
+    languageArchives: []
+  };
+}
+
+export type { ProfileDocumentV3, ProfileDocumentV4, ProfileDocumentV5 };

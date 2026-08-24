@@ -140,14 +140,30 @@ export interface ProfileDocumentV4 {
   languageArchives?: LanguageArchiveRef[];
 }
 
+export interface ProfileDocumentV5 {
+  schemaVersion: 5;
+  name: string;
+  locale: string;
+  wordpress: { version: string; variant: string };
+  theme: { slug: string; version: string } | null;
+  plugins: Array<{
+    slug: string;
+    version: string;
+    required?: boolean;
+    locales?: string[];
+  }>;
+  config: { id: string } | null;
+  languageArchives?: LanguageArchiveRef[];
+}
+
 export interface BuildProfile {
-  schemaVersion: 1 | 2 | 3 | 4;
+  schemaVersion: 1 | 2 | 3 | 4 | 5;
   name: string;
   locale: string;
   wordpress: ArtifactRef;
-  theme: ThemeRef;
+  theme: ThemeRef | null;
   plugins: PluginRef[];
-  configExport: string;
+  configExport: string | null;
   languageArchives?: LanguageArchiveRef[];
 }
 
@@ -157,14 +173,23 @@ export interface BuildInputHash {
 }
 
 export interface StarterBuildManifest {
-  schemaVersion: 2;
+  schemaVersion: 3;
   builderVersion: string;
   builtAt: string;
   profile: string;
   locale: string;
+  configurationEnabled: boolean;
   wordpress: ArtifactRef & { sha256: string };
-  theme: ThemeRef & { sha256: string };
+  theme: (ThemeRef & { sha256: string }) | null;
   plugins: Array<PluginRef & { sha256: string }>;
-  configExport: BuildInputHash;
+  configExport: BuildInputHash | null;
   languageArchives: Array<LanguageArchiveRef & { sha256: string }>;
+}
+
+export interface BuildProgress {
+  percent: number;
+  stage: string;
+  message: string;
+  current?: number;
+  total?: number;
 }

@@ -29,7 +29,7 @@
           <div class="stat"><span>Profiles</span><strong id="stat-profiles">0</strong></div>
           <div class="stat"><span>Builds</span><strong id="stat-builds">0</strong></div>
         </div>
-        <div class="panel"><h2>Workflow</h2><div class="steps"><span>1. Add packages</span><b>→</b><span>2. Import reference config</span><b>→</b><span>3. Create profile</span><b>→</b><span>4. Build ZIP</span></div></div>
+        <div class="panel"><h2>Workflow</h2><div class="steps"><span>1. Add packages</span><b>→</b><span>2. Import config (optional)</span><b>→</b><span>3. Create profile</span><b>→</b><span>4. Build ZIP</span></div></div>
         <div class="panel"><h2>Recent builds</h2><div id="recent-builds" class="empty">No builds yet.</div></div>
       </section>
 
@@ -52,11 +52,11 @@
         <div class="grid-two">
           <div class="panel">
             <h2>Create Build Profile</h2>
-            <label>Configuration snapshot<select id="build-config"></select></label>
+            <label>Configuration snapshot <span class="optional">optional</span><select id="build-config"></select><small class="field-help">Choose “No snapshot” to build only WordPress/theme/plugins without applying starter settings.</small></label>
             <label>Profile name<input id="build-name" value="test-build" autocomplete="off"></label>
             <label>Destination locale<input id="build-locale" value="en_US" autocomplete="off"></label>
             <label>WordPress package<select id="build-wordpress"></select></label>
-            <label>Theme version<select id="build-theme"></select></label>
+            <label>Theme package<select id="build-theme"></select></label>
             <div class="field"><span class="label">Plugins and versions</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div></div>
             <button id="create-profile" class="primary full">Create / Update Profile</button>
           </div>
@@ -64,6 +64,7 @@
             <h2>Build Offline WordPress ZIP</h2>
             <label>Profile<select id="profile-select"></select></label>
             <button id="build-button" class="primary full">Build Starter ZIP</button>
+            <div id="build-progress" class="build-progress hidden"><div class="progress-head"><strong id="build-progress-label">Preparing build…</strong><span id="build-progress-percent">0%</span></div><div class="progress-track"><div id="build-progress-bar" class="progress-bar"></div></div><small id="build-progress-detail">Waiting to start.</small></div>
             <div id="build-result" class="result hidden"></div>
           </div>
         </div>

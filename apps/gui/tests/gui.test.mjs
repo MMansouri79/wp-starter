@@ -92,9 +92,86 @@ test("GUI profile API can pin package versions and localized WordPress variants"
     }) });
     assert.equal(profileRes.status, 200);
     const profileData = await profileRes.json();
-    assert.equal(profileData.profile.schemaVersion, 4);
+    assert.equal(profileData.profile.schemaVersion, 5);
     assert.equal(profileData.profile.wordpress.variant, "en_US");
     assert.equal(profileData.profile.plugins[0].version, "4.2.1");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("GUI can create a package-only profile and expose build progress", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wp-starter-gui-package-only-"));
+  const library = path.join(root, "library");
+  const previous = process.env.WP_STARTER_HOME;
+  process.env.WP_STARTER_HOME = library;
+  const { createGuiServer } = await import(`../index.mjs?package-only-test=${Date.now()}`);
+  const server = createGuiServer();
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+    const wp = path.join(root, "wp", "wordpress");
+    await mkdir(path.join(wp, "wp-admin"), { recursive: true });
+    await mkdir(path.join(wp, "wp-includes"), { recursive: true });
+    await mkdir(path.join(wp, "wp-content", "themes", "twentytwentyfive"), { recursive: true });
+    await writeFile(path.join(wp, "wp-includes/version.php"), "<?php\n$wp_version = '7.1';\n");
+    await writeFile(path.join(wp, "wp-content", "themes", "twentytwentyfive", "style.css"), "Theme Name: Twenty Twenty-Five\n");
+    const wpZip = path.join(root, "wordpress.zip");
+    await zipDir(path.join(root, "wp"), wpZip);
+
+    const pluginDir = path.join(root, "plugin", "simple-plugin");
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(path.join(pluginDir, "simple-plugin.php"), "<?php\n/*\nPlugin Name: Simple Plugin\nVersion: 1.2.3\n*/\n");
+    const pluginZip = path.join(root, "plugin.zip");
+    await zipDir(path.join(root, "plugin"), pluginZip);
+
+    const upload = async (file) => fetch(`${baseUrl}/api/packages?filename=${encodeURIComponent(path.basename(file))}`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: await readFile(file) });
+    assert.equal((await upload(wpZip)).status, 200);
+    assert.equal((await upload(pluginZip)).status, 200);
+
+    const profileRes = await fetch(`${baseUrl}/api/profiles`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        configId: "",
+        name: "packages-only",
+        locale: "en_US",
+        wordpressVersion: "7.1",
+        wordpressVariant: "en_US",
+        themeSlug: "",
+        themeVersion: "",
+        pluginVersions: { "simple-plugin": "1.2.3" }
+      })
+    });
+    assert.equal(profileRes.status, 200);
+    const profileData = await profileRes.json();
+    assert.equal(profileData.profile.schemaVersion, 5);
+    assert.equal(profileData.profile.config, null);
+    assert.equal(profileData.profile.theme, null);
+
+    const jobRes = await fetch(`${baseUrl}/api/build-jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profileFile: profileData.file })
+    });
+    assert.equal(jobRes.status, 202);
+    const { id } = await jobRes.json();
+
+    let job;
+    for (let i = 0; i < 100; i++) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+      const statusRes = await fetch(`${baseUrl}/api/build-jobs/${id}`);
+      assert.equal(statusRes.status, 200);
+      job = await statusRes.json();
+      if (job.status === "complete" || job.status === "failed") break;
+    }
+    assert.equal(job.status, "complete", job.error?.message || job.message);
+    assert.equal(job.percent, 100);
+    assert.equal(job.result.manifest.configurationEnabled, false);
+    assert.equal(job.result.manifest.theme, null);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;

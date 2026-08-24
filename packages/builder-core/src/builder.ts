@@ -13,7 +13,7 @@ import {
   sha256File,
   writeJson
 } from "./fs-utils.js";
-import type { BuildProfile, StarterBuildManifest } from "./types.js";
+import type { BuildProfile, BuildProgress, StarterBuildManifest } from "./types.js";
 
 export interface BuildOptions {
   profile: BuildProfile;
@@ -21,6 +21,7 @@ export interface BuildOptions {
   bootstrapFile: string;
   builderVersion: string;
   keepWorkDir?: boolean;
+  onProgress?: (progress: BuildProgress) => void | Promise<void>;
 }
 
 function safeArtifactName(value: string): string {
@@ -32,6 +33,10 @@ function safeInstallDir(value: string): string {
     throw new BuilderError("invalid_install_dir", `Package install directory contains unsupported characters: ${value}`);
   }
   return value;
+}
+
+async function emit(options: BuildOptions, progress: BuildProgress): Promise<void> {
+  if (options.onProgress) await options.onProgress(progress);
 }
 
 async function createCanonicalPackageZip(options: {
@@ -66,10 +71,14 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
   const configExtract = path.join(workRoot, "config-export");
 
   try {
+    await emit(options, { percent: 2, stage: "prepare", message: "Preparing build workspace…" });
     await ensureEmptyDir(coreExtract);
+
+    await emit(options, { percent: 8, stage: "wordpress", message: "Extracting WordPress core…" });
     await extractZip(profile.wordpress.zip, coreExtract);
     const wordpressRoot = await findWordPressRoot(coreExtract);
 
+    await emit(options, { percent: 16, stage: "wordpress", message: "Staging WordPress distribution…" });
     await ensureEmptyDir(staging);
     await copyDirectoryContents(wordpressRoot, staging);
 
@@ -88,20 +97,41 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       ensureDir(bundledLanguageDir)
     ]);
 
-    const themeBundleName = `${safeArtifactName(profile.theme.slug)}-${safeArtifactName(profile.theme.version)}.zip`;
-    const themeBundleRelative = `packages/themes/${themeBundleName}`;
-    const themeBundlePath = path.join(bundledThemeDir, themeBundleName);
-    const themeBundleSha256 = await createCanonicalPackageZip({
-      sourceZip: profile.theme.zip,
-      installDir: profile.theme.slug,
-      outputZip: themeBundlePath,
-      workDir: path.join(workRoot, "canonical-theme")
-    });
+    let bundledTheme: StarterBuildManifest["theme"] = null;
+    if (profile.theme) {
+      await emit(options, { percent: 24, stage: "theme", message: `Packaging theme ${profile.theme.slug}@${profile.theme.version}…` });
+      const themeBundleName = `${safeArtifactName(profile.theme.slug)}-${safeArtifactName(profile.theme.version)}.zip`;
+      const themeBundleRelative = `packages/themes/${themeBundleName}`;
+      const themeBundlePath = path.join(bundledThemeDir, themeBundleName);
+      const themeBundleSha256 = await createCanonicalPackageZip({
+        sourceZip: profile.theme.zip,
+        installDir: profile.theme.slug,
+        outputZip: themeBundlePath,
+        workDir: path.join(workRoot, "canonical-theme")
+      });
+      bundledTheme = {
+        ...profile.theme,
+        zip: themeBundleRelative,
+        sha256: themeBundleSha256
+      };
+    } else {
+      await emit(options, { percent: 24, stage: "theme", message: "Using the WordPress default theme." });
+    }
 
     const activePlugins = profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale));
     const bundledPlugins = [];
+    const pluginStart = 30;
+    const pluginEnd = 66;
     for (let index = 0; index < activePlugins.length; index++) {
       const plugin = activePlugins[index];
+      const percent = activePlugins.length ? pluginStart + Math.floor(((index + 1) / activePlugins.length) * (pluginEnd - pluginStart)) : pluginEnd;
+      await emit(options, {
+        percent,
+        stage: "plugins",
+        message: `Packaging ${plugin.slug}@${plugin.version}…`,
+        current: index + 1,
+        total: activePlugins.length
+      });
       const bundleName = `${safeArtifactName(plugin.slug)}-${safeArtifactName(plugin.version)}.zip`;
       const bundleRelative = `packages/plugins/${bundleName}`;
       const bundlePath = path.join(bundledPluginDir, bundleName);
@@ -118,7 +148,11 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
         sha256
       });
     }
+    if (activePlugins.length === 0) {
+      await emit(options, { percent: pluginEnd, stage: "plugins", message: "No plugins selected for this build." });
+    }
 
+    await emit(options, { percent: 72, stage: "languages", message: "Packaging language archives…" });
     const bundledLanguages = await Promise.all(
       (profile.languageArchives ?? [])
         .filter((archive) => archive.locale === profile.locale)
@@ -134,49 +168,60 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
         })
     );
 
-    await ensureEmptyDir(configExtract);
-    await extractZip(profile.configExport, configExtract);
-    const configFile = await findFileRecursive(configExtract, "starter-config.json");
-    if (!configFile) {
-      throw new BuilderError("invalid_config_export", "starter-config.json was not found in the configuration export ZIP.");
+    let configExport: StarterBuildManifest["configExport"] = null;
+    if (profile.configExport) {
+      await emit(options, { percent: 78, stage: "configuration", message: "Embedding configuration snapshot…" });
+      await ensureEmptyDir(configExtract);
+      await extractZip(profile.configExport, configExtract);
+      const configFile = await findFileRecursive(configExtract, "starter-config.json");
+      if (!configFile) {
+        throw new BuilderError("invalid_config_export", "starter-config.json was not found in the configuration export ZIP.");
+      }
+      await cp(configFile, path.join(starterDataDir, "starter-config.json"), { force: true });
+      configExport = {
+        path: path.basename(profile.configExport),
+        sha256: await sha256File(profile.configExport)
+      };
+    } else {
+      await emit(options, { percent: 78, stage: "configuration", message: "No configuration snapshot selected. Settings import will be skipped." });
     }
-    await cp(configFile, path.join(starterDataDir, "starter-config.json"), { force: true });
 
+    await emit(options, { percent: 82, stage: "bootstrap", message: "Adding offline bootstrap…" });
     await cp(path.resolve(options.bootstrapFile), path.join(muPluginDir, "site-starter-bootstrap.php"), { force: true });
 
     const manifest: StarterBuildManifest = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       builderVersion: options.builderVersion,
       builtAt: new Date().toISOString(),
       profile: profile.name,
       locale: profile.locale,
+      configurationEnabled: Boolean(profile.configExport),
       wordpress: {
         ...profile.wordpress,
         zip: path.basename(profile.wordpress.zip),
         sha256: await sha256File(profile.wordpress.zip)
       },
-      theme: {
-        ...profile.theme,
-        zip: themeBundleRelative,
-        sha256: themeBundleSha256
-      },
+      theme: bundledTheme,
       plugins: bundledPlugins,
-      configExport: {
-        path: path.basename(profile.configExport),
-        sha256: await sha256File(profile.configExport)
-      },
+      configExport,
       languageArchives: bundledLanguages
     };
 
+    await emit(options, { percent: 87, stage: "manifest", message: "Writing build manifest…" });
     await writeJson(path.join(starterDataDir, "starter-build.json"), manifest);
 
     const outputZip = path.resolve(options.outputZip);
     await ensureDir(path.dirname(outputZip));
+    await emit(options, { percent: 92, stage: "archive", message: "Creating final WordPress ZIP…" });
     await createZip(staging, outputZip);
+
+    await emit(options, { percent: 98, stage: "checksum", message: "Calculating final checksum…" });
+    const sha256 = await sha256File(outputZip);
+    await emit(options, { percent: 100, stage: "complete", message: "Build complete." });
 
     return {
       outputZip,
-      sha256: await sha256File(outputZip),
+      sha256,
       manifest
     };
   } finally {

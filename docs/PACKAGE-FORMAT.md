@@ -153,3 +153,29 @@ Schema v4 makes the selected WordPress distribution explicit and keeps configura
 ```
 
 The configuration snapshot can come from a site that used older plugin versions. A profile may deliberately pin newer package versions while reusing the same portable settings snapshot; compatibility remains the developer's responsibility and is validated further in Phase 2 adapters.
+
+
+## Build profile schema v5
+
+Schema v5 makes the configuration snapshot and custom theme optional:
+
+```json
+{
+  "schemaVersion": 5,
+  "name": "packages-only",
+  "locale": "en_US",
+  "wordpress": { "version": "7.1", "variant": "en_US" },
+  "theme": null,
+  "plugins": [
+    { "slug": "elementor", "version": "4.2.1", "required": true },
+    { "slug": "woocommerce", "version": "10.9.4", "required": true }
+  ],
+  "config": null
+}
+```
+
+When `config` is `null`, Builder does not embed `starter-config.json` and Bootstrap performs only local package installation/activation. It does not apply exported WordPress, Elementor, WooCommerce, or other adapter settings. When `theme` is `null`, Bootstrap keeps the theme provided by the WordPress distribution.
+
+## Generated distribution layout (manifest schema v3)
+
+Manifest schema v3 adds `configurationEnabled` and allows `theme` and `configExport` to be `null`. This lets package-only distributions use the same Bootstrap runtime without pretending that a configuration snapshot exists.

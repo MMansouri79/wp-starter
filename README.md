@@ -18,8 +18,8 @@ The Phase 1 build pipeline currently provides:
 - automatic package inspection and version detection
 - multiple package versions side by side
 - SHA-256 integrity tracking
-- schema v2/v3 profiles referencing exact package coordinates and configuration snapshot IDs instead of ZIP paths
-- automatic schema v3 profile generation from a fully satisfied configuration snapshot
+- schema v5 profiles with exact package coordinates and optional configuration snapshots
+- automatic profile generation from a satisfied configuration snapshot or directly from package selections
 - compact local ZIP payload bundling for plugins/themes to keep hosting-panel extraction small
 - configuration snapshot registry with source requirement matching
 - offline distribution builder
@@ -128,7 +128,8 @@ The GUI currently supports:
 - importing configuration snapshot ZIPs,
 - checking missing package requirements,
 - creating profiles with locale, exact WordPress locale variant, theme version, plugin-version selection, and plugin exclusions,
-- building the complete offline WordPress ZIP,
+- building the complete offline WordPress ZIP with live progress,
+- creating package-only builds with no configuration snapshot,
 - downloading previous builds.
 
 The CLI remains supported for diagnostics, scripting, and CI.
@@ -140,3 +141,10 @@ The package library keeps multiple versions of the same plugin or theme. The GUI
 WordPress core additionally has a locale variant. `WordPress 7.1 (en_US)` and `WordPress 7.1 (fa_IR)` are separate valid packages even though the core version is identical. Localized distributions are detected from WordPress package metadata/language files and can coexist in the same library.
 
 The Build screen is a profile editor: choose the configuration snapshot, destination locale, exact WordPress package, theme version, and the version of each included plugin before saving/building the profile.
+
+
+## Alpha.13: package-only builds and progress
+
+The Build screen now allows **No snapshot — packages only**. In this mode the profile is assembled directly from the local package library and the generated starter installs the selected packages without applying reference-site settings. A custom theme is optional; choosing **Use WordPress default theme** leaves the theme shipped with the selected WordPress distribution untouched.
+
+Builds now run as local asynchronous jobs. The GUI polls the same Builder Core job and shows actual stage progress while WordPress core, theme, plugins, configuration, manifest and final ZIP are processed.

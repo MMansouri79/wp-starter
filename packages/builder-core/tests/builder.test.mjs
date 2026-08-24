@@ -100,7 +100,7 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
     assert.match(bootstrap, /WP Starter Bootstrap/);
 
     const build = JSON.parse(await readFile(path.join(unpack, "wp-content/starter-package/starter-build.json"), "utf8"));
-    assert.equal(build.schemaVersion, 2);
+    assert.equal(build.schemaVersion, 3);
     assert.equal(build.plugins[0].file, "example-plugin/example-plugin.php");
     assert.equal(build.plugins[0].zip, "packages/plugins/example-plugin-1.0.0.zip");
 
@@ -123,6 +123,77 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
     assert.equal(pluginEntries.includes("\\"), false, "plugin payload entries must use POSIX separators");
 
     await assert.rejects(() => readFile(path.join(unpack, "wp-content/plugins/example-plugin/example-plugin.php")));
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("builds a package-only profile without a configuration snapshot or custom theme", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "wp-starter-package-only-"));
+  try {
+    const { PackageRegistry, createProfileFromPackages } = await import("../dist/index.js");
+    const library = path.join(temp, "library");
+
+    const core = path.join(temp, "core/wordpress");
+    await mkdir(path.join(core, "wp-admin"), { recursive: true });
+    await mkdir(path.join(core, "wp-includes"), { recursive: true });
+    await mkdir(path.join(core, "wp-content", "themes", "twentytwentyfive"), { recursive: true });
+    await writeFile(path.join(core, "wp-includes/version.php"), "<?php\n$wp_version = '7.1';\n");
+    await writeFile(path.join(core, "wp-content", "themes", "twentytwentyfive", "style.css"), "Theme Name: Twenty Twenty-Five\n");
+    const wpZip = path.join(temp, "wordpress.zip");
+    await zipDir(path.dirname(core), wpZip);
+
+    const plugin = path.join(temp, "plugin/example-plugin");
+    await mkdir(plugin, { recursive: true });
+    await writeFile(path.join(plugin, "example-plugin.php"), "<?php\n/*\nPlugin Name: Example Plugin\nVersion: 2.0.0\n*/\n");
+    const pluginZip = path.join(temp, "plugin.zip");
+    await zipDir(path.join(temp, "plugin"), pluginZip);
+
+    const registry = new PackageRegistry(library);
+    await registry.add(wpZip);
+    await registry.add(pluginZip);
+
+    const profileDocument = await createProfileFromPackages({
+      libraryDir: library,
+      name: "packages-only",
+      locale: "en_US",
+      wordpressVersion: "7.1",
+      wordpressVariant: "en_US",
+      themeSlug: null,
+      themeVersion: null,
+      plugins: { "example-plugin": "2.0.0" }
+    });
+    assert.equal(profileDocument.schemaVersion, 5);
+    assert.equal(profileDocument.config, null);
+    assert.equal(profileDocument.theme, null);
+
+    const profilePath = path.join(temp, "profile.json");
+    await writeFile(profilePath, JSON.stringify(profileDocument, null, 2));
+    const profile = await loadProfile(profilePath, { libraryDir: library });
+    assert.equal(profile.configExport, null);
+    assert.equal(profile.theme, null);
+
+    const progress = [];
+    const output = path.join(temp, "package-only.zip");
+    const result = await buildStarter({
+      profile,
+      outputZip: output,
+      bootstrapFile: path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"),
+      builderVersion: "test",
+      onProgress: (entry) => progress.push(entry)
+    });
+
+    assert.equal(result.manifest.schemaVersion, 3);
+    assert.equal(result.manifest.configurationEnabled, false);
+    assert.equal(result.manifest.configExport, null);
+    assert.equal(result.manifest.theme, null);
+    assert.equal(progress.at(-1)?.percent, 100);
+
+    const unpack = path.join(temp, "unpacked");
+    await mkdir(unpack, { recursive: true });
+    await execFileAsync("unzip", ["-q", output, "-d", unpack]);
+    await assert.rejects(() => readFile(path.join(unpack, "wp-content/starter-package/starter-config.json")));
+    await readFile(path.join(unpack, "wp-content/starter-package/packages/plugins/example-plugin-2.0.0.zip"));
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
