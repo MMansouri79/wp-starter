@@ -1,4 +1,44 @@
-# Package format v1
+# Package and profile format
+
+## Local package library
+
+Builder schema v2 profiles do not contain filesystem paths to WordPress, theme, or plugin ZIPs.
+They reference exact package coordinates stored in the local package library.
+
+Default library location:
+
+```text
+~/.wp-starter/
+├── registry.json
+└── packages/
+    ├── wordpress/
+    ├── theme/
+    └── plugin/
+```
+
+Add arbitrary local packages with:
+
+```bash
+wp-starter package add ./wordpress-7.1.zip
+wp-starter package add ./hello-elementor.zip
+wp-starter package add ./some-plugin.zip
+```
+
+The builder inspects package headers and records:
+
+- package type
+- name
+- package slug
+- exact version
+- original install directory
+- main plugin file when applicable
+- text domain when declared
+- WordPress/PHP requirements when declared
+- plugin dependency headers when declared
+- SHA-256
+
+The original ZIP is copied into the library. Multiple versions of the same package may coexist.
+The same `type + slug + version` cannot silently change bytes; use `--replace` explicitly when that is intentional.
 
 ## Configuration export ZIP
 
@@ -13,29 +53,43 @@ export-manifest.json
 
 `export-manifest.json` describes the source site and exporter version.
 
-## Build profile
+## Build profile schema v2
 
-The CLI consumes a local JSON profile. All paths may be absolute or relative to the profile file.
+Schema v2 references exact versions from the package library:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "ecommerce-fa",
   "locale": "fa_IR",
   "wordpress": {
-    "version": "7.0.2",
-    "zip": "../private-packages/wordpress-7.0.2.zip"
+    "version": "7.1"
   },
   "theme": {
     "slug": "hello-elementor",
-    "version": "3.4.9",
-    "zip": "../private-packages/themes/hello-elementor-3.4.9.zip"
+    "version": "3.4.9"
   },
-  "plugins": [],
+  "plugins": [
+    {
+      "slug": "elementor",
+      "version": "4.0.8",
+      "required": true
+    },
+    {
+      "slug": "persian-woocommerce",
+      "version": "10.0.4",
+      "required": true,
+      "locales": ["fa_IR"]
+    }
+  ],
   "configExport": "../exports/core-config.zip",
   "languageArchives": []
 }
 ```
+
+Exact version pinning is deliberate. Updating a package means adding its new ZIP and changing the profile, not mutating builder code.
+
+Schema v1 path-based profiles remain readable during the Phase 1 transition but are deprecated.
 
 ## Generated distribution metadata
 

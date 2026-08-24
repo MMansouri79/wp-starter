@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Applies a bundled starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.1
+ * Version: 0.1.0-alpha.2
  */
 
 if ( ! defined( 'ABSPATH' ) ) {

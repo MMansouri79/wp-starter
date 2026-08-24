@@ -4,16 +4,31 @@
 
 Produce a complete WordPress distribution ZIP from local inputs only.
 
-### Inputs
+## Package-library workflow
 
-- WordPress core ZIP
-- one theme ZIP
-- zero or more plugin ZIPs
+WordPress core, themes, and plugins are first registered in a local package library. The CLI automatically inspects normal WordPress ZIP packages, stores their original bytes, records metadata and SHA-256, and permits multiple versions to coexist.
+
+Examples:
+
+```bash
+wp-starter package add C:\Packages\wordpress-7.1.zip
+wp-starter package add C:\Packages\hello-elementor.zip
+wp-starter package add C:\Packages\elementor-pro.zip
+wp-starter package list
+```
+
+The profile references `slug + version`; it does not care where the original ZIP came from or what the ZIP was named.
+
+## Inputs
+
+- exact WordPress package selected from the local library
+- one exact theme package selected from the local library
+- zero or more exact plugin packages selected from the local library
 - exported starter configuration ZIP
 - optional language archive ZIPs
 - build profile JSON
 
-### Output
+## Output
 
 A normal WordPress tree with:
 
@@ -51,5 +66,7 @@ The bootstrap starts only after WordPress is installed and an administrator load
 - reviewed WooCommerce options
 - reviewed Persian WooCommerce options
 - theme/plugin activation
+
+Arbitrary plugin binaries are supported generically. Portable settings are not: configuration adapters remain explicit and plugin-specific.
 
 FilterX object-ID remapping and Elementor layout/template transport belong to Phase 2.
