@@ -1,6 +1,13 @@
-.DS_Store
-Thumbs.db
+node_modules/
+dist/
+.tmp/
+artifacts/
+builds/
 *.log
-/packages/**/*.zip
-!/packages/.gitkeep
-/bundle-manifest.json
+.DS_Store
+
+# Never commit paid/private plugin packages or generated distributions.
+private-packages/
+*.local.json
+
+*.tsbuildinfo

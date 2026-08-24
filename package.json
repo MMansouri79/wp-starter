@@ -1,0 +1,24 @@
+{
+  "name": "wp-starter-system",
+  "private": true,
+  "version": "0.1.0-alpha.1",
+  "description": "Offline WordPress starter build system: exporter, local builder and bootstrap.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b packages/builder-core apps/cli",
+    "test": "npm run build && node --test packages/builder-core/tests/*.test.mjs",
+    "lint:php": "php scripts/lint-php.php",
+    "check": "npm run build && npm run test && npm run lint:php"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

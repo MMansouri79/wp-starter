@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "name": "ecommerce-fa",
+  "locale": "fa_IR",
+  "wordpress": {
+    "version": "7.0.2",
+    "zip": "../private-packages/wordpress-7.0.2.zip"
+  },
+  "theme": {
+    "slug": "hello-elementor",
+    "version": "3.4.9",
+    "zip": "../private-packages/themes/hello-elementor-3.4.9.zip"
+  },
+  "plugins": [
+    {
+      "slug": "classic-editor",
+      "file": "classic-editor/classic-editor.php",
+      "version": "1.7.0",
+      "zip": "../private-packages/plugins/classic-editor-1.7.0.zip",
+      "required": true
+    },
+    {
+      "slug": "elementor",
+      "file": "elementor/elementor.php",
+      "version": "4.0.8",
+      "zip": "../private-packages/plugins/elementor-4.0.8.zip",
+      "required": true
+    },
+    {
+      "slug": "elementor-pro",
+      "file": "elementor-pro/elementor-pro.php",
+      "version": "4.0.4",
+      "zip": "../private-packages/plugins/elementor-pro-4.0.4.zip",
+      "required": true
+    },
+    {
+      "slug": "woocommerce",
+      "file": "woocommerce/woocommerce.php",
+      "version": "10.9.4",
+      "zip": "../private-packages/plugins/woocommerce-10.9.4.zip",
+      "required": true
+    },
+    {
+      "slug": "persian-woocommerce",
+      "file": "persian-woocommerce/woocommerce-persian.php",
+      "version": "10.0.4",
+      "zip": "../private-packages/plugins/persian-woocommerce-10.0.4.zip",
+      "required": true,
+      "locales": ["fa_IR"]
+    },
+    {
+      "slug": "filterx",
+      "file": "filterx/filterx.php",
+      "version": "0.6.1",
+      "zip": "../private-packages/plugins/filterx-0.6.1.zip",
+      "required": true
+    }
+  ],
+  "configExport": "../exports/core-config.zip",
+  "languageArchives": [
+    {
+      "locale": "fa_IR",
+      "zip": "../private-packages/languages/fa_IR.zip"
+    }
+  ]
+}
