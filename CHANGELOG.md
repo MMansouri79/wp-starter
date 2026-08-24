@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.7
+
+### Linux-portable deployment ZIPs
+
+- Fixed Windows-built starter distributions using backslashes inside ZIP entry names.
+- Windows ZIP creation now writes every archive entry explicitly with ZIP-standard forward slashes.
+- Fixes Plesk/File Manager extraction failures reporting `appears to use backslashes as path separators`.
+- Added a regression check that generated deployment archives contain no backslash entry names.
+- Kept the alpha.6 compact payload design: WordPress core is expanded in the outer archive while plugins/themes remain bundled ZIPs for staged offline installation.
+
 ## 0.1.0-alpha.6
 
 ### Compact hosting-panel deployment bundles

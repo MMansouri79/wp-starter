@@ -89,6 +89,9 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
     assert.equal(result.manifest.profile, "test");
     assert.match(result.sha256, /^[a-f0-9]{64}$/);
 
+    const { stdout: zipEntries } = await execFileAsync("unzip", ["-Z1", output]);
+    assert.equal(zipEntries.includes("\\"), false, "deployment ZIP entries must use POSIX separators");
+
     const unpack = path.join(temp, "unpacked");
     await mkdir(unpack, { recursive: true });
     await execFileAsync("unzip", ["-q", output, "-d", unpack]);

@@ -127,3 +127,7 @@ wp-content/
 ```
 
 `starter-build.json` schema v2 stores each bundled package path and SHA-256. Bootstrap validates the checksum before extraction, installs packages from local disk only, and processes expensive package extraction in separate admin requests.
+
+## Archive portability
+
+Generated deployment ZIP entry names always use `/` separators, even when the Builder runs on Windows. This is required for reliable extraction by Linux hosting panels such as Plesk. Plugin/theme payload ZIPs remain nested and are installed later by Bootstrap.
