@@ -56,13 +56,23 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
       locale: "en_US",
       wordpress: { version: "1.0.0", zip: wpZip },
       theme: { slug: "hello-elementor", version: "1.0.0", zip: themeZip },
-      plugins: [{
-        slug: "example-plugin",
-        file: "example-plugin/example-plugin.php",
-        version: "1.0.0",
-        zip: pluginZip,
-        required: true
-      }],
+      plugins: [
+        {
+          slug: "example-plugin",
+          file: "example-plugin/example-plugin.php",
+          version: "1.0.0",
+          zip: pluginZip,
+          required: true
+        },
+        {
+          slug: "persian-only-plugin",
+          file: "persian-only-plugin/plugin.php",
+          version: "1.0.0",
+          zip: path.join(temp, "intentionally-missing.zip"),
+          required: true,
+          locales: ["fa_IR"]
+        }
+      ],
       configExport: configZip,
       languageArchives: []
     }, null, 2));

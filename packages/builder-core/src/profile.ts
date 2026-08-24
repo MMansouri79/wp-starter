@@ -69,8 +69,12 @@ export async function loadProfile(profilePath: string): Promise<BuildProfile> {
     profile.wordpress.zip,
     profile.theme.zip,
     profile.configExport,
-    ...profile.plugins.map((plugin) => plugin.zip),
-    ...(profile.languageArchives ?? []).map((archive) => archive.zip)
+    ...profile.plugins
+      .filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale))
+      .map((plugin) => plugin.zip),
+    ...(profile.languageArchives ?? [])
+      .filter((archive) => archive.locale === profile.locale)
+      .map((archive) => archive.zip)
   ];
 
   for (const input of requiredPaths) {
