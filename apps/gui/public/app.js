@@ -72,7 +72,7 @@ function render() {
   $("#stat-builds").textContent = state.builds.length;
   renderPackages();
 
-  $("#configs-list").innerHTML = state.configs.map(c => `<div class="card"><div><strong>${esc(c.name)}</strong><small>${esc(c.id)} · WP ${esc(c.wordpressVersion)} · ${esc(c.locale)} · ${esc(c.theme.slug)}@${esc(c.theme.version)} · ${c.plugins.length} plugins</small></div><button class="secondary check-config" data-id="${escAttr(c.id)}">Check packages</button></div>`).join("") || `<div class="empty">No configuration snapshots yet. You can still create package-only builds.</div>`;
+  $("#configs-list").innerHTML = state.configs.map(c => `<div class="card"><div><strong>${esc(c.name)}</strong><small>${esc(c.id)} · WP ${esc(c.wordpressVersion)} · ${esc(c.locale)} · ${esc(c.theme.slug)}@${esc(c.theme.version)} · ${c.plugins.length} plugins</small></div><div class="action-list"><button class="secondary inspect-config" data-id="${escAttr(c.id)}">Inspect</button><button class="secondary check-config" data-id="${escAttr(c.id)}">Check packages</button></div></div>`).join("") || `<div class="empty">No configuration snapshots yet. You can still create package-only builds.</div>`;
 
   const configOpts = [`<option value="">No snapshot — packages only</option>`, ...state.configs.map(c => `<option value="${escAttr(c.id)}">${esc(c.name)} (${esc(c.id)})</option>`)].join("");
   $("#build-config").innerHTML = configOpts;
@@ -88,6 +88,7 @@ function render() {
   $("#recent-builds").innerHTML = state.builds.slice(0, 5).map(b => buildCard(b, true)).join("") || `<div class="empty">No builds yet.</div>`;
   $("#build-history").innerHTML = state.builds.map(b => buildCard(b, false)).join("") || `<div class="empty">No builds yet.</div>`;
 
+  document.querySelectorAll(".inspect-config").forEach(btn => btn.onclick = () => inspectConfig(btn.dataset.id));
   document.querySelectorAll(".check-config").forEach(btn => btn.onclick = () => checkConfig(btn.dataset.id));
   document.querySelectorAll(".edit-profile").forEach(btn => btn.onclick = () => loadProfileIntoEditor(btn.dataset.file, false));
   document.querySelectorAll(".duplicate-profile").forEach(btn => btn.onclick = () => loadProfileIntoEditor(btn.dataset.file, true));
@@ -117,6 +118,96 @@ async function removePackage(btn) {
     await refresh();
   } catch (e) { flash(e.message, true); }
 }
+
+function valueText(value) {
+  if (value === null) return "null";
+  if (value === "") return '""';
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+
+function renderKeyValues(values) {
+  const entries = Object.entries(values || {});
+  if (!entries.length) return `<div class="empty compact-empty">No values.</div>`;
+  return `<div class="inspector-kv">${entries.map(([key, value]) => `<div class="kv-row"><code>${esc(key)}</code><span>${esc(valueText(value))}</span></div>`).join("")}</div>`;
+}
+
+function adapterStatusLabel(status) {
+  if (status === "portable") return ["Portable", "portable"];
+  if (status === "deferred") return ["Deferred", "deferred"];
+  return ["Metadata", "metadata"];
+}
+
+function safetyLabel(key) {
+  const labels = {
+    users_exported: "Users",
+    uploads_exported: "Uploads / media",
+    arbitrary_options_exported: "Arbitrary wp_options",
+    credentials_exported: "Credentials / secrets",
+    raw_database_exported: "Raw database",
+    site_specific_ids_intentionally_excluded: "Site-specific IDs"
+  };
+  return labels[key] || key.replaceAll("_", " ");
+}
+
+function safetyState(key, value) {
+  if (key === "site_specific_ids_intentionally_excluded") return value ? ["Excluded", true] : ["Not excluded", false];
+  return value ? ["Included", false] : ["Excluded", true];
+}
+
+async function inspectConfig(id) {
+  const dialog = $("#config-inspector");
+  $("#inspector-title").textContent = "Loading snapshot…";
+  $("#inspector-meta").textContent = id;
+  $("#inspector-body").innerHTML = `<div class="empty">Reading exported configuration…</div>`;
+  if (!dialog.open) dialog.showModal();
+  try {
+    const data = await request(`/api/configs/${encodeURIComponent(id)}/inspect`);
+    const i = data.inspection;
+    const requirements = data.requirements?.requirements || [];
+    $("#inspector-title").textContent = i.name;
+    $("#inspector-meta").textContent = `${i.snapshotId} · Exporter ${i.exporterVersion} · ${new Date(i.generatedAt).toLocaleString()}`;
+
+    const reqRows = requirements.map(r => `<tr><td><span class="status-chip ${r.status === "available" ? "ok" : "missing"}">${r.status === "available" ? "Available" : "Missing"}</span></td><td>${esc(r.kind)}</td><td><code>${esc(r.slug)}</code></td><td>${esc(r.version)}${r.variant ? ` · ${esc(r.variant)}` : ""}</td></tr>`).join("");
+    const pageRows = i.wordpress.pages.map(p => `<span class="entity-pill"><strong>${esc(p.title)}</strong><code>${esc(p.slug)}</code></span>`).join("") || `<span class="muted">No starter pages.</span>`;
+    const pluginRows = i.source.plugins.map(p => `<span class="entity-pill"><strong>${esc(p.name)}</strong><code>${esc(p.slug)}@${esc(p.version)}</code></span>`).join("") || `<span class="muted">No active target plugins.</span>`;
+
+    const adapterCards = i.adapters.map(adapter => {
+      const [statusLabel, statusClass] = adapterStatusLabel(adapter.status);
+      const sections = adapter.sections.map(section => `<details class="inspect-details"><summary>${esc(section.label)} <span>${section.count}</span></summary>${renderKeyValues(section.values)}</details>`).join("");
+      const details = Object.keys(adapter.details || {}).length ? `<details class="inspect-details"><summary>Other metadata <span>${Object.keys(adapter.details).length}</span></summary>${renderKeyValues(adapter.details)}</details>` : "";
+      return `<div class="adapter-card"><div class="adapter-head"><div><strong>${esc(adapter.label)}</strong><code>${esc(adapter.key)}</code></div><span class="adapter-status ${statusClass}">${statusLabel}</span></div>${adapter.reason ? `<p class="adapter-reason">${esc(adapter.reason)}</p>` : ""}${sections || details ? sections + details : `<div class="empty compact-empty">No portable values in this adapter.</div>`}</div>`;
+    }).join("") || `<div class="empty">No adapters in this snapshot.</div>`;
+
+    const safety = Object.entries(i.safety || {}).map(([key, value]) => {
+      const [label, safe] = safetyState(key, value);
+      return `<div class="safety-row"><span>${esc(safetyLabel(key))}</span><strong class="${safe ? "safe" : "warning"}">${esc(label)}</strong></div>`;
+    }).join("") || `<div class="empty">No safety manifest was exported.</div>`;
+
+    $("#inspector-body").innerHTML = `
+      <div class="inspect-stats">
+        <div><span>WordPress options</span><strong>${i.totals.wordpressOptions}</strong></div>
+        <div><span>Adapter options</span><strong>${i.totals.adapterOptions}</strong></div>
+        <div><span>Adapter settings</span><strong>${i.totals.adapterSettings}</strong></div>
+        <div><span>Starter pages</span><strong>${i.totals.pages}</strong></div>
+        <div><span>Portable adapters</span><strong>${i.totals.portableAdapters}</strong></div>
+        <div><span>Deferred adapters</span><strong>${i.totals.deferredAdapters}</strong></div>
+      </div>
+
+      <section class="inspect-section"><h3>Source environment</h3><div class="source-grid"><div><span>WordPress</span><strong>${esc(i.source.wordpressVersion)}</strong></div><div><span>PHP</span><strong>${esc(i.source.phpVersion)}</strong></div><div><span>Locale</span><strong>${esc(i.source.locale)}</strong></div><div><span>Theme</span><strong>${esc(i.source.theme.name)} ${esc(i.source.theme.version)}</strong></div></div><div class="entity-list">${pluginRows}</div></section>
+
+      <section class="inspect-section"><div class="section-title"><h3>Package requirements</h3><span>${data.requirements.available} available · ${data.requirements.missing} missing</span></div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Type</th><th>Package</th><th>Version</th></tr></thead><tbody>${reqRows}</tbody></table></div></section>
+
+      <section class="inspect-section"><div class="section-title"><h3>WordPress</h3><span>${i.wordpress.optionCount} options</span></div><div class="inspect-note"><span>Permalink</span><code>${esc(i.wordpress.permalinkStructure || "default")}</code><span>Default-content cleanup</span><strong>${i.wordpress.cleanupDefaultContent ? "Enabled" : "Disabled"}</strong></div><div class="entity-list">${pageRows}</div><details class="inspect-details"><summary>Portable WordPress options <span>${i.wordpress.optionCount}</span></summary>${renderKeyValues(i.wordpress.options)}</details></section>
+
+      <section class="inspect-section"><div class="section-title"><h3>Plugin adapters</h3><span>Portable data only</span></div><div class="adapter-grid">${adapterCards}</div></section>
+
+      <section class="inspect-section"><div class="section-title"><h3>Safety boundary</h3><span>What the exporter deliberately did not clone</span></div><div class="safety-grid">${safety}</div></section>`;
+  } catch (e) {
+    $("#inspector-body").innerHTML = `<div class="flash error">${esc(e.message)}</div>`;
+  }
+}
+
 async function checkConfig(id) {
   try {
     const r = await request(`/api/configs/${encodeURIComponent(id)}/check`);
@@ -364,4 +455,6 @@ $("#create-profile").onclick = createProfile;
 $("#cancel-profile-edit").onclick = resetProfileEditor;
 $("#new-profile").onclick = () => { resetProfileEditor(); goView("build"); };
 $("#build-button").onclick = build;
+$("#close-inspector").onclick = () => $("#config-inspector").close();
+$("#config-inspector").addEventListener("click", e => { if (e.target === $("#config-inspector")) $("#config-inspector").close(); });
 refresh().catch(e => flash(e.message, true));

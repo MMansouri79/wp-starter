@@ -47,6 +47,14 @@ test("imports a configuration snapshot, ignores exporter infrastructure, and rep
     assert.equal(imported.record.plugins.length, 2);
     assert.equal(imported.record.plugins.some((p) => p.slug === "wp-starter-exporter"), false);
 
+    const inspection = await snapshots.inspect(imported.record.id);
+    assert.equal(inspection.source.wordpressVersion, "7.1");
+    assert.equal(inspection.source.locale, "fa_IR");
+    assert.equal(inspection.totals.activePlugins, 2);
+    assert.equal(inspection.totals.wordpressOptions, 0);
+    assert.equal(inspection.wordpress.pages.length, 0);
+    assert.equal(inspection.adapters.length, 0);
+
     const wp = path.join(temp, "wp/wordpress");
     await mkdir(path.join(wp, "wp-admin"), { recursive: true });
     await mkdir(path.join(wp, "wp-includes"), { recursive: true });

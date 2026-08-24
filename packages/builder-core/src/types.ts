@@ -86,6 +86,57 @@ export interface SnapshotRequirementReport {
   missing: number;
 }
 
+export type SnapshotAdapterStatus = "portable" | "deferred" | "metadata";
+
+export interface SnapshotAdapterSection {
+  key: string;
+  label: string;
+  count: number;
+  values: Record<string, unknown>;
+}
+
+export interface SnapshotAdapterInspection {
+  key: string;
+  label: string;
+  status: SnapshotAdapterStatus;
+  reason?: string;
+  sections: SnapshotAdapterSection[];
+  details: Record<string, unknown>;
+}
+
+export interface ConfigSnapshotInspection {
+  snapshotId: string;
+  name: string;
+  schemaVersion: number;
+  exporterVersion: string;
+  generatedAt: string;
+  source: {
+    wordpressVersion: string;
+    phpVersion: string;
+    locale: string;
+    theme: { slug: string; name: string; version: string };
+    plugins: SnapshotPluginRequirement[];
+  };
+  wordpress: {
+    options: Record<string, unknown>;
+    optionCount: number;
+    permalinkStructure: string;
+    cleanupDefaultContent: boolean;
+    pages: Array<{ title: string; slug: string }>;
+  };
+  adapters: SnapshotAdapterInspection[];
+  safety: Record<string, boolean>;
+  totals: {
+    wordpressOptions: number;
+    adapterOptions: number;
+    adapterSettings: number;
+    pages: number;
+    activePlugins: number;
+    portableAdapters: number;
+    deferredAdapters: number;
+  };
+}
+
 export interface ArtifactRef {
   version: string;
   zip: string;

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.15 - 2026-08-24
+
+### Phase 2: Configuration Inspector
+
+- Started Phase 2 with a read-only Configuration Inspector in the local GUI.
+- Added a Builder Core snapshot inspection API that reads the safe exported `starter-config.json` without mutating the snapshot.
+- Inspector summarizes source WordPress/PHP/locale/theme/plugins, package availability, WordPress options/pages/permalink behavior, adapter payloads, and exporter safety boundaries.
+- Adapter inspection is generic and future-facing: option/settings sections are discovered from the exported adapter payload instead of hardcoding only Elementor/WooCommerce.
+- Deferred adapters such as FilterX are surfaced explicitly with their portability reason rather than being silently ignored.
+- Added snapshot-inspection API regression coverage and verified the inspector against the real reference export.
+
 ## 0.1.0-alpha.14 - 2026-08-24
 
 - Marked Phase 1 core build/deployment validation complete after clean snapshot and package-only Plesk installs both passed.

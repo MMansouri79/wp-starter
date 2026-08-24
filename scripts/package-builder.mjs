@@ -36,6 +36,7 @@ await copy("scripts/wp-starter-gui.cmd", "scripts/wp-starter-gui.cmd");
 await copy("scripts/wp-starter-gui.ps1", "scripts/wp-starter-gui.ps1");
 await copy("README.md", "README.md");
 await copy("docs/PHASE-1.md", "PHASE-1.md");
+await copy("docs/PHASE-2.md", "PHASE-2.md");
 await copy("docs/PACKAGE-FORMAT.md", "PACKAGE-FORMAT.md");
 
 await writeFile(path.join(stage, "VERSION.txt"), `${version}\n`, "utf8");

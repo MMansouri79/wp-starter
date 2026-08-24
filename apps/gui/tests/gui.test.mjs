@@ -32,6 +32,7 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(html, /Package Library/);
     assert.match(html, /Saved Profiles/);
     assert.match(html, /Build History/);
+    assert.match(html, /Configuration Inspector/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME;
@@ -88,6 +89,12 @@ test("GUI profile API can pin package versions and localized WordPress variants"
     const configZip = path.join(root, "config.zip"); await zipDir(configDir, configZip);
     const configRes = await fetch(`${baseUrl}/api/configs?filename=config.zip`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: await readFile(configZip) });
     assert.equal(configRes.status, 200);
+    const inspectRes = await fetch(`${baseUrl}/api/configs/snapshot-20260824050124/inspect`);
+    assert.equal(inspectRes.status, 200);
+    const inspectData = await inspectRes.json();
+    assert.equal(inspectData.inspection.source.wordpressVersion, "7.1");
+    assert.equal(inspectData.inspection.source.locale, "fa_IR");
+    assert.equal(inspectData.inspection.source.plugins.length, 1);
 
     const profileRes = await fetch(`${baseUrl}/api/profiles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       configId: "snapshot-20260824050124", name: "english-new-elementor", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", themeVersion: "3.4.9", pluginVersions: { elementor: "4.2.1" }

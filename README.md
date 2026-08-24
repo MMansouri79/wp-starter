@@ -30,6 +30,21 @@ The Phase 1 build pipeline provides:
 - WordPress exporter with explicit setting whitelists
 - synthetic end-to-end package-library and builder tests
 
+## Phase 2 status
+
+**Phase 2 started in v0.1.0-alpha.15.** The first milestone is the Configuration Inspector: a read-only view of what a reference snapshot actually contains, what is portable today, what is deferred, and what the exporter deliberately excluded.
+
+In the GUI, open **Configurations → Inspect** to review:
+
+- source WordPress/PHP/locale/theme/plugins,
+- exact package requirement availability,
+- WordPress portable options and starter pages,
+- adapter payloads such as Elementor Site Kit and WooCommerce options,
+- deferred adapters such as FilterX with the reason they are not yet portable,
+- safety boundaries for users, uploads, credentials, arbitrary options, raw database data, and site-specific IDs.
+
+Phase 2 will build comparison, adapter contracts/remapping, and portable object-backed structures on top of this inspection model.
+
 ## Quick start
 
 Install the exporter on the reference site and download `starter-config.zip`.
