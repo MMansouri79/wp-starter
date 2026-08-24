@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: WP Starter Bootstrap
- * Description: Applies a bundled starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.5
+ * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
+ * Version: 0.1.0-alpha.6
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -36,68 +36,268 @@ final class MMS_WP_Starter_Bootstrap {
             return;
         }
 
-        $state = get_option( self::STATE_OPTION, 'activate' );
+        if ( 2 > absint( $build['schemaVersion'] ?? 0 ) ) {
+            self::fail( 'This starter build uses an obsolete package layout. Rebuild it with WP Starter Builder alpha.6 or newer.' );
+            return;
+        }
 
-        if ( 'activate' === $state ) {
-            $result = self::activate_components( $build );
+        $state = self::get_state();
+        $phase = isset( $state['phase'] ) ? (string) $state['phase'] : 'theme';
+
+        if ( 'theme' === $phase ) {
+            $result = self::install_theme( $build );
             if ( is_wp_error( $result ) ) {
                 self::fail( $result->get_error_message() );
                 return;
             }
 
-            update_option( self::STATE_OPTION, 'configure', false );
-            delete_option( self::ERROR_OPTION );
-            wp_safe_redirect( admin_url() );
-            exit;
+            self::save_state( array( 'phase' => 'install_plugins', 'plugin_index' => 0 ) );
+            self::continue_setup();
         }
 
-        if ( 'configure' === $state ) {
+        if ( 'install_plugins' === $phase ) {
+            $plugins = array_values( (array) ( $build['plugins'] ?? array() ) );
+            $index   = absint( $state['plugin_index'] ?? 0 );
+
+            if ( $index < count( $plugins ) ) {
+                $result = self::install_plugin( $plugins[ $index ] );
+                if ( is_wp_error( $result ) ) {
+                    self::fail( $result->get_error_message() );
+                    return;
+                }
+
+                self::save_state( array( 'phase' => 'install_plugins', 'plugin_index' => $index + 1 ) );
+                self::continue_setup();
+            }
+
+            self::save_state(
+                array(
+                    'phase'               => 'activate_plugins',
+                    'activation_queue'    => array_keys( $plugins ),
+                    'activation_failures' => 0,
+                )
+            );
+            self::continue_setup();
+        }
+
+        if ( 'activate_plugins' === $phase ) {
+            $plugins = array_values( (array) ( $build['plugins'] ?? array() ) );
+            $queue   = array_values( (array) ( $state['activation_queue'] ?? array_keys( $plugins ) ) );
+            $failed  = absint( $state['activation_failures'] ?? 0 );
+
+            if ( empty( $queue ) ) {
+                self::save_state( array( 'phase' => 'languages', 'language_index' => 0 ) );
+                self::continue_setup();
+            }
+
+            $plugin_index = absint( array_shift( $queue ) );
+            $plugin       = $plugins[ $plugin_index ] ?? array();
+            $result       = self::activate_plugin_component( $plugin );
+
+            if ( is_wp_error( $result ) ) {
+                $queue[] = $plugin_index;
+                $failed++;
+
+                if ( $failed >= count( $queue ) ) {
+                    self::fail( 'Could not activate the remaining starter plugins. Last error: ' . $result->get_error_message() );
+                    return;
+                }
+            } else {
+                $failed = 0;
+            }
+
+            self::save_state(
+                array(
+                    'phase'               => 'activate_plugins',
+                    'activation_queue'    => $queue,
+                    'activation_failures' => $failed,
+                )
+            );
+            self::continue_setup();
+        }
+
+        if ( 'languages' === $phase ) {
+            $archives = array_values( (array) ( $build['languageArchives'] ?? array() ) );
+            $index    = absint( $state['language_index'] ?? 0 );
+
+            if ( $index < count( $archives ) ) {
+                $result = self::install_language_archive( $archives[ $index ] );
+                if ( is_wp_error( $result ) ) {
+                    self::fail( $result->get_error_message() );
+                    return;
+                }
+
+                self::save_state( array( 'phase' => 'languages', 'language_index' => $index + 1 ) );
+                self::continue_setup();
+            }
+
+            self::save_state( array( 'phase' => 'configure' ) );
+            self::continue_setup();
+        }
+
+        if ( 'configure' === $phase ) {
             $result = self::apply_configuration( $config, $build );
             if ( is_wp_error( $result ) ) {
                 self::fail( $result->get_error_message() );
                 return;
             }
 
-            update_option( self::STATE_OPTION, 'complete', false );
+            self::save_state( array( 'phase' => 'complete' ) );
             update_option( self::COMPLETE_OPTION, gmdate( 'c' ), false );
             delete_option( self::ERROR_OPTION );
         }
     }
 
-    private static function activate_components( array $build ) {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    private static function get_state() {
+        $state = get_option( self::STATE_OPTION, array( 'phase' => 'theme' ) );
+        if ( ! is_array( $state ) ) {
+            return array( 'phase' => 'theme' );
+        }
+        return $state;
+    }
 
-        if ( ! empty( $build['theme']['slug'] ) ) {
-            $theme = wp_get_theme( $build['theme']['slug'] );
-            if ( ! $theme->exists() ) {
-                return new WP_Error( 'starter_theme_missing', 'Starter theme is missing: ' . $build['theme']['slug'] );
-            }
-            switch_theme( $build['theme']['slug'] );
+    private static function save_state( array $state ) {
+        update_option( self::STATE_OPTION, $state, false );
+        delete_option( self::ERROR_OPTION );
+    }
+
+    private static function continue_setup() {
+        wp_safe_redirect( admin_url() );
+        exit;
+    }
+
+    private static function prepare_filesystem() {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        if ( ! WP_Filesystem() ) {
+            return new WP_Error( 'starter_filesystem_unavailable', 'WordPress could not initialize direct filesystem access for the offline starter packages.' );
+        }
+        return true;
+    }
+
+    private static function bundled_package_path( array $artifact ) {
+        $relative = isset( $artifact['zip'] ) ? ltrim( str_replace( '\\', '/', (string) $artifact['zip'] ), '/' ) : '';
+        if ( '' === $relative ) {
+            return new WP_Error( 'starter_package_path_missing', 'A bundled starter package path is missing from the build manifest.' );
         }
 
-        foreach ( (array) ( $build['plugins'] ?? array() ) as $plugin ) {
-            $file = isset( $plugin['file'] ) ? (string) $plugin['file'] : '';
-            if ( '' === $file ) {
-                continue;
+        $root = realpath( WP_CONTENT_DIR . '/starter-package' );
+        $path = realpath( WP_CONTENT_DIR . '/starter-package/' . $relative );
+
+        if ( false === $root || false === $path || 0 !== strpos( $path, $root . DIRECTORY_SEPARATOR ) ) {
+            return new WP_Error( 'starter_package_path_invalid', 'Bundled starter package path is invalid: ' . $relative );
+        }
+
+        if ( ! is_file( $path ) ) {
+            return new WP_Error( 'starter_package_missing', 'Bundled starter package is missing: ' . $relative );
+        }
+
+        $expected = isset( $artifact['sha256'] ) ? strtolower( (string) $artifact['sha256'] ) : '';
+        if ( '' !== $expected && hash_file( 'sha256', $path ) !== $expected ) {
+            return new WP_Error( 'starter_package_checksum_failed', 'Bundled starter package checksum failed: ' . $relative );
+        }
+
+        return $path;
+    }
+
+    private static function install_theme( array $build ) {
+        $theme_data = (array) ( $build['theme'] ?? array() );
+        $slug       = isset( $theme_data['slug'] ) ? sanitize_key( $theme_data['slug'] ) : '';
+        if ( '' === $slug ) {
+            return new WP_Error( 'starter_theme_invalid', 'Starter theme slug is missing.' );
+        }
+
+        $theme = wp_get_theme( $slug );
+        if ( ! $theme->exists() ) {
+            $package = self::bundled_package_path( $theme_data );
+            if ( is_wp_error( $package ) ) {
+                return $package;
             }
 
-            $absolute = WP_PLUGIN_DIR . '/' . $file;
-            if ( ! file_exists( $absolute ) ) {
-                if ( ! empty( $plugin['required'] ) ) {
-                    return new WP_Error( 'starter_plugin_missing', 'Required starter plugin is missing: ' . $file );
-                }
-                continue;
+            $filesystem = self::prepare_filesystem();
+            if ( is_wp_error( $filesystem ) ) {
+                return $filesystem;
             }
 
-            if ( ! is_plugin_active( $file ) ) {
-                $activated = activate_plugin( $file, '', false, true );
-                if ( is_wp_error( $activated ) ) {
-                    return $activated;
-                }
+            $result = unzip_file( $package, get_theme_root() );
+            if ( is_wp_error( $result ) ) {
+                return $result;
             }
+
+            $theme = wp_get_theme( $slug );
+            if ( ! $theme->exists() ) {
+                return new WP_Error( 'starter_theme_install_failed', 'Theme archive extracted, but the expected theme was not found: ' . $slug );
+            }
+        }
+
+        switch_theme( $slug );
+        return true;
+    }
+
+    private static function install_plugin( array $plugin ) {
+        $file = isset( $plugin['file'] ) ? (string) $plugin['file'] : '';
+        if ( '' === $file ) {
+            return ! empty( $plugin['required'] ) ? new WP_Error( 'starter_plugin_invalid', 'A required starter plugin has no main plugin file.' ) : true;
+        }
+
+        if ( file_exists( WP_PLUGIN_DIR . '/' . $file ) ) {
+            return true;
+        }
+
+        $package = self::bundled_package_path( $plugin );
+        if ( is_wp_error( $package ) ) {
+            return ! empty( $plugin['required'] ) ? $package : true;
+        }
+
+        $filesystem = self::prepare_filesystem();
+        if ( is_wp_error( $filesystem ) ) {
+            return $filesystem;
+        }
+
+        $result = unzip_file( $package, WP_PLUGIN_DIR );
+        if ( is_wp_error( $result ) ) {
+            return $result;
+        }
+
+        if ( ! file_exists( WP_PLUGIN_DIR . '/' . $file ) ) {
+            return new WP_Error( 'starter_plugin_install_failed', 'Plugin archive extracted, but the expected main file was not found: ' . $file );
         }
 
         return true;
+    }
+
+    private static function activate_plugin_component( array $plugin ) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+        $file = isset( $plugin['file'] ) ? (string) $plugin['file'] : '';
+        if ( '' === $file ) {
+            return ! empty( $plugin['required'] ) ? new WP_Error( 'starter_plugin_invalid', 'A required starter plugin has no main plugin file.' ) : true;
+        }
+
+        if ( ! file_exists( WP_PLUGIN_DIR . '/' . $file ) ) {
+            return ! empty( $plugin['required'] ) ? new WP_Error( 'starter_plugin_missing', 'Required starter plugin is missing: ' . $file ) : true;
+        }
+
+        if ( is_plugin_active( $file ) ) {
+            return true;
+        }
+
+        $activated = activate_plugin( $file, '', false, true );
+        return is_wp_error( $activated ) ? $activated : true;
+    }
+
+    private static function install_language_archive( array $archive ) {
+        $package = self::bundled_package_path( $archive );
+        if ( is_wp_error( $package ) ) {
+            return $package;
+        }
+
+        $filesystem = self::prepare_filesystem();
+        if ( is_wp_error( $filesystem ) ) {
+            return $filesystem;
+        }
+
+        $result = unzip_file( $package, WP_CONTENT_DIR );
+        return is_wp_error( $result ) ? $result : true;
     }
 
     private static function apply_configuration( array $config, array $build ) {
@@ -231,7 +431,12 @@ final class MMS_WP_Starter_Bootstrap {
             return;
         }
 
-        echo '<div class="notice notice-info"><p><strong>WP Starter:</strong> starter provisioning is in progress.</p></div>';
+        $state = self::get_state();
+        $phase = isset( $state['phase'] ) ? sanitize_text_field( $state['phase'] ) : 'starting';
+        printf(
+            '<div class="notice notice-info"><p><strong>WP Starter:</strong> offline provisioning is in progress (%s).</p></div>',
+            esc_html( str_replace( '_', ' ', $phase ) )
+        );
     }
 }
 

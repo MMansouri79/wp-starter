@@ -39,14 +39,17 @@ Generation is strict: it refuses to produce a build-ready profile while any exac
 
 ## Output
 
-A normal WordPress tree with:
+A compact WordPress tree with:
 
-- plugins already present under `wp-content/plugins`
-- theme already present under `wp-content/themes`
-- translations already present under `wp-content/languages` when provided
+- normal WordPress core files expanded at the document root
+- plugin ZIP payloads under `wp-content/starter-package/packages/plugins/`
+- theme ZIP payload under `wp-content/starter-package/packages/themes/`
+- optional language ZIP payloads under `wp-content/starter-package/packages/languages/`
 - `wp-content/starter-package/starter-config.json`
 - `wp-content/starter-package/starter-build.json`
 - `wp-content/mu-plugins/site-starter-bootstrap.php`
+
+Plugins/themes are intentionally **not** expanded into the outer deployment ZIP. This keeps the entry count close to a normal WordPress archive so hosting-panel extractors do not have to inflate tens of thousands of plugin files in one operation. Bootstrap verifies SHA-256 and installs each local payload after the normal WordPress install.
 
 The database is deliberately not bundled.
 

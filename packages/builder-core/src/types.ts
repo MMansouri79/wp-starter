@@ -137,7 +137,7 @@ export interface BuildInputHash {
 }
 
 export interface StarterBuildManifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
   builderVersion: string;
   builtAt: string;
   profile: string;

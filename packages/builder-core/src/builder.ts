@@ -1,11 +1,10 @@
-import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createZip, extractZip } from "./archive.js";
 import { BuilderError } from "./errors.js";
 import {
   copyDirectoryContents,
-  detectPackageRoot,
   ensureDir,
   ensureEmptyDir,
   findFileRecursive,
@@ -23,28 +22,8 @@ export interface BuildOptions {
   keepWorkDir?: boolean;
 }
 
-async function installPackage(zipPath: string, destinationRoot: string, slug: string, workRoot: string): Promise<void> {
-  const extractDir = path.join(workRoot, `package-${slug}`);
-  await ensureEmptyDir(extractDir);
-  await extractZip(zipPath, extractDir);
-  const packageRoot = await detectPackageRoot(extractDir, slug);
-  const destination = path.join(destinationRoot, slug);
-  await rm(destination, { recursive: true, force: true });
-  await cp(packageRoot, destination, { recursive: true, force: true });
-}
-
-async function installLanguageArchive(zipPath: string, destination: string, workRoot: string, index: number): Promise<void> {
-  const extractDir = path.join(workRoot, `language-${index}`);
-  await ensureEmptyDir(extractDir);
-  await extractZip(zipPath, extractDir);
-
-  const languageDir = path.join(extractDir, "languages");
-  try {
-    await copyDirectoryContents(languageDir, destination);
-    return;
-  } catch {
-    await copyDirectoryContents(extractDir, destination);
-  }
+function safeArtifactName(value: string): string {
+  return value.replace(/[^A-Za-z0-9._-]+/g, "_");
 }
 
 export async function buildStarter(options: BuildOptions): Promise<{ outputZip: string; sha256: string; manifest: StarterBuildManifest }> {
@@ -63,34 +42,50 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
     await copyDirectoryContents(wordpressRoot, staging);
 
     const contentDir = path.join(staging, "wp-content");
-    const pluginDir = path.join(contentDir, "plugins");
-    const themeDir = path.join(contentDir, "themes");
-    const languageDir = path.join(contentDir, "languages");
     const muPluginDir = path.join(contentDir, "mu-plugins");
     const starterDataDir = path.join(contentDir, "starter-package");
+    const bundledPluginDir = path.join(starterDataDir, "packages", "plugins");
+    const bundledThemeDir = path.join(starterDataDir, "packages", "themes");
+    const bundledLanguageDir = path.join(starterDataDir, "packages", "languages");
 
     await Promise.all([
-      ensureDir(pluginDir),
-      ensureDir(themeDir),
-      ensureDir(languageDir),
       ensureDir(muPluginDir),
-      ensureDir(starterDataDir)
+      ensureDir(starterDataDir),
+      ensureDir(bundledPluginDir),
+      ensureDir(bundledThemeDir),
+      ensureDir(bundledLanguageDir)
     ]);
 
-    await installPackage(profile.theme.zip, themeDir, profile.theme.slug, workRoot);
+    const themeBundleName = `${safeArtifactName(profile.theme.slug)}-${safeArtifactName(profile.theme.version)}.zip`;
+    const themeBundleRelative = `packages/themes/${themeBundleName}`;
+    await cp(profile.theme.zip, path.join(bundledThemeDir, themeBundleName), { force: true });
 
-    for (const plugin of profile.plugins) {
-      if (plugin.locales && !plugin.locales.includes(profile.locale)) {
-        continue;
-      }
-      await installPackage(plugin.zip, pluginDir, plugin.slug, workRoot);
-    }
+    const activePlugins = profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale));
+    const bundledPlugins = await Promise.all(activePlugins.map(async (plugin) => {
+      const bundleName = `${safeArtifactName(plugin.slug)}-${safeArtifactName(plugin.version)}.zip`;
+      const bundleRelative = `packages/plugins/${bundleName}`;
+      await cp(plugin.zip, path.join(bundledPluginDir, bundleName), { force: true });
+      return {
+        ...plugin,
+        zip: bundleRelative,
+        sha256: await sha256File(plugin.zip)
+      };
+    }));
 
-    let languageIndex = 0;
-    for (const archive of profile.languageArchives ?? []) {
-      if (archive.locale !== profile.locale) continue;
-      await installLanguageArchive(archive.zip, languageDir, workRoot, languageIndex++);
-    }
+    const bundledLanguages = await Promise.all(
+      (profile.languageArchives ?? [])
+        .filter((archive) => archive.locale === profile.locale)
+        .map(async (archive, index) => {
+          const bundleName = `${safeArtifactName(archive.locale)}-${index + 1}.zip`;
+          const bundleRelative = `packages/languages/${bundleName}`;
+          await cp(archive.zip, path.join(bundledLanguageDir, bundleName), { force: true });
+          return {
+            ...archive,
+            zip: bundleRelative,
+            sha256: await sha256File(archive.zip)
+          };
+        })
+    );
 
     await ensureEmptyDir(configExtract);
     await extractZip(profile.configExport, configExtract);
@@ -102,9 +97,8 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
 
     await cp(path.resolve(options.bootstrapFile), path.join(muPluginDir, "site-starter-bootstrap.php"), { force: true });
 
-    const activePlugins = profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale));
     const manifest: StarterBuildManifest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       builderVersion: options.builderVersion,
       builtAt: new Date().toISOString(),
       profile: profile.name,
@@ -116,27 +110,15 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       },
       theme: {
         ...profile.theme,
-        zip: path.basename(profile.theme.zip),
+        zip: themeBundleRelative,
         sha256: await sha256File(profile.theme.zip)
       },
-      plugins: await Promise.all(activePlugins.map(async (plugin) => ({
-        ...plugin,
-        zip: path.basename(plugin.zip),
-        sha256: await sha256File(plugin.zip)
-      }))),
+      plugins: bundledPlugins,
       configExport: {
         path: path.basename(profile.configExport),
         sha256: await sha256File(profile.configExport)
       },
-      languageArchives: await Promise.all(
-        (profile.languageArchives ?? [])
-          .filter((archive) => archive.locale === profile.locale)
-          .map(async (archive) => ({
-            ...archive,
-            zip: path.basename(archive.zip),
-            sha256: await sha256File(archive.zip)
-          }))
-      )
+      languageArchives: bundledLanguages
     };
 
     await writeJson(path.join(starterDataDir, "starter-build.json"), manifest);

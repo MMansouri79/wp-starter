@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0-alpha.6
+
+### Compact hosting-panel deployment bundles
+
+- Changed generated distributions so plugin/theme binaries remain as local ZIP payloads under `wp-content/starter-package/packages/` instead of being expanded into the outer deployment ZIP.
+- Reduced outer archive entry count dramatically for Plesk/cPanel-style File Manager extraction.
+- Bootstrap now installs the bundled theme and one plugin package at a time after the normal WordPress database/admin installation.
+- Added checksum verification before any bundled package is extracted.
+- Added staged plugin installation and dependency-tolerant activation retries.
+- Bundled language archives are now installed by Bootstrap instead of being expanded by the Builder.
+- Bumped starter build manifest to schema v2 for bundled package paths.
+- Kept the entire deployment offline; Bootstrap only reads package files shipped inside the starter distribution.
+
 ## 0.1.0-alpha.5
 
 ### Profile locale overrides and selective plugin builds

@@ -101,3 +101,29 @@ Schema v1 path-based profiles remain readable during the Phase 1 transition but 
 - SHA-256 of every input artifact
 - builder version
 - build timestamp
+
+
+## Generated distribution layout (manifest schema v2)
+
+The outer deployment ZIP keeps WordPress core expanded but carries third-party binaries as nested local package ZIPs:
+
+```text
+wp-admin/
+wp-includes/
+wp-content/
+  mu-plugins/
+    site-starter-bootstrap.php
+  starter-package/
+    starter-config.json
+    starter-build.json
+    packages/
+      themes/
+        hello-elementor-3.4.9.zip
+      plugins/
+        elementor-4.0.8.zip
+        woocommerce-10.9.4.zip
+      languages/
+        ...
+```
+
+`starter-build.json` schema v2 stores each bundled package path and SHA-256. Bootstrap validates the checksum before extraction, installs packages from local disk only, and processes expensive package extraction in separate admin requests.

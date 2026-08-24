@@ -97,10 +97,15 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
     assert.match(bootstrap, /WP Starter Bootstrap/);
 
     const build = JSON.parse(await readFile(path.join(unpack, "wp-content/starter-package/starter-build.json"), "utf8"));
+    assert.equal(build.schemaVersion, 2);
     assert.equal(build.plugins[0].file, "example-plugin/example-plugin.php");
+    assert.equal(build.plugins[0].zip, "packages/plugins/example-plugin-1.0.0.zip");
 
-    const pluginFile = await readFile(path.join(unpack, "wp-content/plugins/example-plugin/example-plugin.php"), "utf8");
-    assert.match(pluginFile, /Plugin Name: Example/);
+    const bundledPlugin = path.join(unpack, "wp-content/starter-package/packages/plugins/example-plugin-1.0.0.zip");
+    const bundledTheme = path.join(unpack, "wp-content/starter-package/packages/themes/hello-elementor-1.0.0.zip");
+    await readFile(bundledPlugin);
+    await readFile(bundledTheme);
+    await assert.rejects(() => readFile(path.join(unpack, "wp-content/plugins/example-plugin/example-plugin.php")));
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

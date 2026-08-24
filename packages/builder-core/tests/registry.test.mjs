@@ -101,8 +101,10 @@ test("registers arbitrary packages and builds schema v2 profiles from exact pack
     const unpack = path.join(temp, "unpacked");
     await mkdir(unpack, { recursive: true });
     await execFileAsync("unzip", ["-q", output, "-d", unpack]);
-    const installed = await readFile(path.join(unpack, "wp-content/plugins/arbitrary-plugin/bootstrap.php"), "utf8");
-    assert.match(installed, /Plugin Name: Arbitrary Plugin/);
+    assert.equal(result.manifest.schemaVersion, 2);
+    assert.equal(result.manifest.plugins[0].zip, "packages/plugins/arbitrary-plugin-2.4.1.zip");
+    await readFile(path.join(unpack, "wp-content/starter-package/packages/plugins/arbitrary-plugin-2.4.1.zip"));
+    await assert.rejects(() => readFile(path.join(unpack, "wp-content/plugins/arbitrary-plugin/bootstrap.php")));
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

@@ -8,7 +8,7 @@ The project is intentionally split into three responsibilities:
 2. **Builder CLI** runs on a developer machine and combines packages from a local package library, a configuration export, and the bootstrap runtime.
 3. **Starter Bootstrap** ships inside the generated WordPress distribution as an MU plugin and applies the exported configuration after the normal WordPress database/admin installer finishes.
 
-No part of the generated starter distribution needs WordPress.org or internet access.
+No part of the generated starter distribution needs WordPress.org or internet access. Plugin/theme ZIPs are carried inside the distribution and installed locally after WordPress itself is installed.
 
 ## Phase 1 status
 
@@ -20,7 +20,7 @@ The Phase 1 build pipeline currently provides:
 - SHA-256 integrity tracking
 - schema v2/v3 profiles referencing exact package coordinates and configuration snapshot IDs instead of ZIP paths
 - automatic schema v3 profile generation from a fully satisfied configuration snapshot
-- local ZIP-only WordPress/plugin/theme assembly
+- compact local ZIP payload bundling for plugins/themes to keep hosting-panel extraction small
 - configuration snapshot registry with source requirement matching
 - offline distribution builder
 - build manifest + SHA-256 hashes
@@ -81,7 +81,7 @@ On an offline new server:
 1. Create an empty database and database user.
 2. Extract the generated starter ZIP into the document root.
 3. Run the normal WordPress installer and create the admin account.
-4. Open wp-admin. The bundled MU-plugin activates the selected theme/plugins and applies the starter configuration.
+4. Open wp-admin. The bundled MU-plugin verifies and installs the local theme/plugin ZIP payloads one at a time, activates them, and applies the starter configuration.
 
 ## Generic binaries vs portable configuration
 
