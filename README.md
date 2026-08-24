@@ -104,3 +104,8 @@ The exporter does not export:
 - raw database dumps
 
 Plugin binaries, config snapshots, profiles, and builder code are separate versioned concepts.
+
+
+## Alpha.10
+
+Configuration verification, WooCommerce page ownership, and Elementor default-kit repair.

@@ -9,6 +9,8 @@ return array(
         'default_ping_status',
         'users_can_register',
         'show_on_front',
+        'page_on_front',
+        'page_for_posts',
         'timezone_string',
         'date_format',
         'time_format',

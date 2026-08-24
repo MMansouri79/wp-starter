@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.0-alpha.10
+
+### Verified configuration and deterministic default-page ownership
+
+- Removed the Bootstrap call to `WC_Install::create_pages()` so WooCommerce alone owns Shop/Cart/Checkout/My Account creation.
+- Added a conservative repair pass that removes duplicate WooCommerce default pages while preserving the page IDs WooCommerce currently owns.
+- Added Elementor default-kit repair/creation before importing Site Settings, fixing the editor error that no default kit exists.
+- Clears Elementor generated-file cache after applying imported kit settings.
+- Added post-import verification of WordPress, Elementor, WooCommerce, locale, permalink, and active Elementor kit state. Bootstrap now fails instead of claiming success when stored settings do not match the snapshot.
+- Added a configuration revision so existing alpha.9 test installs automatically rerun only the configuration phase and repair themselves without reinstalling WordPress or packages.
+- Expanded the Exporter baseline whitelist with `page_on_front`, `page_for_posts`, and `large_size_h`.
+- Added repeatable Exporter release packaging.
+
 ## 0.1.0-alpha.9
 
 ### Direct local package extraction on WordPress hosts

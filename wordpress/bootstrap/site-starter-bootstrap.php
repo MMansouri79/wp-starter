@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.9
+ * Version: 0.1.0-alpha.10
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -13,6 +13,9 @@ final class MMS_WP_Starter_Bootstrap {
     const STATE_OPTION    = 'mms_wp_starter_bootstrap_state';
     const COMPLETE_OPTION = 'mms_wp_starter_bootstrap_complete';
     const ERROR_OPTION    = 'mms_wp_starter_bootstrap_error';
+    const REPORT_OPTION   = 'mms_wp_starter_bootstrap_report';
+    const REVISION_OPTION = 'mms_wp_starter_bootstrap_revision';
+    const CONFIG_REVISION = 1;
 
     public static function init() {
         add_action( 'admin_init', array( __CLASS__, 'maybe_run' ), 1 );
@@ -24,8 +27,20 @@ final class MMS_WP_Starter_Bootstrap {
             return;
         }
 
-        if ( get_option( self::COMPLETE_OPTION ) ) {
+        $completed = get_option( self::COMPLETE_OPTION );
+        $revision  = absint( get_option( self::REVISION_OPTION, 0 ) );
+
+        if ( $completed && $revision >= self::CONFIG_REVISION ) {
             return;
+        }
+
+        // Alpha.10 introduced a configuration repair revision. Existing alpha.9
+        // test installs may already be marked complete even though WooCommerce
+        // pages were duplicated or Elementor had no valid active kit. Re-run
+        // only the configuration phase instead of reinstalling package files.
+        if ( $completed && $revision < self::CONFIG_REVISION ) {
+            self::save_state( array( 'phase' => 'configure' ) );
+            delete_option( self::COMPLETE_OPTION );
         }
 
         $config = self::read_json( WP_CONTENT_DIR . '/starter-package/starter-config.json' );
@@ -144,6 +159,7 @@ final class MMS_WP_Starter_Bootstrap {
 
             self::save_state( array( 'phase' => 'complete' ) );
             update_option( self::COMPLETE_OPTION, gmdate( 'c' ), false );
+            update_option( self::REVISION_OPTION, self::CONFIG_REVISION, false );
             delete_option( self::ERROR_OPTION );
         }
     }
@@ -410,22 +426,33 @@ final class MMS_WP_Starter_Bootstrap {
     }
 
     private static function apply_configuration( array $config, array $build ) {
+        $report = array(
+            'wordpress_options'  => 0,
+            'elementor_options'  => 0,
+            'woocommerce_options'=> 0,
+            'persian_options'    => 0,
+            'woocommerce_duplicates_removed' => 0,
+            'elementor_kit_id'   => 0,
+            'verified_at'        => gmdate( 'c' ),
+        );
+
         if ( isset( $build['locale'] ) ) {
             $locale = sanitize_text_field( $build['locale'] );
             update_option( 'WPLANG', 'en_US' === $locale ? '' : $locale );
         }
 
         $wordpress = isset( $config['wordpress'] ) && is_array( $config['wordpress'] ) ? $config['wordpress'] : array();
-
-        foreach ( (array) ( $wordpress['options'] ?? array() ) as $key => $value ) {
-            update_option( sanitize_key( $key ), $value );
-        }
+        $wordpress_options = (array) ( $wordpress['options'] ?? array() );
+        self::apply_option_group( $wordpress_options );
+        $report['wordpress_options'] = count( $wordpress_options );
 
         if ( ! empty( $wordpress['permalink_structure'] ) ) {
             global $wp_rewrite;
             $wp_rewrite->set_permalink_structure( (string) $wordpress['permalink_structure'] );
         }
 
+        // Only exporter-declared custom starter pages are created here.
+        // WordPress and WooCommerce own their native/default pages.
         self::apply_pages( (array) ( $wordpress['pages'] ?? array() ) );
 
         if ( ! empty( $wordpress['cleanup_default_content'] ) ) {
@@ -435,34 +462,225 @@ final class MMS_WP_Starter_Bootstrap {
         require_once ABSPATH . 'wp-admin/includes/plugin.php';
 
         if ( is_plugin_active( 'elementor/elementor.php' ) ) {
-            self::apply_option_group( (array) ( $config['adapters']['elementor']['options'] ?? array() ) );
+            $elementor_options = (array) ( $config['adapters']['elementor']['options'] ?? array() );
+            self::apply_option_group( $elementor_options );
+            $report['elementor_options'] = count( $elementor_options );
         }
 
         if ( is_plugin_active( 'woocommerce/woocommerce.php' ) ) {
-            self::apply_option_group( (array) ( $config['adapters']['woocommerce']['options'] ?? array() ) );
+            $woocommerce_options = (array) ( $config['adapters']['woocommerce']['options'] ?? array() );
+            self::apply_option_group( $woocommerce_options );
+            $report['woocommerce_options'] = count( $woocommerce_options );
+
+            // Do not call WC_Install::create_pages(). WooCommerce already owns
+            // page creation during its install/activation flow. Calling it again
+            // can race the installer and produce Cart/Checkout/Shop duplicates.
+            $report['woocommerce_duplicates_removed'] = self::cleanup_duplicate_woocommerce_pages();
         }
 
         if ( is_plugin_active( 'persian-woocommerce/woocommerce-persian.php' ) ) {
-            self::apply_option_group( (array) ( $config['adapters']['persian_woocommerce']['options'] ?? array() ) );
-        }
-
-        if ( class_exists( 'WC_Install' ) && method_exists( 'WC_Install', 'create_pages' ) ) {
-            WC_Install::create_pages();
+            $persian_options = (array) ( $config['adapters']['persian_woocommerce']['options'] ?? array() );
+            self::apply_option_group( $persian_options );
+            $report['persian_options'] = count( $persian_options );
         }
 
         $kit_settings = (array) ( $config['adapters']['elementor']['kit_settings'] ?? array() );
-        if ( ! empty( $kit_settings ) ) {
-            $kit_id = absint( get_option( 'elementor_active_kit' ) );
-            if ( $kit_id > 0 ) {
-                $current = get_post_meta( $kit_id, '_elementor_page_settings', true );
-                $current = is_array( $current ) ? $current : array();
-                update_post_meta( $kit_id, '_elementor_page_settings', array_replace_recursive( $current, $kit_settings ) );
+        if ( is_plugin_active( 'elementor/elementor.php' ) ) {
+            $kit_result = self::ensure_elementor_kit( $kit_settings );
+            if ( is_wp_error( $kit_result ) ) {
+                return $kit_result;
             }
+            $report['elementor_kit_id'] = absint( $kit_result );
         }
 
         flush_rewrite_rules( false );
 
+        $verification = self::verify_configuration( $config, $build );
+        if ( is_wp_error( $verification ) ) {
+            return $verification;
+        }
+
+        $report['verification'] = $verification;
+        update_option( self::REPORT_OPTION, $report, false );
+
         return true;
+    }
+
+    private static function ensure_elementor_kit( array $kit_settings ) {
+        if ( ! class_exists( '\\Elementor\\Plugin' ) ) {
+            return new WP_Error( 'starter_elementor_not_loaded', 'Elementor is active but its runtime is not loaded, so the default kit could not be prepared.' );
+        }
+
+        $kit_id = absint( get_option( 'elementor_active_kit' ) );
+        $kit_post = $kit_id > 0 ? get_post( $kit_id ) : null;
+
+        if ( ! $kit_post || 'elementor_library' !== $kit_post->post_type || 'trash' === $kit_post->post_status ) {
+            delete_option( 'elementor_active_kit' );
+            $kit_id = 0;
+
+            if ( class_exists( '\\Elementor\\Core\\Kits\\Manager' ) && method_exists( '\\Elementor\\Core\\Kits\\Manager', 'create_default_kit' ) ) {
+                $created = \Elementor\Core\Kits\Manager::create_default_kit();
+                if ( is_wp_error( $created ) ) {
+                    return $created;
+                }
+                $kit_id = absint( get_option( 'elementor_active_kit' ) );
+            }
+
+            if ( $kit_id <= 0 && isset( \Elementor\Plugin::$instance->kits_manager ) && method_exists( \Elementor\Plugin::$instance->kits_manager, 'create_default' ) ) {
+                $kit_id = absint( \Elementor\Plugin::$instance->kits_manager->create_default() );
+                if ( $kit_id > 0 ) {
+                    update_option( 'elementor_active_kit', $kit_id );
+                }
+            }
+        }
+
+        if ( $kit_id <= 0 || ! get_post( $kit_id ) ) {
+            return new WP_Error( 'starter_elementor_kit_missing', 'Elementor did not provide a valid default kit after activation.' );
+        }
+
+        if ( ! empty( $kit_settings ) ) {
+            $current = get_post_meta( $kit_id, '_elementor_page_settings', true );
+            $current = is_array( $current ) ? $current : array();
+            update_post_meta( $kit_id, '_elementor_page_settings', array_replace_recursive( $current, $kit_settings ) );
+        }
+
+        // Elementor caches generated kit/CSS files. Clear them after importing
+        // the reference kit so the editor and frontend immediately see it.
+        if ( isset( \Elementor\Plugin::$instance->files_manager ) && method_exists( \Elementor\Plugin::$instance->files_manager, 'clear_cache' ) ) {
+            \Elementor\Plugin::$instance->files_manager->clear_cache();
+        }
+
+        return $kit_id;
+    }
+
+    private static function cleanup_duplicate_woocommerce_pages() {
+        $definitions = array(
+            'woocommerce_shop_page_id'      => array( 'slug' => 'shop',       'title' => 'Shop',       'markers' => array() ),
+            'woocommerce_cart_page_id'      => array( 'slug' => 'cart',       'title' => 'Cart',       'markers' => array( 'woocommerce_cart', 'woocommerce/cart' ) ),
+            'woocommerce_checkout_page_id'  => array( 'slug' => 'checkout',   'title' => 'Checkout',   'markers' => array( 'woocommerce_checkout', 'woocommerce/checkout' ) ),
+            'woocommerce_myaccount_page_id' => array( 'slug' => 'my-account', 'title' => 'My account', 'markers' => array( 'woocommerce_my_account', 'woocommerce/my-account' ) ),
+        );
+
+        $removed = 0;
+
+        foreach ( $definitions as $option => $definition ) {
+            $keeper_id = absint( get_option( $option ) );
+            if ( $keeper_id <= 0 ) {
+                continue;
+            }
+
+            $keeper = get_post( $keeper_id );
+            if ( ! $keeper || 'page' !== $keeper->post_type ) {
+                continue;
+            }
+
+            $pages = get_posts(
+                array(
+                    'post_type'      => 'page',
+                    'post_status'    => array( 'publish', 'draft', 'pending', 'private' ),
+                    'posts_per_page' => -1,
+                    'exclude'        => array( $keeper_id ),
+                    'orderby'        => 'ID',
+                    'order'          => 'ASC',
+                )
+            );
+
+            foreach ( $pages as $page ) {
+                $slug = (string) $page->post_name;
+                if ( ! preg_match( '/^' . preg_quote( $definition['slug'], '/' ) . '(?:-\\d+)?$/', $slug ) ) {
+                    continue;
+                }
+
+                $title = trim( wp_strip_all_tags( (string) $page->post_title ) );
+                $keeper_title = trim( wp_strip_all_tags( (string) $keeper->post_title ) );
+                if ( 0 !== strcasecmp( $title, $definition['title'] ) && 0 !== strcasecmp( $title, $keeper_title ) ) {
+                    continue;
+                }
+
+                $content = trim( (string) $page->post_content );
+                $safe_to_remove = '' === $content;
+                foreach ( $definition['markers'] as $marker ) {
+                    if ( false !== strpos( $content, $marker ) ) {
+                        $safe_to_remove = true;
+                        break;
+                    }
+                }
+
+                if ( $safe_to_remove && wp_delete_post( $page->ID, true ) ) {
+                    $removed++;
+                }
+            }
+        }
+
+        return $removed;
+    }
+
+    private static function verify_configuration( array $config, array $build ) {
+        $mismatches = array();
+
+        if ( isset( $build['locale'] ) ) {
+            $expected_locale = sanitize_text_field( $build['locale'] );
+            $stored_locale = (string) get_option( 'WPLANG', '' );
+            $expected_stored = 'en_US' === $expected_locale ? '' : $expected_locale;
+            if ( $stored_locale !== $expected_stored ) {
+                $mismatches[] = 'WPLANG';
+            }
+        }
+
+        $groups = array(
+            (array) ( $config['wordpress']['options'] ?? array() ),
+        );
+
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        if ( is_plugin_active( 'elementor/elementor.php' ) ) {
+            $groups[] = (array) ( $config['adapters']['elementor']['options'] ?? array() );
+        }
+        if ( is_plugin_active( 'woocommerce/woocommerce.php' ) ) {
+            $groups[] = (array) ( $config['adapters']['woocommerce']['options'] ?? array() );
+        }
+        if ( is_plugin_active( 'persian-woocommerce/woocommerce-persian.php' ) ) {
+            $groups[] = (array) ( $config['adapters']['persian_woocommerce']['options'] ?? array() );
+        }
+
+        $checked = 0;
+        foreach ( $groups as $options ) {
+            foreach ( $options as $key => $expected ) {
+                $checked++;
+                $sentinel = new stdClass();
+                $actual = get_option( $key, $sentinel );
+                if ( $sentinel === $actual || maybe_serialize( $actual ) !== maybe_serialize( $expected ) ) {
+                    $mismatches[] = sanitize_key( $key );
+                }
+            }
+        }
+
+        $expected_permalink = (string) ( $config['wordpress']['permalink_structure'] ?? '' );
+        if ( '' !== $expected_permalink ) {
+            $checked++;
+            if ( (string) get_option( 'permalink_structure', '' ) !== $expected_permalink ) {
+                $mismatches[] = 'permalink_structure';
+            }
+        }
+
+        if ( is_plugin_active( 'elementor/elementor.php' ) ) {
+            $checked++;
+            $kit_id = absint( get_option( 'elementor_active_kit' ) );
+            if ( $kit_id <= 0 || ! get_post( $kit_id ) ) {
+                $mismatches[] = 'elementor_active_kit';
+            }
+        }
+
+        if ( ! empty( $mismatches ) ) {
+            return new WP_Error(
+                'starter_configuration_verification_failed',
+                'Starter configuration did not verify after import. Mismatched keys: ' . implode( ', ', array_unique( $mismatches ) )
+            );
+        }
+
+        return array(
+            'checked' => $checked,
+            'mismatches' => 0,
+        );
     }
 
     private static function apply_option_group( array $options ) {
@@ -536,7 +754,14 @@ final class MMS_WP_Starter_Bootstrap {
         }
 
         if ( get_option( self::COMPLETE_OPTION ) ) {
-            echo '<div class="notice notice-success is-dismissible"><p><strong>WP Starter:</strong> starter provisioning completed.</p></div>';
+            $report = get_option( self::REPORT_OPTION, array() );
+            $verified = isset( $report['verification']['checked'] ) ? absint( $report['verification']['checked'] ) : 0;
+            $duplicates = isset( $report['woocommerce_duplicates_removed'] ) ? absint( $report['woocommerce_duplicates_removed'] ) : 0;
+            printf(
+                '<div class="notice notice-success is-dismissible"><p><strong>WP Starter:</strong> starter provisioning completed and verified (%d settings/checks, %d duplicate WooCommerce pages removed).</p></div>',
+                $verified,
+                $duplicates
+            );
             return;
         }
 
