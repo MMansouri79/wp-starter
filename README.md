@@ -109,3 +109,26 @@ Plugin binaries, config snapshots, profiles, and builder code are separate versi
 ## Alpha.10
 
 Configuration verification, WooCommerce page ownership, and Elementor default-kit repair.
+
+## Local GUI preview (alpha.11)
+
+The Builder now includes a lightweight local GUI that runs entirely on `127.0.0.1` and calls the same builder-core APIs as the CLI. It is an interim usability layer before the final Electron shell, not a separate build engine.
+
+On Windows, extract the Builder release and double-click:
+
+```text
+scripts\\wp-starter-gui.cmd
+```
+
+The launcher opens the local Builder UI in the default browser. Keep the terminal window open while using it. The GUI uses the same default library as the CLI (`%USERPROFILE%\\.wp-starter`), so all packages and configuration snapshots already imported through the CLI appear automatically.
+
+The GUI currently supports:
+
+- adding arbitrary WordPress/plugin/theme ZIPs,
+- importing configuration snapshot ZIPs,
+- checking missing package requirements,
+- creating profiles with locale and plugin exclusions,
+- building the complete offline WordPress ZIP,
+- downloading previous builds.
+
+The CLI remains supported for diagnostics, scripting, and CI.

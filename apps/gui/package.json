@@ -1,0 +1,7 @@
+{
+  "name": "@wp-starter/gui",
+  "private": true,
+  "version": "0.1.0-alpha.11",
+  "type": "module",
+  "main": "index.mjs"
+}

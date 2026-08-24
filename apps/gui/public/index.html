@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WP Starter Builder</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="mark">W</span><div><strong>WP Starter</strong><small>Offline Builder</small></div></div>
+      <nav>
+        <button class="nav active" data-view="overview">Overview</button>
+        <button class="nav" data-view="packages">Packages</button>
+        <button class="nav" data-view="configs">Configurations</button>
+        <button class="nav" data-view="build">Build</button>
+      </nav>
+      <div class="sidebar-foot"><span id="version"></span><code id="library"></code></div>
+    </aside>
+    <main>
+      <header><div><h1 id="title">Overview</h1><p id="subtitle">Your local WordPress starter workspace.</p></div><button id="refresh" class="secondary">Refresh</button></header>
+      <div id="flash" class="flash hidden"></div>
+
+      <section class="view active" id="view-overview">
+        <div class="stats">
+          <div class="stat"><span>Packages</span><strong id="stat-packages">0</strong></div>
+          <div class="stat"><span>Configs</span><strong id="stat-configs">0</strong></div>
+          <div class="stat"><span>Profiles</span><strong id="stat-profiles">0</strong></div>
+          <div class="stat"><span>Builds</span><strong id="stat-builds">0</strong></div>
+        </div>
+        <div class="panel"><h2>Workflow</h2><div class="steps"><span>1. Add packages</span><b>→</b><span>2. Import reference config</span><b>→</b><span>3. Create profile</span><b>→</b><span>4. Build ZIP</span></div></div>
+        <div class="panel"><h2>Recent builds</h2><div id="recent-builds" class="empty">No builds yet.</div></div>
+      </section>
+
+      <section class="view" id="view-packages">
+        <div class="panel">
+          <div class="panel-head"><div><h2>Package Library</h2><p>Add any WordPress core, theme, or plugin ZIP. Type and version are detected automatically.</p></div><label class="primary file-button">+ Add ZIP<input id="package-file" type="file" accept=".zip" multiple></label></div>
+          <div class="dropzone" id="package-drop">Drop plugin, theme, or WordPress ZIPs here</div>
+          <div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Slug</th><th>Version</th><th>Main file</th></tr></thead><tbody id="packages-body"></tbody></table></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-configs">
+        <div class="panel">
+          <div class="panel-head"><div><h2>Configuration Snapshots</h2><p>Import a ZIP exported by WP Starter Exporter.</p></div><label class="primary file-button">+ Import Config<input id="config-file" type="file" accept=".zip"></label></div>
+          <div id="configs-list" class="cards"></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-build">
+        <div class="grid-two">
+          <div class="panel">
+            <h2>Create Build Profile</h2>
+            <label>Configuration snapshot<select id="build-config"></select></label>
+            <label>Profile name<input id="build-name" value="test-build" autocomplete="off"></label>
+            <label>Destination locale<input id="build-locale" value="en_US" autocomplete="off"></label>
+            <div class="field"><span class="label">Plugins</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div></div>
+            <button id="create-profile" class="primary full">Create / Update Profile</button>
+          </div>
+          <div class="panel">
+            <h2>Build Offline WordPress ZIP</h2>
+            <label>Profile<select id="profile-select"></select></label>
+            <button id="build-button" class="primary full">Build Starter ZIP</button>
+            <div id="build-result" class="result hidden"></div>
+          </div>
+        </div>
+        <div class="panel"><h2>Saved Profiles</h2><div id="profiles-list" class="cards"></div></div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -21,6 +21,9 @@ const copy = async (source, destination) => {
 
 await copy("apps/cli/dist", "apps/cli/dist");
 await copy("apps/cli/package.json", "apps/cli/package.json");
+await copy("apps/gui/index.mjs", "apps/gui/index.mjs");
+await copy("apps/gui/public", "apps/gui/public");
+await copy("apps/gui/package.json", "apps/gui/package.json");
 await copy("packages/builder-core/dist", "packages/builder-core/dist");
 await copy("packages/builder-core/package.json", "packages/builder-core/package.json");
 await copy("profiles", "profiles");
@@ -29,6 +32,8 @@ await copy("scripts/build.cmd", "scripts/build.cmd");
 await copy("scripts/build.ps1", "scripts/build.ps1");
 await copy("scripts/wp-starter.cmd", "scripts/wp-starter.cmd");
 await copy("scripts/wp-starter.ps1", "scripts/wp-starter.ps1");
+await copy("scripts/wp-starter-gui.cmd", "scripts/wp-starter-gui.cmd");
+await copy("scripts/wp-starter-gui.ps1", "scripts/wp-starter-gui.ps1");
 await copy("README.md", "README.md");
 await copy("docs/PHASE-1.md", "PHASE-1.md");
 await copy("docs/PACKAGE-FORMAT.md", "PACKAGE-FORMAT.md");

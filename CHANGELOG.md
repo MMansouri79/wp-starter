@@ -119,3 +119,13 @@
 - Added an MU-plugin bootstrap that stages activation and configuration after normal WordPress installation.
 - Added synthetic end-to-end builder tests.
 - Preserved the earlier Site Starter Git history before the architecture reset.
+
+## 0.1.0-alpha.11 - 2026-08-24
+
+- Added the first local GUI preview on top of the existing builder-core APIs.
+- Added browser-based package ZIP import with drag-and-drop.
+- Added configuration snapshot import and requirement checking.
+- Added profile creation with locale and plugin inclusion controls.
+- Added one-click offline build creation and browser download.
+- Added Windows GUI launchers that reuse the existing local package library.
+- Kept the CLI as the debugging/automation interface; no builder logic was duplicated into the GUI.
