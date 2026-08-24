@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.7
+ * Version: 0.1.0-alpha.8
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -225,7 +225,12 @@ final class MMS_WP_Starter_Bootstrap {
 
             $theme = wp_get_theme( $slug );
             if ( ! $theme->exists() ) {
-                return new WP_Error( 'starter_theme_install_failed', 'Theme archive extracted, but the expected theme was not found: ' . $slug );
+                $found = array_keys( wp_get_themes() );
+                return new WP_Error(
+                    'starter_theme_install_failed',
+                    'Theme archive extracted, but the expected theme was not found: ' . $slug .
+                    '. Theme directories detected after extraction: ' . ( empty( $found ) ? '(none)' : implode( ', ', $found ) )
+                );
             }
         }
 

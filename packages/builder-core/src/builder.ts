@@ -5,6 +5,7 @@ import { createZip, extractZip } from "./archive.js";
 import { BuilderError } from "./errors.js";
 import {
   copyDirectoryContents,
+  detectPackageRoot,
   ensureDir,
   ensureEmptyDir,
   findFileRecursive,
@@ -24,6 +25,37 @@ export interface BuildOptions {
 
 function safeArtifactName(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]+/g, "_");
+}
+
+function safeInstallDir(value: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) {
+    throw new BuilderError("invalid_install_dir", `Package install directory contains unsupported characters: ${value}`);
+  }
+  return value;
+}
+
+async function createCanonicalPackageZip(options: {
+  sourceZip: string;
+  installDir: string;
+  outputZip: string;
+  workDir: string;
+}): Promise<string> {
+  const installDir = safeInstallDir(options.installDir);
+  const extractDir = path.join(options.workDir, "extract");
+  const stageDir = path.join(options.workDir, "stage");
+  const canonicalRoot = path.join(stageDir, installDir);
+
+  await ensureEmptyDir(extractDir);
+  await extractZip(options.sourceZip, extractDir);
+  const detectedRoot = await detectPackageRoot(extractDir, installDir);
+
+  await ensureEmptyDir(stageDir);
+  await ensureDir(canonicalRoot);
+  await copyDirectoryContents(detectedRoot, canonicalRoot);
+
+  await ensureDir(path.dirname(options.outputZip));
+  await createZip(stageDir, options.outputZip);
+  return sha256File(options.outputZip);
 }
 
 export async function buildStarter(options: BuildOptions): Promise<{ outputZip: string; sha256: string; manifest: StarterBuildManifest }> {
@@ -58,19 +90,34 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
 
     const themeBundleName = `${safeArtifactName(profile.theme.slug)}-${safeArtifactName(profile.theme.version)}.zip`;
     const themeBundleRelative = `packages/themes/${themeBundleName}`;
-    await cp(profile.theme.zip, path.join(bundledThemeDir, themeBundleName), { force: true });
+    const themeBundlePath = path.join(bundledThemeDir, themeBundleName);
+    const themeBundleSha256 = await createCanonicalPackageZip({
+      sourceZip: profile.theme.zip,
+      installDir: profile.theme.slug,
+      outputZip: themeBundlePath,
+      workDir: path.join(workRoot, "canonical-theme")
+    });
 
     const activePlugins = profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale));
-    const bundledPlugins = await Promise.all(activePlugins.map(async (plugin) => {
+    const bundledPlugins = [];
+    for (let index = 0; index < activePlugins.length; index++) {
+      const plugin = activePlugins[index];
       const bundleName = `${safeArtifactName(plugin.slug)}-${safeArtifactName(plugin.version)}.zip`;
       const bundleRelative = `packages/plugins/${bundleName}`;
-      await cp(plugin.zip, path.join(bundledPluginDir, bundleName), { force: true });
-      return {
+      const bundlePath = path.join(bundledPluginDir, bundleName);
+      const sha256 = await createCanonicalPackageZip({
+        sourceZip: plugin.zip,
+        installDir: plugin.slug,
+        outputZip: bundlePath,
+        workDir: path.join(workRoot, `canonical-plugin-${index}`)
+      });
+
+      bundledPlugins.push({
         ...plugin,
         zip: bundleRelative,
-        sha256: await sha256File(plugin.zip)
-      };
-    }));
+        sha256
+      });
+    }
 
     const bundledLanguages = await Promise.all(
       (profile.languageArchives ?? [])
@@ -111,7 +158,7 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       theme: {
         ...profile.theme,
         zip: themeBundleRelative,
-        sha256: await sha256File(profile.theme.zip)
+        sha256: themeBundleSha256
       },
       plugins: bundledPlugins,
       configExport: {

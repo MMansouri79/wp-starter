@@ -26,7 +26,7 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
     const wpZip = path.join(temp, "wordpress.zip");
     await zipDir(path.dirname(core), wpZip);
 
-    const theme = path.join(temp, "theme/hello-elementor");
+    const theme = path.join(temp, "theme/downloaded-theme-folder");
     await mkdir(theme, { recursive: true });
     await writeFile(path.join(theme, "style.css"), "Theme Name: Hello Elementor\nVersion: 1.0.0\n");
     const themeZip = path.join(temp, "theme.zip");
@@ -108,6 +108,20 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
     const bundledTheme = path.join(unpack, "wp-content/starter-package/packages/themes/hello-elementor-1.0.0.zip");
     await readFile(bundledPlugin);
     await readFile(bundledTheme);
+
+    const { stdout: themeEntries } = await execFileAsync("unzip", ["-Z1", bundledTheme]);
+    const themeFiles = themeEntries.trim().split(/\r?\n/).filter(Boolean);
+    assert.ok(themeFiles.length > 0);
+    assert.ok(themeFiles.every((entry) => entry.startsWith("hello-elementor/")), "theme payload must use the canonical install directory");
+    assert.ok(themeFiles.includes("hello-elementor/style.css"));
+    assert.equal(themeEntries.includes("\\"), false, "theme payload entries must use POSIX separators");
+
+    const { stdout: pluginEntries } = await execFileAsync("unzip", ["-Z1", bundledPlugin]);
+    const pluginFiles = pluginEntries.trim().split(/\r?\n/).filter(Boolean);
+    assert.ok(pluginFiles.every((entry) => entry.startsWith("example-plugin/")), "plugin payload must use the canonical install directory");
+    assert.ok(pluginFiles.includes("example-plugin/example-plugin.php"));
+    assert.equal(pluginEntries.includes("\\"), false, "plugin payload entries must use POSIX separators");
+
     await assert.rejects(() => readFile(path.join(unpack, "wp-content/plugins/example-plugin/example-plugin.php")));
   } finally {
     await rm(temp, { recursive: true, force: true });

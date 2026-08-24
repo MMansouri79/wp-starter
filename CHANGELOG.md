@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-alpha.8
+
+### Canonical plugin/theme payloads
+
+- Normalizes every bundled plugin and theme ZIP during build instead of copying arbitrary source ZIP bytes unchanged.
+- Repackages each payload with exactly one canonical top-level install directory matching the detected registry install directory.
+- Forces ZIP-standard forward-slash entry names for inner plugin/theme archives as well as the outer deployment archive.
+- Fixes Bootstrap failures where an archive reported successful extraction but WordPress could not find the expected theme/plugin path afterward.
+- Covers single-file plugins by wrapping them in their canonical plugin directory before deployment.
+- Adds post-extraction theme-directory diagnostics if a theme still cannot be discovered.
+
 ## 0.1.0-alpha.7
 
 ### Linux-portable deployment ZIPs
