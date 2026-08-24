@@ -3,7 +3,10 @@ param(
     [string]$Profile,
 
     [Parameter(Mandatory = $true)]
-    [string]$Output
+    [string]$Output,
+
+    [Parameter(Mandatory = $false)]
+    [string]$Library = ""
 )
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
@@ -14,5 +17,10 @@ if (-not (Test-Path $Cli)) {
     exit 1
 }
 
-node $Cli build --profile $Profile --output $Output
+$Args = @($Cli, "build", "--profile", $Profile, "--output", $Output)
+if ($Library -ne "") {
+    $Args += @("--library", $Library)
+}
+
+& node @Args
 exit $LASTEXITCODE

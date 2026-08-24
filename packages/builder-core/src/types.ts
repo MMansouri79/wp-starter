@@ -1,3 +1,41 @@
+export type PackageKind = "wordpress" | "theme" | "plugin";
+
+export interface PackageInspection {
+  kind: PackageKind;
+  slug: string;
+  name: string;
+  version: string;
+  packageRoot: string;
+  installDir: string;
+  mainFile?: string;
+  textDomain?: string;
+  requiresWordPress?: string;
+  requiresPhp?: string;
+  requiresPlugins?: string[];
+}
+
+export interface PackageRecord {
+  kind: PackageKind;
+  slug: string;
+  name: string;
+  version: string;
+  installDir: string;
+  mainFile?: string;
+  textDomain?: string;
+  requiresWordPress?: string;
+  requiresPhp?: string;
+  requiresPlugins?: string[];
+  zip: string;
+  sha256: string;
+  sourceFilename: string;
+  addedAt: string;
+}
+
+export interface RegistryFile {
+  schemaVersion: 1;
+  packages: PackageRecord[];
+}
+
 export interface ArtifactRef {
   version: string;
   zip: string;
@@ -20,7 +58,7 @@ export interface LanguageArchiveRef {
 }
 
 export interface BuildProfile {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   name: string;
   locale: string;
   wordpress: ArtifactRef;

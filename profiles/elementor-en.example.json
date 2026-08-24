@@ -1,36 +1,28 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "elementor-en",
   "locale": "en_US",
   "wordpress": {
-    "version": "7.0.2",
-    "zip": "../private-packages/wordpress-7.0.2.zip"
+    "version": "7.1"
   },
   "theme": {
     "slug": "hello-elementor",
-    "version": "3.4.9",
-    "zip": "../private-packages/themes/hello-elementor-3.4.9.zip"
+    "version": "3.4.9"
   },
   "plugins": [
     {
       "slug": "classic-editor",
-      "file": "classic-editor/classic-editor.php",
       "version": "1.7.0",
-      "zip": "../private-packages/plugins/classic-editor-1.7.0.zip",
       "required": true
     },
     {
       "slug": "elementor",
-      "file": "elementor/elementor.php",
       "version": "4.0.8",
-      "zip": "../private-packages/plugins/elementor-4.0.8.zip",
       "required": true
     },
     {
       "slug": "elementor-pro",
-      "file": "elementor-pro/elementor-pro.php",
       "version": "4.0.4",
-      "zip": "../private-packages/plugins/elementor-pro-4.0.4.zip",
       "required": true
     }
   ],
