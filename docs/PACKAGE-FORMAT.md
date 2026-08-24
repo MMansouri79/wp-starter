@@ -38,7 +38,7 @@ The builder inspects package headers and records:
 - SHA-256
 
 The original ZIP is copied into the library. Multiple versions of the same package may coexist.
-The same `type + slug + version` cannot silently change bytes; use `--replace` explicitly when that is intentional.
+For plugins/themes, the same `type + slug + version` cannot silently change bytes; use `--replace` explicitly when that is intentional. WordPress core adds a locale variant, so `wordpress@7.1 (en_US)` and `wordpress@7.1 (fa_IR)` can coexist with different bytes.
 
 ## Configuration export ZIP
 
@@ -131,3 +131,25 @@ wp-content/
 ## Archive portability
 
 Generated deployment ZIP entry names always use `/` separators, even when the Builder runs on Windows. This is required for reliable extraction by Linux hosting panels such as Plesk. Plugin/theme payload ZIPs remain nested and are installed later by Bootstrap.
+
+
+## Build profile schema v4
+
+Schema v4 makes the selected WordPress distribution explicit and keeps configuration independent from package versions:
+
+```json
+{
+  "schemaVersion": 4,
+  "name": "store-test",
+  "locale": "en_US",
+  "wordpress": { "version": "7.1", "variant": "en_US" },
+  "theme": { "slug": "hello-elementor", "version": "3.4.9" },
+  "plugins": [
+    { "slug": "elementor", "version": "4.2.1", "required": true },
+    { "slug": "woocommerce", "version": "10.9.4", "required": true }
+  ],
+  "config": { "id": "snapshot-20260824050124" }
+}
+```
+
+The configuration snapshot can come from a site that used older plugin versions. A profile may deliberately pin newer package versions while reusing the same portable settings snapshot; compatibility remains the developer's responsibility and is validated further in Phase 2 adapters.

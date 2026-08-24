@@ -23,6 +23,14 @@ function safeSegment(value: string, label: string): string {
   return value;
 }
 
+function defaultVariant(kind: PackageKind): string {
+  return kind === "wordpress" ? "en_US" : "default";
+}
+
+function recordVariant(record: Pick<PackageRecord, "kind" | "variant" | "locale">): string {
+  return record.variant || record.locale || defaultVariant(record.kind);
+}
+
 export class PackageRegistry {
   public readonly root: string;
   private readonly registryFile: string;
@@ -34,7 +42,7 @@ export class PackageRegistry {
 
   private async load(): Promise<RegistryFile> {
     if (!(await exists(this.registryFile))) {
-      return { schemaVersion: 1, packages: [] };
+      return { schemaVersion: 2, packages: [] };
     }
 
     let parsed: unknown;
@@ -45,14 +53,24 @@ export class PackageRegistry {
     }
 
     const registry = parsed as RegistryFile;
-    if (registry.schemaVersion !== 1 || !Array.isArray(registry.packages)) {
+    if (![1, 2].includes(registry.schemaVersion) || !Array.isArray(registry.packages)) {
       throw new BuilderError("invalid_registry", "Unsupported or invalid package registry format.");
     }
+
+    if (registry.schemaVersion === 1) {
+      registry.schemaVersion = 2;
+      registry.packages = registry.packages.map((record) => record.kind === "wordpress"
+        ? { ...record, variant: record.variant || record.locale || "en_US", locale: record.locale || record.variant || "en_US" }
+        : record
+      );
+    }
+
     return registry;
   }
 
   private async save(registry: RegistryFile): Promise<void> {
     await ensureDir(this.root);
+    registry.schemaVersion = 2;
     await writeJson(this.registryFile, registry);
   }
 
@@ -62,12 +80,20 @@ export class PackageRegistry {
     safeSegment(inspection.slug, "slug");
     safeSegment(inspection.version, "version");
 
+    const variant = inspection.variant || inspection.locale || defaultVariant(inspection.kind);
+    safeSegment(variant, "variant");
+
     const hash = await sha256File(absolute);
-    const relativeZip = path.join("packages", inspection.kind, inspection.slug, inspection.version, "package.zip");
+    const relativeZip = inspection.kind === "wordpress"
+      ? path.join("packages", inspection.kind, inspection.slug, inspection.version, variant, "package.zip")
+      : path.join("packages", inspection.kind, inspection.slug, inspection.version, "package.zip");
     const storedZip = path.join(this.root, relativeZip);
     const registry = await this.load();
     const existingIndex = registry.packages.findIndex((record) =>
-      record.kind === inspection.kind && record.slug === inspection.slug && record.version === inspection.version
+      record.kind === inspection.kind &&
+      record.slug === inspection.slug &&
+      record.version === inspection.version &&
+      recordVariant(record) === variant
     );
 
     if (existingIndex >= 0) {
@@ -76,9 +102,10 @@ export class PackageRegistry {
         return { record: existing, added: false, replaced: false };
       }
       if (!options.replace) {
+        const suffix = inspection.kind === "wordpress" ? ` (${variant})` : "";
         throw new BuilderError(
           "package_conflict",
-          `${inspection.kind} ${inspection.slug}@${inspection.version} already exists with different bytes. Use --replace only if you intentionally want to replace that exact version.`
+          `${inspection.kind} ${inspection.slug}@${inspection.version}${suffix} already exists with different bytes. Use --replace only if you intentionally want to replace that exact package variant.`
         );
       }
     }
@@ -92,6 +119,8 @@ export class PackageRegistry {
       name: inspection.name,
       version: inspection.version,
       installDir: inspection.installDir,
+      variant: inspection.kind === "wordpress" ? variant : undefined,
+      locale: inspection.kind === "wordpress" ? (inspection.locale || variant) : undefined,
       mainFile: inspection.mainFile,
       textDomain: inspection.textDomain,
       requiresWordPress: inspection.requiresWordPress,
@@ -112,7 +141,10 @@ export class PackageRegistry {
     }
 
     registry.packages.sort((a, b) =>
-      a.kind.localeCompare(b.kind) || a.slug.localeCompare(b.slug) || a.version.localeCompare(b.version)
+      a.kind.localeCompare(b.kind) ||
+      a.slug.localeCompare(b.slug) ||
+      a.version.localeCompare(b.version) ||
+      recordVariant(a).localeCompare(recordVariant(b))
     );
     await this.save(registry);
     await writeJson(path.join(path.dirname(storedZip), "package.json"), record);
@@ -125,11 +157,24 @@ export class PackageRegistry {
     return registry.packages.filter((record) => !kind || record.kind === kind);
   }
 
-  async resolve(kind: PackageKind, slug: string, version: string): Promise<PackageRecord & { absoluteZip: string }> {
+  async resolve(kind: PackageKind, slug: string, version: string, variant?: string): Promise<PackageRecord & { absoluteZip: string }> {
     const registry = await this.load();
-    const record = registry.packages.find((entry) => entry.kind === kind && entry.slug === slug && entry.version === version);
+    const candidates = registry.packages.filter((entry) => entry.kind === kind && entry.slug === slug && entry.version === version);
+    let record: PackageRecord | undefined;
+
+    if (variant) {
+      record = candidates.find((entry) => recordVariant(entry) === variant);
+    } else if (candidates.length === 1) {
+      record = candidates[0];
+    } else if (kind === "wordpress") {
+      record = candidates.find((entry) => recordVariant(entry) === "en_US");
+    } else {
+      record = candidates[0];
+    }
+
     if (!record) {
-      throw new BuilderError("package_not_found", `${kind} ${slug}@${version} is not available in the package library at ${this.root}`);
+      const suffix = variant ? ` (${variant})` : "";
+      throw new BuilderError("package_not_found", `${kind} ${slug}@${version}${suffix} is not available in the package library at ${this.root}`);
     }
 
     const absoluteZip = path.join(this.root, record.zip);
@@ -145,15 +190,32 @@ export class PackageRegistry {
     return { ...record, absoluteZip };
   }
 
-  async remove(kind: PackageKind, slug: string, version: string): Promise<PackageRecord> {
+  async remove(kind: PackageKind, slug: string, version: string, variant?: string): Promise<PackageRecord> {
     const registry = await this.load();
-    const index = registry.packages.findIndex((entry) => entry.kind === kind && entry.slug === slug && entry.version === version);
-    if (index < 0) {
-      throw new BuilderError("package_not_found", `${kind} ${slug}@${version} is not present in the package library.`);
+    const candidates = registry.packages
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.kind === kind && entry.slug === slug && entry.version === version);
+
+    let match = variant
+      ? candidates.find(({ entry }) => recordVariant(entry) === variant)
+      : candidates.length === 1 ? candidates[0] : kind === "wordpress"
+        ? candidates.find(({ entry }) => recordVariant(entry) === "en_US")
+        : candidates[0];
+
+    if (!match) {
+      throw new BuilderError("package_not_found", `${kind} ${slug}@${version}${variant ? ` (${variant})` : ""} is not present in the package library.`);
     }
 
-    const [record] = registry.packages.splice(index, 1);
-    await rm(path.join(this.root, "packages", kind, slug, version), { recursive: true, force: true });
+    const [record] = registry.packages.splice(match.index, 1);
+    const relativeParts = record.zip.replaceAll("\\", "/").split("/");
+    const isLegacyWordPressPath = record.kind === "wordpress" && relativeParts.length === 5;
+    if (isLegacyWordPressPath) {
+      await rm(path.join(this.root, record.zip), { force: true });
+      await rm(path.join(this.root, path.dirname(record.zip), "package.json"), { force: true });
+    } else {
+      const target = path.join(this.root, path.dirname(record.zip));
+      await rm(target, { recursive: true, force: true });
+    }
     await this.save(registry);
     return record;
   }

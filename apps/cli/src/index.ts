@@ -14,7 +14,7 @@ import {
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.11";
+const VERSION = "0.1.0-alpha.12";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;
@@ -24,12 +24,12 @@ Usage:
   wp-starter package add <package.zip> [--type plugin|theme|wordpress] [--library <dir>] [--replace]
   wp-starter package inspect <package.zip> [--type plugin|theme|wordpress]
   wp-starter package list [--type plugin|theme|wordpress] [--library <dir>]
-  wp-starter package remove --type <type> --slug <slug> --version <version> [--library <dir>]
+  wp-starter package remove --type <type> --slug <slug> --version <version> [--variant <variant>] [--library <dir>]
   wp-starter config add <starter-config.zip> [--id <id>] [--name <name>] [--library <dir>] [--replace]
   wp-starter config list [--library <dir>]
   wp-starter config check <id> [--library <dir>]
   wp-starter config remove <id> [--library <dir>]
-  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--exclude-plugin <slug>]... [--library <dir>] [--replace]
+  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--wordpress-version <version>] [--wordpress-variant <locale>] [--theme-version <version>] [--plugin-version <slug=version>]... [--exclude-plugin <slug>]... [--library <dir>] [--replace]
   wp-starter profile check <profile.json> [--library <dir>]
   wp-starter library path [--library <dir>]
   wp-starter build --profile <profile.json> --output <starter.zip> [--library <dir>]
@@ -86,6 +86,7 @@ async function handlePackage(): Promise<void> {
     console.log(`Type: ${record.kind}`);
     console.log(`Slug: ${record.slug}`);
     console.log(`Version: ${record.version}`);
+    if (record.variant) console.log(`Variant: ${record.variant}`);
     if (record.mainFile) console.log(`Main file: ${record.mainFile}`);
     console.log(`SHA-256: ${record.sha256}`);
     console.log(`Library: ${registry.root}`);
@@ -100,6 +101,8 @@ async function handlePackage(): Promise<void> {
       name: inspected.name,
       slug: inspected.slug,
       version: inspected.version,
+      variant: inspected.variant ?? null,
+      locale: inspected.locale ?? null,
       mainFile: inspected.mainFile ?? null,
       textDomain: inspected.textDomain ?? null,
       requiresWordPress: inspected.requiresWordPress ?? null,
@@ -122,6 +125,7 @@ async function handlePackage(): Promise<void> {
       Type: record.kind,
       Slug: record.slug,
       Version: record.version,
+      Variant: record.variant ?? "",
       Name: record.name,
       "Main file": record.mainFile ?? ""
     }));
@@ -136,7 +140,7 @@ async function handlePackage(): Promise<void> {
     const version = getArg("--version");
     if (!kind || !slug || !version) usage();
     const registry = new PackageRegistry(libraryDir());
-    const removed = await registry.remove(kind, slug, version);
+    const removed = await registry.remove(kind, slug, version, getArg("--variant") ?? undefined);
     console.log(`Removed: ${removed.kind} ${removed.slug}@${removed.version}`);
     return;
   }
@@ -246,10 +250,19 @@ async function handleProfile(): Promise<void> {
       );
     }
 
+    const pluginVersions = Object.fromEntries(getArgs("--plugin-version").map((entry) => {
+      const split = entry.indexOf("=");
+      if (split <= 0 || split === entry.length - 1) throw new BuilderError("invalid_profile", `--plugin-version must use slug=version: ${entry}`);
+      return [entry.slice(0, split), entry.slice(split + 1)];
+    }));
     const profile = await createProfileFromSnapshot(input, {
       libraryDir: libraryDir(),
       name: getArg("--name") ?? undefined,
       locale: getArg("--locale") ?? undefined,
+      wordpressVersion: getArg("--wordpress-version") ?? undefined,
+      wordpressVariant: getArg("--wordpress-variant") ?? undefined,
+      themeVersion: getArg("--theme-version") ?? undefined,
+      pluginVersions,
       excludePlugins: getArgs("--exclude-plugin")
     });
 
@@ -260,7 +273,7 @@ async function handleProfile(): Promise<void> {
     console.log(`Output: ${absoluteOutput}`);
     console.log(`Config: ${profile.config.id}`);
     console.log(`Locale: ${profile.locale}`);
-    console.log(`WordPress: ${profile.wordpress.version}`);
+    console.log(`WordPress: ${profile.wordpress.version}${profile.wordpress.variant ? ` (${profile.wordpress.variant})` : ""}`);
     console.log(`Theme: ${profile.theme.slug}@${profile.theme.version}`);
     console.log(`Plugins: ${profile.plugins.length}`);
     return;
@@ -272,7 +285,7 @@ async function handleProfile(): Promise<void> {
     console.log(`Profile: ${profile.name}`);
     console.log(`Schema: ${profile.schemaVersion}`);
     console.log(`Locale: ${profile.locale}`);
-    console.log(`WordPress: ${profile.wordpress.version}`);
+    console.log(`WordPress: ${profile.wordpress.version}${profile.wordpress.variant ? ` (${profile.wordpress.variant})` : ""}`);
     console.log(`Theme: ${profile.theme.slug}@${profile.theme.version}`);
     console.table(profile.plugins
       .filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale))

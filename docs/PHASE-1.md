@@ -17,7 +17,7 @@ wp-starter package add C:\Packages\elementor-pro.zip
 wp-starter package list
 ```
 
-The profile references `slug + version`; it does not care where the original ZIP came from or what the ZIP was named.
+The profile references exact package coordinates. Plugins/themes use `slug + version`; WordPress core uses `version + locale variant`. It does not care where the original ZIP came from or what the ZIP was named.
 
 After a reference configuration snapshot has `Missing: 0`, the CLI can generate the initial build profile automatically:
 

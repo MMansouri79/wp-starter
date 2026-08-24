@@ -109,3 +109,33 @@ test("registers arbitrary packages and builds schema v2 profiles from exact pack
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test("stores localized WordPress packages as separate variants of the same version", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "wp-starter-wp-variants-"));
+  try {
+    const makeCore = async (name, locale) => {
+      const base = path.join(temp, name, "wordpress");
+      await mkdir(path.join(base, "wp-admin"), { recursive: true });
+      await mkdir(path.join(base, "wp-includes"), { recursive: true });
+      await mkdir(path.join(base, "wp-content", "languages"), { recursive: true });
+      await writeFile(path.join(base, "wp-includes/version.php"), "<?php\n$wp_version = '7.1';\n");
+      if (locale !== "en_US") await writeFile(path.join(base, "wp-content", "languages", `${locale}.mo`), "language");
+      const zip = path.join(temp, `${name}.zip`);
+      await zipDir(path.join(temp, name), zip);
+      return zip;
+    };
+
+    const library = path.join(temp, "library");
+    const registry = new PackageRegistry(library);
+    await registry.add(await makeCore("wordpress-en", "en_US"));
+    await registry.add(await makeCore("wordpress-fa", "fa_IR"));
+
+    const records = (await registry.list("wordpress")).sort((a, b) => a.variant.localeCompare(b.variant));
+    assert.equal(records.length, 2);
+    assert.deepEqual(records.map((r) => r.variant), ["en_US", "fa_IR"]);
+    assert.equal((await registry.resolve("wordpress", "wordpress", "7.1", "en_US")).variant, "en_US");
+    assert.equal((await registry.resolve("wordpress", "wordpress", "7.1", "fa_IR")).variant, "fa_IR");
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});

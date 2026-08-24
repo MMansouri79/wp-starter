@@ -235,14 +235,17 @@ export class ConfigSnapshotRegistry {
     const available = await packages.list();
 
     const requirement = (
-      kind: SnapshotRequirement["kind"], slug: string, version: string, name: string
+      kind: SnapshotRequirement["kind"], slug: string, version: string, name: string, variant?: string
     ): SnapshotRequirement => {
-      const match = available.find((record) => record.kind === kind && record.slug === slug && record.version === version);
-      return { kind, slug, version, name, status: match ? "available" : "missing" };
+      const match = available.find((record) =>
+        record.kind === kind && record.slug === slug && record.version === version &&
+        (!variant || (record.variant || record.locale || (record.kind === "wordpress" ? "en_US" : "default")) === variant)
+      );
+      return { kind, slug, version, name, variant, status: match ? "available" : "missing" };
     };
 
     const requirements: SnapshotRequirement[] = [
-      requirement("wordpress", "wordpress", snapshot.wordpressVersion, "WordPress"),
+      requirement("wordpress", "wordpress", snapshot.wordpressVersion, "WordPress", snapshot.locale),
       requirement("theme", snapshot.theme.slug, snapshot.theme.version, snapshot.theme.name),
       ...snapshot.plugins.map((plugin) => requirement("plugin", plugin.slug, plugin.version, plugin.name))
     ];

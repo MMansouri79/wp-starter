@@ -110,7 +110,7 @@ Plugin binaries, config snapshots, profiles, and builder code are separate versi
 
 Configuration verification, WooCommerce page ownership, and Elementor default-kit repair.
 
-## Local GUI preview (alpha.11)
+## Local GUI profile editor (alpha.12)
 
 The Builder now includes a lightweight local GUI that runs entirely on `127.0.0.1` and calls the same builder-core APIs as the CLI. It is an interim usability layer before the final Electron shell, not a separate build engine.
 
@@ -127,8 +127,16 @@ The GUI currently supports:
 - adding arbitrary WordPress/plugin/theme ZIPs,
 - importing configuration snapshot ZIPs,
 - checking missing package requirements,
-- creating profiles with locale and plugin exclusions,
+- creating profiles with locale, exact WordPress locale variant, theme version, plugin-version selection, and plugin exclusions,
 - building the complete offline WordPress ZIP,
 - downloading previous builds.
 
 The CLI remains supported for diagnostics, scripting, and CI.
+
+## Versioned packages and localized WordPress core
+
+The package library keeps multiple versions of the same plugin or theme. The GUI groups those versions under one package row, and Build profiles choose the exact version to use. Older versions are retained until explicitly removed so existing profiles stay reproducible.
+
+WordPress core additionally has a locale variant. `WordPress 7.1 (en_US)` and `WordPress 7.1 (fa_IR)` are separate valid packages even though the core version is identical. Localized distributions are detected from WordPress package metadata/language files and can coexist in the same library.
+
+The Build screen is a profile editor: choose the configuration snapshot, destination locale, exact WordPress package, theme version, and the version of each included plugin before saving/building the profile.

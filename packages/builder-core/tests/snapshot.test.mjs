@@ -50,7 +50,9 @@ test("imports a configuration snapshot, ignores exporter infrastructure, and rep
     const wp = path.join(temp, "wp/wordpress");
     await mkdir(path.join(wp, "wp-admin"), { recursive: true });
     await mkdir(path.join(wp, "wp-includes"), { recursive: true });
+    await mkdir(path.join(wp, "wp-content/languages"), { recursive: true });
     await writeFile(path.join(wp, "wp-includes/version.php"), "<?php\n$wp_version = '7.1';\n");
+    await writeFile(path.join(wp, "wp-content/languages/fa_IR.mo"), "fake-language");
     const wpZip = path.join(temp, "wordpress.zip");
     await zipDir(path.join(temp, "wp"), wpZip);
 
@@ -92,12 +94,21 @@ test("imports a configuration snapshot, ignores exporter infrastructure, and rep
       libraryDir: library,
       name: "generated-from-snapshot"
     });
-    assert.equal(generated.schemaVersion, 3);
+    assert.equal(generated.schemaVersion, 4);
     assert.equal(generated.name, "generated-from-snapshot");
     assert.equal(generated.wordpress.version, "7.1");
+    assert.equal(generated.wordpress.variant, "fa_IR");
     assert.equal(generated.theme.slug, "hello-elementor");
     assert.deepEqual(generated.plugins.map((plugin) => plugin.slug).sort(), ["elementor", "filterx"]);
     assert.equal(generated.config.id, imported.record.id);
+
+    const wpEn = path.join(temp, "wp-en/wordpress");
+    await mkdir(path.join(wpEn, "wp-admin"), { recursive: true });
+    await mkdir(path.join(wpEn, "wp-includes"), { recursive: true });
+    await writeFile(path.join(wpEn, "wp-includes/version.php"), "<?php\n$wp_version = '7.1';\n");
+    const wpEnZip = path.join(temp, "wordpress-en.zip");
+    await zipDir(path.join(temp, "wp-en"), wpEnZip);
+    await packages.add(wpEnZip);
 
     const overridden = await createProfileFromSnapshot(imported.record.id, {
       libraryDir: library,
@@ -110,10 +121,10 @@ test("imports a configuration snapshot, ignores exporter infrastructure, and rep
 
     const profilePath = path.join(temp, "profile.json");
     await writeFile(profilePath, JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       name: "snapshot-build",
       locale: "fa_IR",
-      wordpress: { version: "7.1" },
+      wordpress: { version: "7.1", variant: "fa_IR" },
       theme: { slug: "hello-elementor", version: "3.4.9" },
       plugins: [{ slug: "elementor", version: "4.0.8" }],
       config: { id: imported.record.id },
@@ -121,7 +132,7 @@ test("imports a configuration snapshot, ignores exporter infrastructure, and rep
     }, null, 2));
 
     const profile = await loadProfile(profilePath, { libraryDir: library });
-    assert.equal(profile.schemaVersion, 3);
+    assert.equal(profile.schemaVersion, 4);
     assert.equal(path.resolve(profile.configExport), path.resolve(library, imported.record.zip));
   } finally {
     await rm(temp, { recursive: true, force: true });

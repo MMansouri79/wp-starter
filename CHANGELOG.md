@@ -129,3 +129,14 @@
 - Added one-click offline build creation and browser download.
 - Added Windows GUI launchers that reuse the existing local package library.
 - Kept the CLI as the debugging/automation interface; no builder logic was duplicated into the GUI.
+
+## 0.1.0-alpha.12 - 2026-08-24
+
+- Group package-library rows by package slug in the GUI so multiple installed versions appear as versions of one package rather than duplicate packages.
+- Add per-version remove actions in the GUI while preserving version pinning for existing profiles.
+- Add WordPress package variants keyed by locale, allowing the same WordPress version to coexist as `en_US`, `fa_IR`, and other localized distributions without checksum conflicts.
+- Detect localized WordPress packages from `$wp_local_package` or bundled core language files.
+- Add profile schema v4 with an explicit WordPress package variant.
+- Add GUI package-version selectors for WordPress, theme, and every plugin in a configuration snapshot.
+- Allow profiles to pin newer plugin/theme/core package versions independently from the reference snapshot while continuing to use the same exported configuration.
+- Migrate existing schema-v1 package registries transparently, treating legacy WordPress core entries as `en_US`.

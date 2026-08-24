@@ -9,6 +9,8 @@ export interface PackageInspection {
   version: string;
   packageRoot: string;
   installDir: string;
+  variant?: string;
+  locale?: string;
   mainFile?: string;
   textDomain?: string;
   requiresWordPress?: string;
@@ -22,6 +24,8 @@ export interface PackageRecord {
   name: string;
   version: string;
   installDir: string;
+  variant?: string;
+  locale?: string;
   mainFile?: string;
   textDomain?: string;
   requiresWordPress?: string;
@@ -34,10 +38,9 @@ export interface PackageRecord {
 }
 
 export interface RegistryFile {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   packages: PackageRecord[];
 }
-
 
 export interface SnapshotPluginRequirement {
   slug: string;
@@ -71,6 +74,7 @@ export interface SnapshotRequirement {
   slug: string;
   version: string;
   name: string;
+  variant?: string;
   status: SnapshotRequirementStatus;
 }
 
@@ -85,6 +89,7 @@ export interface SnapshotRequirementReport {
 export interface ArtifactRef {
   version: string;
   zip: string;
+  variant?: string;
 }
 
 export interface ThemeRef extends ArtifactRef {
@@ -103,7 +108,6 @@ export interface LanguageArchiveRef {
   zip: string;
 }
 
-
 export interface ProfileDocumentV3 {
   schemaVersion: 3;
   name: string;
@@ -120,8 +124,24 @@ export interface ProfileDocumentV3 {
   languageArchives?: LanguageArchiveRef[];
 }
 
+export interface ProfileDocumentV4 {
+  schemaVersion: 4;
+  name: string;
+  locale: string;
+  wordpress: { version: string; variant: string };
+  theme: { slug: string; version: string };
+  plugins: Array<{
+    slug: string;
+    version: string;
+    required?: boolean;
+    locales?: string[];
+  }>;
+  config: { id: string };
+  languageArchives?: LanguageArchiveRef[];
+}
+
 export interface BuildProfile {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 1 | 2 | 3 | 4;
   name: string;
   locale: string;
   wordpress: ArtifactRef;

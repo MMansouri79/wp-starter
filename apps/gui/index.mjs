@@ -17,7 +17,7 @@ import {
   PackageRegistry
 } from "../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.11";
+const VERSION = "0.1.0-alpha.12";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
 const publicDir = path.join(here, "public");
@@ -94,7 +94,7 @@ async function listProfiles() {
         name: String(raw.name || entry.name.replace(/\.json$/i, "")),
         file: entry.name,
         locale: String(raw.locale || ""),
-        wordpress: String(raw.wordpress?.version || ""),
+        wordpress: raw.wordpress ? `${String(raw.wordpress.version || "")}${raw.wordpress.variant ? ` (${raw.wordpress.variant})` : ""}` : "",
         theme: raw.theme ? `${raw.theme.slug}@${raw.theme.version}` : "",
         plugins: Array.isArray(raw.plugins) ? raw.plugins.length : 0,
         config: String(raw.config?.id || "")
@@ -170,10 +170,11 @@ async function api(req, res, url) {
     const kind = url.searchParams.get("kind");
     const slug = url.searchParams.get("slug");
     const version = url.searchParams.get("version");
+    const variant = url.searchParams.get("variant") || undefined;
     if (!(["plugin", "theme", "wordpress"].includes(kind)) || !slug || !version) {
       throw new BuilderError("invalid_request", "kind, slug and version are required.");
     }
-    json(res, 200, await new PackageRegistry(libraryRoot).remove(kind, slug, version));
+    json(res, 200, await new PackageRegistry(libraryRoot).remove(kind, slug, version, variant));
     return true;
   }
 
@@ -204,11 +205,16 @@ async function api(req, res, url) {
     const name = String(body.name || configId || "profile").trim();
     const locale = String(body.locale || "").trim() || undefined;
     const excludedPlugins = Array.isArray(body.excludedPlugins) ? body.excludedPlugins.map(String) : [];
+    const pluginVersions = body.pluginVersions && typeof body.pluginVersions === "object" ? body.pluginVersions : {};
     const profile = await createProfileFromSnapshot(configId, {
       libraryDir: libraryRoot,
       name,
       locale,
-      excludePlugins: excludedPlugins
+      excludePlugins: excludedPlugins,
+      wordpressVersion: String(body.wordpressVersion || "").trim() || undefined,
+      wordpressVariant: String(body.wordpressVariant || "").trim() || undefined,
+      themeVersion: String(body.themeVersion || "").trim() || undefined,
+      pluginVersions
     });
     await mkdir(profilesDir, { recursive: true });
     const filename = `${safeName(name, "profile")}.json`;

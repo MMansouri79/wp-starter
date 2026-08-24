@@ -37,7 +37,7 @@
         <div class="panel">
           <div class="panel-head"><div><h2>Package Library</h2><p>Add any WordPress core, theme, or plugin ZIP. Type and version are detected automatically.</p></div><label class="primary file-button">+ Add ZIP<input id="package-file" type="file" accept=".zip" multiple></label></div>
           <div class="dropzone" id="package-drop">Drop plugin, theme, or WordPress ZIPs here</div>
-          <div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Slug</th><th>Version</th><th>Main file</th></tr></thead><tbody id="packages-body"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>Type</th><th>Name</th><th>Slug</th><th>Available versions</th><th>Actions</th></tr></thead><tbody id="packages-body"></tbody></table></div>
         </div>
       </section>
 
@@ -55,7 +55,9 @@
             <label>Configuration snapshot<select id="build-config"></select></label>
             <label>Profile name<input id="build-name" value="test-build" autocomplete="off"></label>
             <label>Destination locale<input id="build-locale" value="en_US" autocomplete="off"></label>
-            <div class="field"><span class="label">Plugins</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div></div>
+            <label>WordPress package<select id="build-wordpress"></select></label>
+            <label>Theme version<select id="build-theme"></select></label>
+            <div class="field"><span class="label">Plugins and versions</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div></div>
             <button id="create-profile" class="primary full">Create / Update Profile</button>
           </div>
           <div class="panel">

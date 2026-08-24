@@ -42,6 +42,30 @@ async function candidateRoots(extractRoot: string): Promise<string[]> {
   return roots;
 }
 
+
+async function detectWordPressLocale(root: string): Promise<string> {
+  const languages = path.join(root, "wp-content", "languages");
+  if (!(await exists(languages))) return "en_US";
+
+  const counts = new Map<string, number>();
+  async function scan(current: string, depth = 0): Promise<void> {
+    if (depth > 2) return;
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const target = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        await scan(target, depth + 1);
+        continue;
+      }
+      const match = entry.name.match(/(?:^|[-_])([a-z]{2,3}_[A-Z]{2})(?=\.(?:mo|po|l10n\.php)$)/);
+      if (match) counts.set(match[1], (counts.get(match[1]) || 0) + 1);
+    }
+  }
+  await scan(languages);
+  if (counts.size === 0) return "en_US";
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
+}
+
 async function inspectWordPress(extractRoot: string): Promise<PackageInspection | null> {
   for (const root of await candidateRoots(extractRoot)) {
     if (!(await exists(path.join(root, "wp-admin"))) || !(await exists(path.join(root, "wp-includes")))) {
@@ -59,13 +83,17 @@ async function inspectWordPress(extractRoot: string): Promise<PackageInspection 
       throw new BuilderError("invalid_wordpress_package", "WordPress package was detected but wp-includes/version.php did not expose $wp_version.");
     }
 
+    const localPackage = source.match(/\$wp_local_package\s*=\s*['"]([^'"]+)['"]/);
+    const locale = localPackage?.[1] || await detectWordPressLocale(root);
     return {
       kind: "wordpress",
       slug: "wordpress",
       name: "WordPress",
       version: match[1],
       packageRoot: root,
-      installDir: "wordpress"
+      installDir: "wordpress",
+      variant: locale,
+      locale
     };
   }
   return null;
