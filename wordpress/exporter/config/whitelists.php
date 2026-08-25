@@ -4,38 +4,105 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 return array(
+    /*
+     * Portable WordPress baseline only. Site identity, URLs, admin email,
+     * taxonomy IDs, page IDs and other destination-specific values are omitted.
+     */
     'wordpress_options' => array(
+        'blog_public',
         'default_comment_status',
         'default_ping_status',
         'users_can_register',
+        'default_role',
         'show_on_front',
-        'page_on_front',
-        'page_for_posts',
+        'posts_per_page',
+        'posts_per_rss',
+        'rss_use_excerpt',
         'timezone_string',
         'date_format',
         'time_format',
         'start_of_week',
+        'use_smilies',
+        'default_post_format',
+        'require_name_email',
+        'comment_registration',
+        'close_comments_for_old_posts',
+        'close_comments_days_old',
+        'thread_comments',
+        'thread_comments_depth',
+        'page_comments',
+        'comments_per_page',
+        'default_comments_page',
+        'comment_order',
+        'comments_notify',
+        'moderation_notify',
+        'comment_moderation',
+        'comment_previously_approved',
+        'comment_max_links',
+        'show_avatars',
+        'avatar_rating',
+        'avatar_default',
         'thumbnail_size_w',
         'thumbnail_size_h',
+        'thumbnail_crop',
         'medium_size_w',
         'medium_size_h',
+        'medium_large_size_w',
+        'medium_large_size_h',
         'large_size_w',
         'large_size_h',
     ),
 
+    /*
+     * General Elementor behavior only. Security-sensitive, beta/experiment,
+     * connection, license and identity options are deliberately not exported.
+     */
     'elementor_options' => array(
         'elementor_css_print_method',
         'elementor_disable_color_schemes',
         'elementor_disable_typography_schemes',
-        'elementor_unfiltered_files_upload',
-        'elementor_beta',
         'elementor_enable_inspector',
         'elementor_font_display',
         'elementor_landing_pages_activation',
-        'elementor_experiment-container',
-        'elementor_experiment-e_swiper_latest',
-        'elementor_experiment-e_optimized_markup',
-        'elementor_experiment-additional_custom_breakpoints',
+    ),
+
+    /*
+     * Exact general Site Settings that are safe to move between sites.
+     * Identity keys such as site_name/site_logo/site_favicon are not present.
+     */
+    'elementor_kit_exact' => array(
+        'system_colors',
+        'custom_colors',
+        'system_typography',
+        'custom_typography',
+        'default_generic_fonts',
+        'container_width',
+        'container_padding',
+        'space_between_widgets',
+        'page_title_selector',
+        'viewport_md',
+        'viewport_lg',
+        'viewport_mobile_extra',
+        'viewport_tablet_extra',
+        'viewport_laptop',
+        'viewport_widescreen',
+        'active_breakpoints',
+        'global_image_lightbox',
+    ),
+
+    /* Theme-style families. These prefixes are restricted to visual globals. */
+    'elementor_kit_prefixes' => array(
+        'body_',
+        'link_',
+        'h1_',
+        'h2_',
+        'h3_',
+        'h4_',
+        'h5_',
+        'h6_',
+        'button_',
+        'form_field_',
+        'lightbox_',
     ),
 
     'woocommerce_options' => array(
@@ -104,5 +171,48 @@ return array(
 
     'persian_woocommerce_options' => array(
         'persian_woocommerce_translates',
+    ),
+
+    /* Safe, reusable Code Snippets preferences. Version/debug/cloud state omitted. */
+    'code_snippets_settings' => array(
+        'general' => array(
+            'activate_by_default',
+            'enable_tags',
+            'enable_description',
+            'visual_editor_rows',
+            'list_order',
+            'disable_prism',
+            'hide_upgrade_menu',
+            'complete_uninstall',
+            'enable_flat_files',
+            'enable_admin_bar',
+            'admin_bar_snippet_limit',
+        ),
+        'editor' => array(
+            'indent_with_tabs',
+            'tab_size',
+            'indent_unit',
+            'font_size',
+            'wrap_lines',
+            'code_folding',
+            'line_numbers',
+            'auto_close_brackets',
+            'highlight_selection_matches',
+            'highlight_active_line',
+            'keymap',
+            'theme',
+        ),
+    ),
+
+    /* Portable snippet fields only. IDs/cloud/revision/error/runtime fields omitted. */
+    'code_snippet_fields' => array(
+        'name',
+        'desc',
+        'code',
+        'tags',
+        'scope',
+        'priority',
+        'active',
+        'locked',
     ),
 );

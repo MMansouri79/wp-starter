@@ -33,8 +33,18 @@ final class Admin_Page {
         ?>
         <div class="wrap">
             <h1>WP Starter Exporter</h1>
-            <p>Export only approved portable configuration from this reference site. Plugin/theme binaries are supplied separately to the local Builder.</p>
-            <p>The export intentionally excludes users, uploads, credentials, arbitrary options, and raw database data.</p>
+            <p><strong>Exporter <?php echo esc_html( MMS_WP_STARTER_EXPORTER_VERSION ); ?></strong></p>
+            <p>This export uses explicit allowlists and is intended for reusable starter configuration, not cloning a site.</p>
+            <ul style="list-style:disc;padding-left:22px">
+                <li><strong>WordPress:</strong> reusable Settings values, permalink structure, logical front/posts page references, and existing Home/About/Contact/Blog page definitions.</li>
+                <li><strong>Elementor:</strong> general Site Settings only: colors, typography, layout, breakpoints, theme styles, and approved behavior options.</li>
+                <li><strong>Elementor excluded:</strong> site identity, logo, favicon, site title/description, WooCommerce page IDs, licenses/connections, Theme Builder conditions, beta/experiment state, and arbitrary Kit fields.</li>
+                <li><strong>Code Snippets:</strong> reusable plugin preferences plus non-trashed snippets. Database IDs, cloud IDs, revision/error state, network-sharing state and condition IDs are excluded.</li>
+                <li><strong>WooCommerce:</strong> the existing reviewed portable settings allowlist.</li>
+                <li><strong>FilterX:</strong> still deferred until the portable ID-remapping adapter is implemented.</li>
+            </ul>
+            <div class="notice notice-warning inline"><p><strong>Code Snippets warning:</strong> snippet source code is intentionally included. If a snippet contains a hardcoded API key, token, password or other secret, that secret will be inside the export. Review sensitive snippets before moving the snapshot to another site.</p></div>
+            <p>The export does not intentionally include users, uploads/media, arbitrary wp_options, raw database data, licenses, connected-account data, or site-specific object IDs.</p>
             <p><a class="button button-primary" href="<?php echo esc_url( $url ); ?>">Download Starter Configuration</a></p>
         </div>
         <?php
@@ -48,20 +58,28 @@ final class Admin_Page {
         check_admin_referer( 'mms_wp_starter_export' );
 
         $exporter = new Exporter();
-        $config   = wp_json_encode( $exporter->build_config(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
-        $manifest = wp_json_encode( $exporter->build_manifest(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
+        $config   = wp_json_encode( $exporter->build_config(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+        $manifest = wp_json_encode( $exporter->build_manifest(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 
         if ( false === $config || false === $manifest ) {
             wp_die( 'Could not encode starter configuration.' );
         }
 
-        $tmp = trailingslashit( get_temp_dir() ) . 'wp-starter-export-' . wp_generate_password( 12, false, false );
+        $tmp = trailingslashit( get_temp_dir() ) . 'wp-starter-export-' . wp_generate_password( 20, false, false );
         if ( ! wp_mkdir_p( $tmp ) ) {
             wp_die( 'Could not create a temporary export directory.' );
         }
+        @chmod( $tmp, 0700 );
 
-        file_put_contents( $tmp . '/starter-config.json', $config . "\n" );
-        file_put_contents( $tmp . '/export-manifest.json', $manifest . "\n" );
+        $config_path   = $tmp . '/starter-config.json';
+        $manifest_path = $tmp . '/export-manifest.json';
+
+        if ( false === file_put_contents( $config_path, $config . "\n", LOCK_EX ) || false === file_put_contents( $manifest_path, $manifest . "\n", LOCK_EX ) ) {
+            self::cleanup( $tmp );
+            wp_die( 'Could not write temporary export files.' );
+        }
+        @chmod( $config_path, 0600 );
+        @chmod( $manifest_path, 0600 );
 
         $zip_path = $tmp . '/starter-config.zip';
         $ok       = self::create_zip( $tmp, $zip_path );
@@ -70,11 +88,13 @@ final class Admin_Page {
             self::cleanup( $tmp );
             wp_die( 'Could not build the starter configuration ZIP.' );
         }
+        @chmod( $zip_path, 0600 );
 
         nocache_headers();
         header( 'Content-Type: application/zip' );
         header( 'Content-Disposition: attachment; filename="starter-config-' . gmdate( 'Ymd-His' ) . '.zip"' );
         header( 'Content-Length: ' . filesize( $zip_path ) );
+        header( 'X-Content-Type-Options: nosniff' );
 
         readfile( $zip_path );
         self::cleanup( $tmp );
@@ -82,14 +102,17 @@ final class Admin_Page {
     }
 
     private static function create_zip( $source_dir, $zip_path ) {
-        if ( class_exists( '\ZipArchive' ) ) {
+        if ( class_exists( '\\ZipArchive' ) ) {
             $zip = new \ZipArchive();
             if ( true !== $zip->open( $zip_path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE ) ) {
                 return false;
             }
 
             foreach ( array( 'starter-config.json', 'export-manifest.json' ) as $name ) {
-                $zip->addFile( $source_dir . '/' . $name, $name );
+                if ( ! $zip->addFile( $source_dir . '/' . $name, $name ) ) {
+                    $zip->close();
+                    return false;
+                }
             }
 
             return $zip->close();
@@ -116,7 +139,7 @@ final class Admin_Page {
             }
 
             $path = $dir . '/' . $entry;
-            if ( is_dir( $path ) ) {
+            if ( is_dir( $path ) && ! is_link( $path ) ) {
                 self::cleanup( $path );
             } else {
                 @unlink( $path );

@@ -1,5 +1,20 @@
 # Changelog
 
+## Exporter 0.2.0-alpha.1 - 2026-08-25
+
+### Strict portable baseline + Code Snippets
+
+- Switched Elementor Kit export from a denylist to an explicit general-settings allowlist.
+- Elementor site identity, logo/favicon, WooCommerce page IDs, arbitrary Kit fields, license/connection state, Theme Builder conditions, beta/experiment state, and custom CSS are not exported.
+- Expanded the safe WordPress baseline while continuing to exclude site identity, URLs, admin email, taxonomy IDs, and raw destination-specific page IDs.
+- Added logical front-page/posts-page slug references instead of exporting destination-specific numeric IDs.
+- Added Code Snippets export using the plugin API when available.
+- Code Snippets export includes reusable general/editor preferences and non-trashed snippet name, description, code, tags, scope, priority, active/locked state and derived type.
+- Code Snippets database IDs, cloud IDs, conditions, revision/error/runtime state, modified timestamps, network-sharing state and trashed snippets are excluded.
+- Added an explicit warning that snippet code may itself contain hardcoded secrets and must be reviewed before reuse.
+- Excluded WP Starter infrastructure plugins from source plugin requirements.
+- Hardened temporary export permissions and download headers.
+
 ## 0.1.0-alpha.16 - 2026-08-24
 
 ### Phase 2: Snapshot Comparison

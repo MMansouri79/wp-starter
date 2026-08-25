@@ -4,7 +4,7 @@ A self-contained WordPress starter build system for offline or restricted hostin
 
 The project is intentionally split into three responsibilities:
 
-1. **Starter Exporter** runs on the reference WordPress site and exports only approved portable configuration.
+1. **Starter Exporter** runs on the reference WordPress site and exports only approved portable configuration. The Exporter is versioned independently from the Builder. Exporter 0.2 adds strict Elementor general-settings allowlists and Code Snippets support.
 2. **Builder CLI** runs on a developer machine and combines packages from a local package library, a configuration export, and the bootstrap runtime.
 3. **Starter Bootstrap** ships inside the generated WordPress distribution as an MU plugin and applies the exported configuration after the normal WordPress database/admin installer finishes.
 
