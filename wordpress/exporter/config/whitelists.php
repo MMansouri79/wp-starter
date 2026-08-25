@@ -54,55 +54,37 @@ return array(
     ),
 
     /*
-     * General Elementor behavior only. Security-sensitive, beta/experiment,
-     * connection, license and identity options are deliberately not exported.
+     * Elementor standalone options are deliberately excluded. The starter
+     * should carry reusable layout structure, not editor preferences, fonts,
+     * colors, feature flags, account state, or other site-specific behavior.
      */
-    'elementor_options' => array(
-        'elementor_css_print_method',
-        'elementor_disable_color_schemes',
-        'elementor_disable_typography_schemes',
-        'elementor_enable_inspector',
-        'elementor_font_display',
-        'elementor_landing_pages_activation',
-    ),
+    'elementor_options' => array(),
 
     /*
-     * Exact general Site Settings that are safe to move between sites.
-     * Identity keys such as site_name/site_logo/site_favicon are not present.
+     * Structural Elementor Site Settings only. These are layout primitives
+     * that can reasonably stay consistent between projects. Visual design
+     * tokens (colors, typography, body/link/heading/button/form/lightbox
+     * styles), site identity, custom CSS and WooCommerce IDs are excluded.
      */
     'elementor_kit_exact' => array(
-        'system_colors',
-        'custom_colors',
-        'system_typography',
-        'custom_typography',
-        'default_generic_fonts',
         'container_width',
         'container_padding',
         'space_between_widgets',
         'page_title_selector',
-        'viewport_md',
-        'viewport_lg',
-        'viewport_mobile_extra',
-        'viewport_tablet_extra',
-        'viewport_laptop',
-        'viewport_widescreen',
+        'stretched_section_container',
+        'default_page_template',
         'active_breakpoints',
-        'global_image_lightbox',
     ),
 
-    /* Theme-style families. These prefixes are restricted to visual globals. */
+    /*
+     * Responsive variants of the approved structural controls plus Elementor
+     * breakpoint values. Prefixes are intentionally narrow.
+     */
     'elementor_kit_prefixes' => array(
-        'body_',
-        'link_',
-        'h1_',
-        'h2_',
-        'h3_',
-        'h4_',
-        'h5_',
-        'h6_',
-        'button_',
-        'form_field_',
-        'lightbox_',
+        'container_width_',
+        'container_padding_',
+        'space_between_widgets_',
+        'viewport_',
     ),
 
     'woocommerce_options' => array(

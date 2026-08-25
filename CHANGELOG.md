@@ -1,5 +1,16 @@
 # Changelog
 
+## Exporter 0.2.0-alpha.2 - 2026-08-25
+
+### Structural Elementor baseline only
+
+- Narrowed Elementor export to reusable structural/layout settings only.
+- Removed Elementor colors, custom/system typography, generic fonts, body/link/heading/button/form/lightbox styles, and global lightbox settings from the portable snapshot.
+- Removed standalone Elementor behavior/editor options from export; Elementor now contributes only approved Kit layout primitives.
+- Preserved content/container width, responsive container width, container padding, responsive padding, widget gaps, breakpoints, page-title selector, stretched-section target, and default page layout.
+- Added explicit safety flags stating that Elementor design-system and visual-style data are not exported.
+- Updated the Exporter admin screen to describe the narrower structural-only policy.
+
 ## Exporter 0.2.0-alpha.1 - 2026-08-25
 
 ### Strict portable baseline + Code Snippets

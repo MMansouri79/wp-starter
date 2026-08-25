@@ -37,8 +37,8 @@ final class Admin_Page {
             <p>This export uses explicit allowlists and is intended for reusable starter configuration, not cloning a site.</p>
             <ul style="list-style:disc;padding-left:22px">
                 <li><strong>WordPress:</strong> reusable Settings values, permalink structure, logical front/posts page references, and existing Home/About/Contact/Blog page definitions.</li>
-                <li><strong>Elementor:</strong> general Site Settings only: colors, typography, layout, breakpoints, theme styles, and approved behavior options.</li>
-                <li><strong>Elementor excluded:</strong> site identity, logo, favicon, site title/description, WooCommerce page IDs, licenses/connections, Theme Builder conditions, beta/experiment state, and arbitrary Kit fields.</li>
+                <li><strong>Elementor:</strong> structural Site Settings only: content/container width, container padding, widget gaps, breakpoints, page-title selector, stretched-section target, and default page layout.</li>
+                <li><strong>Elementor excluded:</strong> colors, fonts, typography, body/link/heading/button/form/lightbox styles, custom CSS, site identity, logo, favicon, site title/description, WooCommerce page IDs, licenses/connections, Theme Builder conditions, editor preferences, beta/experiment state, and arbitrary Kit fields.</li>
                 <li><strong>Code Snippets:</strong> reusable plugin preferences plus non-trashed snippets. Database IDs, cloud IDs, revision/error state, network-sharing state and condition IDs are excluded.</li>
                 <li><strong>WooCommerce:</strong> the existing reviewed portable settings allowlist.</li>
                 <li><strong>FilterX:</strong> still deferred until the portable ID-remapping adapter is implemented.</li>

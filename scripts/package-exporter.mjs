@@ -5,8 +5,7 @@ import { createZip } from "../packages/builder-core/dist/archive.js";
 
 const scriptFile = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptFile), "..");
-const packageJson = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8"));
-const version = packageJson.version;
+const version = (await readFile(path.join(repoRoot, "wordpress/exporter/VERSION.txt"), "utf8")).trim();
 const artifacts = path.join(repoRoot, "artifacts");
 const stageRoot = path.join(artifacts, ".exporter-stage");
 const stage = path.join(stageRoot, "wp-starter-exporter");

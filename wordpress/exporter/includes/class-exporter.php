@@ -41,7 +41,7 @@ final class Exporter {
                 'elementor' => array(
                     'options'      => $this->read_options( $this->whitelists['elementor_options'] ),
                     'kit_settings' => $this->elementor_kit_settings(),
-                    'policy'       => 'general_settings_only',
+                    'policy'       => 'structural_layout_only',
                 ),
                 'woocommerce' => array(
                     'options' => $this->read_options( $this->whitelists['woocommerce_options'] ),
@@ -63,6 +63,8 @@ final class Exporter {
                 'raw_database_exported'                     => false,
                 'site_specific_ids_intentionally_excluded'  => true,
                 'elementor_site_identity_exported'          => false,
+                'elementor_design_system_exported'          => false,
+                'elementor_visual_styles_exported'          => false,
                 'elementor_license_connection_exported'     => false,
                 'elementor_theme_builder_conditions_exported' => false,
                 'code_snippets_code_exported'               => true,
