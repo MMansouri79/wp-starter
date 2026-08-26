@@ -62,14 +62,35 @@ function renderPackages() {
   document.querySelectorAll(".remove-package").forEach(btn => btn.onclick = () => removePackage(btn));
 }
 
+function fontWeightLabel(weight) {
+  const labels = {
+    100: "Thin",
+    200: "Extra Light",
+    300: "Light",
+    400: "Regular",
+    500: "Medium",
+    600: "Semi Bold",
+    700: "Bold",
+    800: "Extra Bold",
+    900: "Black"
+  };
+  return labels[Number(weight)] || `Weight ${weight}`;
+}
+
 function renderFonts() {
   const systems = state.fonts || [];
   $("#fonts-list").innerHTML = systems.map(system => {
     const legacy = (system.faces || []).some(face => face.format !== "woff2");
-    const faces = (system.faces || []).map(face => `<span class="version-pill">${esc(face.weight)} ${esc(face.style)}${face.format === "woff2" ? "" : ` · ${esc(face.format.toUpperCase())}`}</span>`).join("");
+    const faceRows = (system.faces || []).map(face => `
+      <div class="font-face-row">
+        <code class="font-face-file">${esc(face.filename)}</code>
+        <span class="font-face-weight"><b>${esc(face.weight)}</b><small>CSS weight</small></span>
+        <span class="font-face-label"><b>${esc(fontWeightLabel(face.weight))}</b><small>Detected label</small></span>
+        <span class="font-face-style"><b>${esc(face.style)}</b><small>Style</small></span>
+      </div>`).join("");
     const skipped = (system.skipped || []).length ? `<details class="inspect-details"><summary>Ignored WOFF2 files <span>${system.skipped.length}</span></summary>${(system.skipped || []).map(item => `<div class="kv-row"><code>${esc(item.filename)}</code><span>${esc(item.reason)}</span></div>`).join("")}</details>` : "";
     const legacyNote = legacy ? `<small class="field-help">Legacy multi-format profile. Re-import the original ZIP with this Builder to replace it with clean WOFF2-only family profiles.</small>` : "";
-    return `<div class="card font-card"><div><strong>${esc(system.name)}</strong><small><code>${esc(system.id)}</code> · ${system.faces.length} WOFF2 face${system.faces.length === 1 ? "" : "s"}</small>${legacyNote}<div class="version-list">${faces}</div>${skipped}</div><div class="action-list"><button class="tiny danger remove-font" data-id="${escAttr(system.id)}">Remove</button></div></div>`;
+    return `<div class="card font-card"><div class="font-card-main"><strong>${esc(system.name)}</strong><small><code>${esc(system.id)}</code> · ${system.faces.length} WOFF2 face${system.faces.length === 1 ? "" : "s"}</small>${legacyNote}<div class="font-face-map"><div class="font-face-head"><span>Font file</span><span>Weight</span><span>Name</span><span>Style</span></div>${faceRows}</div>${skipped}</div><div class="action-list"><button class="tiny danger remove-font" data-id="${escAttr(system.id)}">Remove</button></div></div>`;
   }).join("") || `<div class="empty">No font profiles yet. Import one ZIP containing one or more WOFF2 font families. Each detected family becomes its own profile automatically.</div>`;
   document.querySelectorAll(".remove-font").forEach(btn => btn.onclick = () => removeFontSystem(btn.dataset.id));
 }

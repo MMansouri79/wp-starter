@@ -261,6 +261,11 @@ test("GUI font import splits a multi-family ZIP into WOFF2-only named profiles",
     const state = await (await authFetch(`${baseUrl}/api/state`)).json();
     assert.deepEqual(state.fonts.map((profile) => profile.name), ["Yekan Bakh", "Yekan Bakh FaNum"]);
     assert(state.fonts.every((profile) => profile.faces.every((face) => face.format === "woff2")));
+    const yekan = state.fonts.find((profile) => profile.name === "Yekan Bakh");
+    assert.deepEqual(yekan.faces.map((face) => [face.filename, face.weight, face.style]), [
+      ["YekanBakh-Regular.woff2", 400, "normal"],
+      ["YekanBakh-Bold.woff2", 700, "normal"]
+    ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;

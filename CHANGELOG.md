@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-alpha.20 - 2026-08-26
+
+### Visible font weight mapping
+
+- Added an explicit per-face mapping table to every Font Profile card in the Builder GUI.
+- Each WOFF2 face now shows its exact stored filename, numeric CSS weight, human-readable weight label, and detected style.
+- Standard CSS weights are labeled Thin, Extra Light, Light, Regular, Medium, Semi Bold, Bold, Extra Bold, and Black.
+- Kept the numeric weight visible because that is the value ultimately registered with Elementor Pro.
+- Added GUI regression coverage verifying that imported font filenames remain paired with their detected weights/styles.
+
 ## 0.1.0-alpha.19 - 2026-08-26
 
 ### WOFF2-only font profiles
