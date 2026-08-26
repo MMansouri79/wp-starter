@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.20
+ * Version: 0.1.0-alpha.21
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -15,7 +15,7 @@ final class MMS_WP_Starter_Bootstrap {
     const ERROR_OPTION    = 'mms_wp_starter_bootstrap_error';
     const REPORT_OPTION   = 'mms_wp_starter_bootstrap_report';
     const REVISION_OPTION = 'mms_wp_starter_bootstrap_revision';
-    const CONFIG_REVISION = 3;
+    const CONFIG_REVISION = 4;
 
     public static function init() {
         add_action( 'admin_init', array( __CLASS__, 'maybe_run' ), 1 );
@@ -33,7 +33,7 @@ final class MMS_WP_Starter_Bootstrap {
             return;
         }
         if ( $completed && $revision < self::CONFIG_REVISION ) {
-            self::save_state( array( 'phase' => 'configure' ) );
+            self::save_state( array( 'phase' => 'fonts' ) );
             delete_option( self::COMPLETE_OPTION );
         }
 
@@ -513,6 +513,10 @@ final class MMS_WP_Starter_Bootstrap {
                 return new WP_Error( 'starter_font_copy_checksum_failed', 'Installed font checksum did not match: ' . $filename );
             }
             $url = trailingslashit( $font_url ) . rawurlencode( basename( $destination ) );
+            $attachment_id = self::ensure_font_attachment( $destination, $url, $family, $weight, $style, $filename );
+            if ( is_wp_error( $attachment_id ) ) {
+                return $attachment_id;
+            }
             $key = strtolower( $family ) . '|' . $weight . '|' . $style;
             if ( ! isset( $groups[ $family ] ) ) {
                 $groups[ $family ] = array();
@@ -524,7 +528,10 @@ final class MMS_WP_Starter_Bootstrap {
                     'font_style'  => $style,
                 );
             }
-            $groups[ $family ][ $key ][ $format ] = array( 'url' => esc_url_raw( $url ) );
+            $groups[ $family ][ $key ][ $format ] = array(
+                'id'  => absint( $attachment_id ),
+                'url' => esc_url_raw( $url ),
+            );
         }
 
         $installed = 0;
@@ -565,6 +572,74 @@ final class MMS_WP_Starter_Bootstrap {
         delete_option( 'elementor_fonts_manager_fonts' );
         delete_option( 'elementor_fonts_manager_font_types' );
         return $installed;
+    }
+
+    private static function ensure_font_attachment( $file_path, $url, $family, $weight, $style, $filename ) {
+        $uploads = wp_upload_dir();
+        if ( ! empty( $uploads['error'] ) ) {
+            return new WP_Error( 'starter_font_attachment_upload_dir_failed', 'WordPress uploads directory is unavailable while registering a font attachment: ' . $uploads['error'] );
+        }
+
+        $base_dir = realpath( $uploads['basedir'] );
+        $real_file = realpath( $file_path );
+        if ( false === $base_dir || false === $real_file ) {
+            return new WP_Error( 'starter_font_attachment_path_invalid', 'Could not resolve the installed font path inside WordPress uploads.' );
+        }
+        $base_normalized = rtrim( str_replace( '\\', '/', $base_dir ), '/' ) . '/';
+        $file_normalized = str_replace( '\\', '/', $real_file );
+        if ( 0 !== strpos( $file_normalized, $base_normalized ) ) {
+            return new WP_Error( 'starter_font_attachment_path_invalid', 'Installed font file is outside the WordPress uploads directory.' );
+        }
+
+        $relative = ltrim( substr( $file_normalized, strlen( $base_normalized ) ), '/' );
+        if ( '' === $relative ) {
+            return new WP_Error( 'starter_font_attachment_path_empty', 'Could not determine the installed font path relative to WordPress uploads.' );
+        }
+
+        $existing = get_posts(
+            array(
+                'post_type'      => 'attachment',
+                'post_status'    => 'inherit',
+                'posts_per_page' => 1,
+                'fields'         => 'ids',
+                'meta_key'       => '_wp_attached_file',
+                'meta_value'     => $relative,
+            )
+        );
+        $attachment_id = ! empty( $existing ) ? absint( $existing[0] ) : 0;
+
+        $title = trim( $family . ' ' . $weight . ( 'normal' !== $style ? ' ' . $style : '' ) );
+        $attachment_data = array(
+            'post_mime_type' => 'font/woff2',
+            'post_title'     => sanitize_text_field( $title ),
+            'post_status'    => 'inherit',
+            'post_content'   => '',
+            'post_excerpt'   => '',
+        );
+
+        if ( $attachment_id > 0 ) {
+            $attachment_data['ID'] = $attachment_id;
+            $updated = wp_update_post( $attachment_data, true );
+            if ( is_wp_error( $updated ) ) {
+                return $updated;
+            }
+        } else {
+            $attachment_data['guid'] = esc_url_raw( $url );
+            $attachment_id = wp_insert_attachment( $attachment_data, $real_file, 0, true );
+            if ( is_wp_error( $attachment_id ) ) {
+                return $attachment_id;
+            }
+        }
+
+        update_attached_file( $attachment_id, $real_file );
+        update_post_meta( $attachment_id, '_wp_attachment_wp_starter_font', array(
+            'family'   => sanitize_text_field( $family ),
+            'weight'   => absint( $weight ),
+            'style'    => sanitize_key( $style ),
+            'filename' => sanitize_file_name( $filename ),
+        ) );
+
+        return absint( $attachment_id );
     }
 
     private static function generate_elementor_font_face_css( $family, array $rows ) {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-alpha.21 - 2026-08-26
+
+- Fixed Elementor Pro Custom Fonts provisioning so each installed WOFF2 face is registered as a real WordPress Media attachment.
+- Elementor `elementor_font_files` rows now store both the attachment `id` and `url`, so WOFF2 files appear inside Elementor's Edit Font interface instead of only existing in generated CSS.
+- Font attachment registration is idempotent by uploads-relative path and records starter font metadata for traceability.
+- Raised the bootstrap configuration revision so an alpha.20-provisioned site can rerun from the Fonts phase when alpha.21 is overlaid for repair.
+
 ## 0.1.0-alpha.20 - 2026-08-26
 
 ### Visible font weight mapping
