@@ -2,6 +2,42 @@ export type PackageKind = "wordpress" | "theme" | "plugin";
 
 export type SnapshotRequirementStatus = "available" | "missing";
 
+export type FontStyle = "normal" | "italic" | "oblique";
+export type FontFormat = "woff2" | "woff" | "ttf" | "otf";
+
+export interface FontFaceRecord {
+  family: string;
+  weight: number;
+  style: FontStyle;
+  format: FontFormat;
+  filename: string;
+  file: string;
+  sha256: string;
+  variable?: boolean;
+}
+
+export interface FontSystemRecord {
+  id: string;
+  name: string;
+  sourceFilename: string;
+  addedAt: string;
+  faces: FontFaceRecord[];
+  skipped: Array<{ filename: string; reason: string }>;
+}
+
+export interface FontRegistryFile {
+  schemaVersion: 1;
+  systems: FontSystemRecord[];
+}
+
+export interface ResolvedFontFace extends FontFaceRecord {
+  absoluteFile: string;
+}
+
+export interface ResolvedFontSystem extends Omit<FontSystemRecord, "faces"> {
+  faces: ResolvedFontFace[];
+}
+
 export interface PackageInspection {
   kind: PackageKind;
   slug: string;
@@ -58,6 +94,7 @@ export interface ConfigSnapshotRecord {
   locale: string;
   theme: { slug: string; name: string; version: string };
   plugins: SnapshotPluginRequirement[];
+  sourcePlugins?: SnapshotPluginRequirement[];
   zip: string;
   sha256: string;
   sourceFilename: string;
@@ -194,6 +231,7 @@ export interface ConfigSnapshotInspection {
     locale: string;
     theme: { slug: string; name: string; version: string };
     plugins: SnapshotPluginRequirement[];
+    targetPlugins: SnapshotPluginRequirement[];
   };
   wordpress: {
     options: Record<string, unknown>;
@@ -210,6 +248,7 @@ export interface ConfigSnapshotInspection {
     adapterSettings: number;
     pages: number;
     activePlugins: number;
+    targetPlugins: number;
     portableAdapters: number;
     deferredAdapters: number;
   };
@@ -285,14 +324,32 @@ export interface ProfileDocumentV5 {
   languageArchives?: LanguageArchiveRef[];
 }
 
+export interface ProfileDocumentV6 {
+  schemaVersion: 6;
+  name: string;
+  locale: string;
+  wordpress: { version: string; variant: string };
+  theme: { slug: string; version: string } | null;
+  plugins: Array<{
+    slug: string;
+    version: string;
+    required?: boolean;
+    locales?: string[];
+  }>;
+  config: { id: string } | null;
+  fontSystem: { id: string } | null;
+  languageArchives?: LanguageArchiveRef[];
+}
+
 export interface BuildProfile {
-  schemaVersion: 1 | 2 | 3 | 4 | 5;
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
   name: string;
   locale: string;
   wordpress: ArtifactRef;
   theme: ThemeRef | null;
   plugins: PluginRef[];
   configExport: string | null;
+  fontSystem?: ResolvedFontSystem | null;
   languageArchives?: LanguageArchiveRef[];
 }
 
@@ -302,7 +359,7 @@ export interface BuildInputHash {
 }
 
 export interface StarterBuildManifest {
-  schemaVersion: 3;
+  schemaVersion: 4;
   builderVersion: string;
   builtAt: string;
   profile: string;
@@ -312,6 +369,11 @@ export interface StarterBuildManifest {
   theme: (ThemeRef & { sha256: string }) | null;
   plugins: Array<PluginRef & { sha256: string }>;
   configExport: BuildInputHash | null;
+  fontSystem: {
+    id: string;
+    name: string;
+    faces: Array<Omit<FontFaceRecord, "file"> & { file: string }>;
+  } | null;
   languageArchives: Array<LanguageArchiveRef & { sha256: string }>;
 }
 

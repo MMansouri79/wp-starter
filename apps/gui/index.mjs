@@ -2,7 +2,7 @@
 import http from "node:http";
 import path from "node:path";
 import os from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
@@ -15,11 +15,14 @@ import {
   createProfileFromPackages,
   createProfileFromSnapshot,
   defaultLibraryDir,
+  FontSystemRegistry,
   loadProfile,
   PackageRegistry
 } from "../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.16";
+const VERSION = "0.1.0-alpha.18";
+const SESSION_TOKEN = randomBytes(32).toString("hex");
+const SESSION_COOKIE = `wp_starter_session=${SESSION_TOKEN}`;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../..");
 const publicDir = path.join(here, "public");
@@ -29,12 +32,44 @@ const profilesDir = path.join(libraryRoot, "profiles");
 const buildsDir = path.join(libraryRoot, "builds");
 const buildJobs = new Map();
 
+function securityHeaders() {
+  return {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+  };
+}
+
+function localHostAllowed(req) {
+  const host = String(req.headers.host || "").toLowerCase();
+  return /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host);
+}
+
+function localOriginAllowed(req) {
+  const origin = String(req.headers.origin || "");
+  if (!origin) return true;
+  try {
+    const parsed = new URL(origin);
+    return (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") && parsed.protocol === "http:";
+  } catch { return false; }
+}
+
+function sessionAllowed(req) {
+  const cookies = String(req.headers.cookie || "").split(/;\s*/);
+  const token = cookies.find((entry) => entry.startsWith("wp_starter_session="))?.slice("wp_starter_session=".length) || "";
+  if (token.length !== SESSION_TOKEN.length) return false;
+  return timingSafeEqual(Buffer.from(token), Buffer.from(SESSION_TOKEN));
+}
+
 function json(res, status, value) {
   const body = JSON.stringify(value, null, 2);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...securityHeaders()
   });
   res.end(body);
 }
@@ -43,7 +78,8 @@ function text(res, status, value, contentType = "text/plain; charset=utf-8") {
   res.writeHead(status, {
     "Content-Type": contentType,
     "Content-Length": Buffer.byteLength(value),
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...securityHeaders()
   });
   res.end(value);
 }
@@ -106,6 +142,7 @@ async function listProfiles() {
         theme: raw.theme ? `${raw.theme.slug}@${raw.theme.version}` : "WordPress default",
         plugins: Array.isArray(raw.plugins) ? raw.plugins.length : 0,
         config: String(raw.config?.id || ""),
+        fontSystem: String(raw.fontSystem?.id || ""),
         updatedAt: info.mtime.toISOString()
       });
     } catch {
@@ -151,6 +188,7 @@ async function state() {
     library: libraryRoot,
     packages,
     configs,
+    fonts: await new FontSystemRegistry(libraryRoot).list(),
     profiles: await listProfiles(),
     builds: await listBuilds()
   };
@@ -162,7 +200,8 @@ async function serveFile(res, target, contentType) {
     res.writeHead(200, {
       "Content-Type": contentType,
       "Content-Length": data.length,
-      "Cache-Control": "no-store"
+      "Cache-Control": "no-store",
+      ...securityHeaders()
     });
     res.end(data);
   } catch {
@@ -186,7 +225,8 @@ async function createOrUpdateProfile(body) {
       wordpressVersion: String(body.wordpressVersion || "").trim() || undefined,
       wordpressVariant: String(body.wordpressVariant || "").trim() || undefined,
       themeVersion: String(body.themeVersion || "").trim() || undefined,
-      pluginVersions
+      pluginVersions,
+      fontSystemId: String(body.fontSystemId || "").trim() || null
     });
   }
 
@@ -198,7 +238,8 @@ async function createOrUpdateProfile(body) {
     wordpressVariant: String(body.wordpressVariant || "").trim(),
     themeSlug: String(body.themeSlug || "").trim() || null,
     themeVersion: String(body.themeVersion || "").trim() || null,
-    plugins: pluginVersions
+    plugins: pluginVersions,
+    fontSystemId: String(body.fontSystemId || "").trim() || null
   });
 }
 
@@ -279,6 +320,8 @@ function startBuildJob(profileFile) {
 
 async function api(req, res, url) {
   if (!url.pathname.startsWith("/api/")) return false;
+  if (!localHostAllowed(req) || !localOriginAllowed(req)) { json(res, 403, { error: "forbidden_origin", message: "Local GUI request origin is not allowed." }); return true; }
+  if (!sessionAllowed(req)) { json(res, 401, { error: "unauthorized", message: "Open the WP Starter GUI root page to establish a local session." }); return true; }
 
   if (req.method === "GET" && url.pathname === "/api/state") {
     json(res, 200, await state());
@@ -307,6 +350,27 @@ async function api(req, res, url) {
       throw new BuilderError("invalid_request", "kind, slug and version are required.");
     }
     json(res, 200, await new PackageRegistry(libraryRoot).remove(kind, slug, version, variant));
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/fonts") {
+    const filename = url.searchParams.get("filename") || "fonts.zip";
+    const replace = url.searchParams.get("replace") === "1";
+    const name = String(url.searchParams.get("name") || "").trim() || undefined;
+    const upload = await receiveZip(req, filename);
+    try {
+      const result = await new FontSystemRegistry(libraryRoot).add(upload.file, { replace, name });
+      json(res, 200, result);
+    } finally {
+      await rm(upload.tempDir, { recursive: true, force: true });
+    }
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/api/fonts") {
+    const id = String(url.searchParams.get("id") || "").trim();
+    if (!id) throw new BuilderError("invalid_request", "Font system id is required.");
+    json(res, 200, await new FontSystemRegistry(libraryRoot).remove(id));
     return true;
   }
 
@@ -426,9 +490,11 @@ export function createGuiServer() {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://127.0.0.1");
+      if (!localHostAllowed(req)) { text(res, 403, "Invalid local host header."); return; }
       if (await api(req, res, url)) return;
 
       if (req.method === "GET" && url.pathname.startsWith("/download/")) {
+        if (!sessionAllowed(req)) { text(res, 401, "Unauthorized local session."); return; }
         const filename = path.basename(decodeURIComponent(url.pathname.slice("/download/".length)));
         const target = path.join(buildsDir, filename);
         if (!filename.endsWith(".zip") || path.dirname(target) !== buildsDir) {
@@ -440,14 +506,23 @@ export function createGuiServer() {
           "Content-Type": "application/zip",
           "Content-Disposition": `attachment; filename=\"${filename.replaceAll('"', '')}\"`,
           "Content-Length": data.length,
-          "Cache-Control": "no-store"
+          "Cache-Control": "no-store",
+          ...securityHeaders()
         });
         res.end(data);
         return;
       }
 
       if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
-        await serveFile(res, path.join(publicDir, "index.html"), "text/html; charset=utf-8");
+        const data = await readFile(path.join(publicDir, "index.html"));
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Length": data.length,
+          "Cache-Control": "no-store",
+          "Set-Cookie": `${SESSION_COOKIE}; Path=/; HttpOnly; SameSite=Strict`,
+          ...securityHeaders()
+        });
+        res.end(data);
         return;
       }
       if (req.method === "GET" && url.pathname === "/app.js") {

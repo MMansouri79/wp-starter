@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -101,9 +101,11 @@ test("registers arbitrary packages and builds schema v2 profiles from exact pack
     const unpack = path.join(temp, "unpacked");
     await mkdir(unpack, { recursive: true });
     await execFileAsync("unzip", ["-q", output, "-d", unpack]);
-    assert.equal(result.manifest.schemaVersion, 3);
+    assert.equal(result.manifest.schemaVersion, 4);
     assert.equal(result.manifest.plugins[0].zip, "packages/plugins/arbitrary-plugin-2.4.1.zip");
-    await readFile(path.join(unpack, "wp-content/starter-package/packages/plugins/arbitrary-plugin-2.4.1.zip"));
+    const payloadName = (await readdir(path.join(unpack, "wp-content"))).find((name) => name.startsWith(".wp-starter-"));
+    assert.ok(payloadName);
+    await readFile(path.join(unpack, "wp-content", payloadName, "packages/plugins/arbitrary-plugin-2.4.1.zip"));
     await assert.rejects(() => readFile(path.join(unpack, "wp-content/plugins/arbitrary-plugin/bootstrap.php")));
   } finally {
     await rm(temp, { recursive: true, force: true });

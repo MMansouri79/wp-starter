@@ -102,7 +102,7 @@ test("imports a configuration snapshot, ignores exporter infrastructure, and rep
       libraryDir: library,
       name: "generated-from-snapshot"
     });
-    assert.equal(generated.schemaVersion, 5);
+    assert.equal(generated.schemaVersion, 6);
     assert.equal(generated.name, "generated-from-snapshot");
     assert.equal(generated.wordpress.version, "7.1");
     assert.equal(generated.wordpress.variant, "fa_IR");

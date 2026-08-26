@@ -32,11 +32,11 @@ The Phase 1 build pipeline provides:
 
 ## Phase 2 status
 
-**Phase 2 is in progress as of v0.1.0-alpha.16.** Configuration inspection and snapshot comparison are now implemented.
+**Phase 2 is in progress as of v0.1.0-alpha.18.** Configuration inspection/comparison, security hardening, explicit starter targeting, Code Snippets restoration, and reusable Font Systems are now implemented.
 
 In the GUI, open **Configurations → Inspect** to review a snapshot through Overview, Packages, WordPress, Structures, Adapters, and Safety tabs. Use **Configurations → Compare Snapshots** to compare a baseline export against a target export. The diff keeps software/package changes separate from portable setting changes and object/structure changes.
 
-The comparison model currently covers WordPress/theme/plugin coordinates, WordPress options and permalink behavior, adapter values, starter pages, adapter status, and exporter safety boundaries. Phase 2 continues with formal adapter remapping and portable object-backed structures such as Elementor templates and FilterX definitions.
+The comparison model currently covers WordPress/theme/plugin coordinates, WordPress options and permalink behavior, adapter values, starter pages, adapter status, and exporter safety boundaries. Builder alpha.18 also separates source inventory from starter targets, restores selected Code Snippets idempotently, hardens local/build-time archive handling and installer cleanup, and can bundle reusable static Font Systems into Elementor Pro Custom Fonts. Phase 2 continues with formal adapter remapping and portable object-backed structures such as Elementor templates and FilterX definitions.
 
 ## Quick start
 

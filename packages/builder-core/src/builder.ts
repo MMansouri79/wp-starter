@@ -1,4 +1,5 @@
 import { cp, mkdtemp, rm } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { createZip, extractZip } from "./archive.js";
@@ -84,17 +85,20 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
 
     const contentDir = path.join(staging, "wp-content");
     const muPluginDir = path.join(contentDir, "mu-plugins");
-    const starterDataDir = path.join(contentDir, "starter-package");
+    const payloadName = `.wp-starter-${randomBytes(10).toString("hex")}`;
+    const starterDataDir = path.join(contentDir, payloadName);
     const bundledPluginDir = path.join(starterDataDir, "packages", "plugins");
     const bundledThemeDir = path.join(starterDataDir, "packages", "themes");
     const bundledLanguageDir = path.join(starterDataDir, "packages", "languages");
+    const bundledFontDir = path.join(starterDataDir, "fonts");
 
     await Promise.all([
       ensureDir(muPluginDir),
       ensureDir(starterDataDir),
       ensureDir(bundledPluginDir),
       ensureDir(bundledThemeDir),
-      ensureDir(bundledLanguageDir)
+      ensureDir(bundledLanguageDir),
+      ensureDir(bundledFontDir)
     ]);
 
     let bundledTheme: StarterBuildManifest["theme"] = null;
@@ -168,6 +172,26 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
         })
     );
 
+    let bundledFontSystem: StarterBuildManifest["fontSystem"] = null;
+    if (profile.fontSystem) {
+      await emit(options, { percent: 75, stage: "fonts", message: `Packaging font system ${profile.fontSystem.name}…` });
+      const faces = [];
+      for (let index = 0; index < profile.fontSystem.faces.length; index++) {
+        const face = profile.fontSystem.faces[index];
+        const safeFile = `${index + 1}-${safeArtifactName(face.filename)}`;
+        const relative = `fonts/${safeFile}`;
+        const target = path.join(bundledFontDir, safeFile);
+        await cp(face.absoluteFile, target, { force: true });
+        faces.push({
+          family: face.family, weight: face.weight, style: face.style, format: face.format, filename: face.filename,
+          file: relative, sha256: await sha256File(target), variable: face.variable === true
+        });
+      }
+      bundledFontSystem = { id: profile.fontSystem.id, name: profile.fontSystem.name, faces };
+    } else {
+      await emit(options, { percent: 75, stage: "fonts", message: "No font system selected." });
+    }
+
     let configExport: StarterBuildManifest["configExport"] = null;
     if (profile.configExport) {
       await emit(options, { percent: 78, stage: "configuration", message: "Embedding configuration snapshot…" });
@@ -190,7 +214,7 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
     await cp(path.resolve(options.bootstrapFile), path.join(muPluginDir, "site-starter-bootstrap.php"), { force: true });
 
     const manifest: StarterBuildManifest = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       builderVersion: options.builderVersion,
       builtAt: new Date().toISOString(),
       profile: profile.name,
@@ -204,6 +228,7 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       theme: bundledTheme,
       plugins: bundledPlugins,
       configExport,
+      fontSystem: bundledFontSystem,
       languageArchives: bundledLanguages
     };
 

@@ -18,7 +18,14 @@ test("bootstrap owns only custom pages and repairs Elementor kit", async () => {
 
 test("exporter includes complete reviewed WordPress baseline keys", async () => {
   const whitelist = await readFile(path.join(repoRoot, "wordpress/exporter/config/whitelists.php"), "utf8");
-  for (const key of ["page_on_front", "page_for_posts", "large_size_h"]) {
-    assert.equal(whitelist.includes(`'${key}'`), true, `${key} should be exported`);
+  assert.equal(whitelist.includes("'large_size_h'"), true, "large_size_h should be exported");
+  assert.equal(whitelist.includes("'page_on_front'"), false, "raw front-page IDs must not be exported");
+  assert.equal(whitelist.includes("'page_for_posts'"), false, "raw posts-page IDs must not be exported");
+});
+
+test("bootstrap restores snippets/fonts and removes one-time payload", async () => {
+  const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
+  for (const marker of ["apply_code_snippets_adapter", "\\Code_Snippets\\save_snippet", "elementor_font_files", "elementor_font_face", "cleanup_payload_and_self", ".wp-starter-"]) {
+    assert.equal(bootstrap.includes(marker), true, `${marker} should be present in hardened bootstrap`);
   }
 });

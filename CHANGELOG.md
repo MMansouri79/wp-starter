@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.0-alpha.18 - 2026-08-26
+
+### Security hardening, target selection, Code Snippets restore, and Font Systems
+
+- Separated source-site plugin inventory from explicit starter target packages.
+- Added schema-v2 snapshot validation with strict allowlists for WordPress and supported adapters.
+- Added logical front-page/posts-page roles instead of copying source database IDs.
+- Added hardened ZIP validation for traversal, absolute paths, symlinks, encryption, excessive expansion, and suspicious archives.
+- Added per-process GUI API authentication, Host/Origin validation, and browser security headers while retaining localhost-only binding.
+- Randomized bundled staging paths and added verified post-provision cleanup of package payloads and the one-time Bootstrap MU plugin.
+- Added idempotent Code Snippets restoration using the plugin public API and logical snippet identity.
+- Added reusable Font Systems to the local Builder library, profile selection, automatic static face detection, and offline Elementor Pro Custom Fonts installation.
+- Font Systems detect common 100-900 weights plus normal/italic/oblique styles; variable fonts are currently skipped with a warning.
+- Font-enabled profiles require both Elementor and Elementor Pro.
+
+## Exporter 0.2.0-alpha.4 - 2026-08-26
+
+### Real-site starter targeting and safer structural export
+
+- Added explicit starter-package selection separate from source plugin inventory.
+- Added Code Snippets selection with active reusable snippets selected by default and inactive/sample snippets excluded by default.
+- Added logical WordPress front/posts page roles and removed raw page IDs from the portable model.
+- Kept Elementor export structural-only: widths, padding, gaps, breakpoints, page-title selector, stretched-section target, and default page layout.
+- Kept Elementor colors, typography, fonts, visual styling, site identity, licenses/connections, Theme Builder conditions, and arbitrary Kit fields excluded.
+- Tightened temporary export permissions and schema-v2 safety metadata.
+
 ## Exporter 0.2.0-alpha.2 - 2026-08-25
 
 ### Structural Elementor baseline only

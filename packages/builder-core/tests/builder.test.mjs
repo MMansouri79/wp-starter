@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -99,13 +99,16 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
     const bootstrap = await readFile(path.join(unpack, "wp-content/mu-plugins/site-starter-bootstrap.php"), "utf8");
     assert.match(bootstrap, /WP Starter Bootstrap/);
 
-    const build = JSON.parse(await readFile(path.join(unpack, "wp-content/starter-package/starter-build.json"), "utf8"));
-    assert.equal(build.schemaVersion, 3);
+    const payloadName = (await readdir(path.join(unpack, "wp-content"))).find((name) => name.startsWith(".wp-starter-"));
+    assert.ok(payloadName, "randomized starter payload should exist");
+    const payload = path.join(unpack, "wp-content", payloadName);
+    const build = JSON.parse(await readFile(path.join(payload, "starter-build.json"), "utf8"));
+    assert.equal(build.schemaVersion, 4);
     assert.equal(build.plugins[0].file, "example-plugin/example-plugin.php");
     assert.equal(build.plugins[0].zip, "packages/plugins/example-plugin-1.0.0.zip");
 
-    const bundledPlugin = path.join(unpack, "wp-content/starter-package/packages/plugins/example-plugin-1.0.0.zip");
-    const bundledTheme = path.join(unpack, "wp-content/starter-package/packages/themes/hello-elementor-1.0.0.zip");
+    const bundledPlugin = path.join(payload, "packages/plugins/example-plugin-1.0.0.zip");
+    const bundledTheme = path.join(payload, "packages/themes/hello-elementor-1.0.0.zip");
     await readFile(bundledPlugin);
     await readFile(bundledTheme);
 
@@ -163,7 +166,7 @@ test("builds a package-only profile without a configuration snapshot or custom t
       themeVersion: null,
       plugins: { "example-plugin": "2.0.0" }
     });
-    assert.equal(profileDocument.schemaVersion, 5);
+    assert.equal(profileDocument.schemaVersion, 6);
     assert.equal(profileDocument.config, null);
     assert.equal(profileDocument.theme, null);
 
@@ -183,7 +186,7 @@ test("builds a package-only profile without a configuration snapshot or custom t
       onProgress: (entry) => progress.push(entry)
     });
 
-    assert.equal(result.manifest.schemaVersion, 3);
+    assert.equal(result.manifest.schemaVersion, 4);
     assert.equal(result.manifest.configurationEnabled, false);
     assert.equal(result.manifest.configExport, null);
     assert.equal(result.manifest.theme, null);
@@ -192,8 +195,11 @@ test("builds a package-only profile without a configuration snapshot or custom t
     const unpack = path.join(temp, "unpacked");
     await mkdir(unpack, { recursive: true });
     await execFileAsync("unzip", ["-q", output, "-d", unpack]);
-    await assert.rejects(() => readFile(path.join(unpack, "wp-content/starter-package/starter-config.json")));
-    await readFile(path.join(unpack, "wp-content/starter-package/packages/plugins/example-plugin-2.0.0.zip"));
+    const payloadName = (await readdir(path.join(unpack, "wp-content"))).find((name) => name.startsWith(".wp-starter-"));
+    assert.ok(payloadName);
+    const payload = path.join(unpack, "wp-content", payloadName);
+    await assert.rejects(() => readFile(path.join(payload, "starter-config.json")));
+    await readFile(path.join(payload, "packages/plugins/example-plugin-2.0.0.zip"));
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

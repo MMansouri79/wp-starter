@@ -14,7 +14,6 @@ return array(
         'default_ping_status',
         'users_can_register',
         'default_role',
-        'show_on_front',
         'posts_per_page',
         'posts_per_rss',
         'rss_use_excerpt',

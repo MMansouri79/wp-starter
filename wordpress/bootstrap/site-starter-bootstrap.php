@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.16
+ * Version: 0.1.0-alpha.18
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -15,7 +15,7 @@ final class MMS_WP_Starter_Bootstrap {
     const ERROR_OPTION    = 'mms_wp_starter_bootstrap_error';
     const REPORT_OPTION   = 'mms_wp_starter_bootstrap_report';
     const REVISION_OPTION = 'mms_wp_starter_bootstrap_revision';
-    const CONFIG_REVISION = 1;
+    const CONFIG_REVISION = 3;
 
     public static function init() {
         add_action( 'admin_init', array( __CLASS__, 'maybe_run' ), 1 );
@@ -29,41 +29,42 @@ final class MMS_WP_Starter_Bootstrap {
 
         $completed = get_option( self::COMPLETE_OPTION );
         $revision  = absint( get_option( self::REVISION_OPTION, 0 ) );
-
         if ( $completed && $revision >= self::CONFIG_REVISION ) {
             return;
         }
-
-        // Alpha.10 introduced a configuration repair revision. Existing alpha.9
-        // test installs may already be marked complete even though WooCommerce
-        // pages were duplicated or Elementor had no valid active kit. Re-run
-        // only the configuration phase instead of reinstalling package files.
         if ( $completed && $revision < self::CONFIG_REVISION ) {
             self::save_state( array( 'phase' => 'configure' ) );
             delete_option( self::COMPLETE_OPTION );
         }
 
-        $build = self::read_json( WP_CONTENT_DIR . '/starter-package/starter-build.json' );
+        $root = self::package_root();
+        if ( is_wp_error( $root ) ) {
+            self::fail( $root->get_error_message() );
+            return;
+        }
+        $build = self::read_json( $root . '/starter-build.json' );
         if ( is_wp_error( $build ) ) {
             self::fail( $build->get_error_message() );
             return;
         }
+        if ( 2 > absint( $build['schemaVersion'] ?? 0 ) ) {
+            self::fail( 'This starter build uses an obsolete package layout.' );
+            return;
+        }
 
-        $configuration_enabled = array_key_exists( 'configurationEnabled', $build )
-            ? ! empty( $build['configurationEnabled'] )
-            : file_exists( WP_CONTENT_DIR . '/starter-package/starter-config.json' );
+        $configuration_enabled = array_key_exists( 'configurationEnabled', $build ) ? ! empty( $build['configurationEnabled'] ) : file_exists( $root . '/starter-config.json' );
         $config = array();
         if ( $configuration_enabled ) {
-            $config = self::read_json( WP_CONTENT_DIR . '/starter-package/starter-config.json' );
+            $config = self::read_json( $root . '/starter-config.json' );
             if ( is_wp_error( $config ) ) {
                 self::fail( $config->get_error_message() );
                 return;
             }
-        }
-
-        if ( 2 > absint( $build['schemaVersion'] ?? 0 ) ) {
-            self::fail( 'This starter build uses an obsolete package layout. Rebuild it with WP Starter Builder alpha.6 or newer.' );
-            return;
+            $validation = self::validate_configuration_schema( $config );
+            if ( is_wp_error( $validation ) ) {
+                self::fail( $validation->get_error_message() );
+                return;
+            }
         }
 
         $state = self::get_state();
@@ -71,11 +72,7 @@ final class MMS_WP_Starter_Bootstrap {
 
         if ( 'theme' === $phase ) {
             $result = self::install_theme( $build );
-            if ( is_wp_error( $result ) ) {
-                self::fail( $result->get_error_message() );
-                return;
-            }
-
+            if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
             self::save_state( array( 'phase' => 'install_plugins', 'plugin_index' => 0 ) );
             self::continue_setup();
         }
@@ -83,25 +80,13 @@ final class MMS_WP_Starter_Bootstrap {
         if ( 'install_plugins' === $phase ) {
             $plugins = array_values( (array) ( $build['plugins'] ?? array() ) );
             $index   = absint( $state['plugin_index'] ?? 0 );
-
             if ( $index < count( $plugins ) ) {
                 $result = self::install_plugin( $plugins[ $index ] );
-                if ( is_wp_error( $result ) ) {
-                    self::fail( $result->get_error_message() );
-                    return;
-                }
-
+                if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
                 self::save_state( array( 'phase' => 'install_plugins', 'plugin_index' => $index + 1 ) );
                 self::continue_setup();
             }
-
-            self::save_state(
-                array(
-                    'phase'               => 'activate_plugins',
-                    'activation_queue'    => array_keys( $plugins ),
-                    'activation_failures' => 0,
-                )
-            );
+            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => array_keys( $plugins ), 'activation_failures' => 0 ) );
             self::continue_setup();
         }
 
@@ -109,53 +94,40 @@ final class MMS_WP_Starter_Bootstrap {
             $plugins = array_values( (array) ( $build['plugins'] ?? array() ) );
             $queue   = array_values( (array) ( $state['activation_queue'] ?? array_keys( $plugins ) ) );
             $failed  = absint( $state['activation_failures'] ?? 0 );
-
             if ( empty( $queue ) ) {
-                self::save_state( array( 'phase' => 'languages', 'language_index' => 0 ) );
+                self::save_state( array( 'phase' => 'fonts' ) );
                 self::continue_setup();
             }
-
             $plugin_index = absint( array_shift( $queue ) );
             $plugin       = $plugins[ $plugin_index ] ?? array();
             $result       = self::activate_plugin_component( $plugin );
-
             if ( is_wp_error( $result ) ) {
                 $queue[] = $plugin_index;
                 $failed++;
-
-                if ( $failed >= count( $queue ) ) {
-                    self::fail( 'Could not activate the remaining starter plugins. Last error: ' . $result->get_error_message() );
-                    return;
-                }
+                if ( $failed >= max( 1, count( $queue ) ) ) { self::fail( 'Could not activate the remaining starter plugins. Last error: ' . $result->get_error_message() ); return; }
             } else {
                 $failed = 0;
             }
+            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => $queue, 'activation_failures' => $failed ) );
+            self::continue_setup();
+        }
 
-            self::save_state(
-                array(
-                    'phase'               => 'activate_plugins',
-                    'activation_queue'    => $queue,
-                    'activation_failures' => $failed,
-                )
-            );
+        if ( 'fonts' === $phase ) {
+            $result = self::install_font_system( isset( $build['fontSystem'] ) && is_array( $build['fontSystem'] ) ? $build['fontSystem'] : array() );
+            if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
+            self::save_state( array( 'phase' => 'languages', 'language_index' => 0 ) );
             self::continue_setup();
         }
 
         if ( 'languages' === $phase ) {
             $archives = array_values( (array) ( $build['languageArchives'] ?? array() ) );
             $index    = absint( $state['language_index'] ?? 0 );
-
             if ( $index < count( $archives ) ) {
                 $result = self::install_language_archive( $archives[ $index ] );
-                if ( is_wp_error( $result ) ) {
-                    self::fail( $result->get_error_message() );
-                    return;
-                }
-
+                if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
                 self::save_state( array( 'phase' => 'languages', 'language_index' => $index + 1 ) );
                 self::continue_setup();
             }
-
             self::save_state( array( 'phase' => 'configure' ) );
             self::continue_setup();
         }
@@ -163,26 +135,16 @@ final class MMS_WP_Starter_Bootstrap {
         if ( 'configure' === $phase ) {
             if ( $configuration_enabled ) {
                 $result = self::apply_configuration( $config, $build );
-                if ( is_wp_error( $result ) ) {
-                    self::fail( $result->get_error_message() );
-                    return;
-                }
+                if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
             } else {
-                update_option(
-                    self::REPORT_OPTION,
-                    array(
-                        'verification' => array( 'checked' => 0, 'mismatches' => 0 ),
-                        'woocommerce_duplicates_removed' => 0,
-                        'configuration_skipped' => true,
-                    ),
-                    false
-                );
+                update_option( self::REPORT_OPTION, array( 'verification' => array( 'checked' => 0, 'mismatches' => 0 ), 'woocommerce_duplicates_removed' => 0, 'configuration_skipped' => true ), false );
             }
 
             self::save_state( array( 'phase' => 'complete' ) );
             update_option( self::COMPLETE_OPTION, gmdate( 'c' ), false );
             update_option( self::REVISION_OPTION, self::CONFIG_REVISION, false );
             delete_option( self::ERROR_OPTION );
+            self::cleanup_payload_and_self();
         }
     }
 
@@ -212,14 +174,39 @@ final class MMS_WP_Starter_Bootstrap {
         return true;
     }
 
+    private static function package_root() {
+        $legacy = WP_CONTENT_DIR . '/starter-package';
+        if ( is_file( $legacy . '/starter-build.json' ) ) {
+            return $legacy;
+        }
+        $matches = glob( WP_CONTENT_DIR . '/.wp-starter-*', GLOB_ONLYDIR );
+        if ( ! is_array( $matches ) ) {
+            $matches = array();
+        }
+        $valid = array();
+        foreach ( $matches as $candidate ) {
+            if ( is_file( $candidate . '/starter-build.json' ) ) {
+                $valid[] = $candidate;
+            }
+        }
+        if ( 1 !== count( $valid ) ) {
+            return new WP_Error( 'starter_package_root_missing', 'Could not uniquely locate the randomized WP Starter payload directory.' );
+        }
+        return $valid[0];
+    }
+
     private static function bundled_package_path( array $artifact ) {
         $relative = isset( $artifact['zip'] ) ? ltrim( str_replace( '\\', '/', (string) $artifact['zip'] ), '/' ) : '';
         if ( '' === $relative ) {
             return new WP_Error( 'starter_package_path_missing', 'A bundled starter package path is missing from the build manifest.' );
         }
 
-        $root = realpath( WP_CONTENT_DIR . '/starter-package' );
-        $path = realpath( WP_CONTENT_DIR . '/starter-package/' . $relative );
+        $package_root = self::package_root();
+        if ( is_wp_error( $package_root ) ) {
+            return $package_root;
+        }
+        $root = realpath( $package_root );
+        $path = realpath( $package_root . '/' . $relative );
 
         if ( false === $root || false === $path || 0 !== strpos( $path, $root . DIRECTORY_SEPARATOR ) ) {
             return new WP_Error( 'starter_package_path_invalid', 'Bundled starter package path is invalid: ' . $relative );
@@ -455,6 +442,154 @@ final class MMS_WP_Starter_Bootstrap {
         return is_wp_error( $activated ) ? $activated : true;
     }
 
+    private static function bundled_payload_file_path( $relative, $expected = '' ) {
+        $relative = ltrim( str_replace( '\\', '/', (string) $relative ), '/' );
+        if ( '' === $relative || false !== strpos( $relative, '../' ) || 0 === strpos( $relative, '/' ) ) {
+            return new WP_Error( 'starter_payload_path_invalid', 'A bundled payload path is invalid.' );
+        }
+        $package_root = self::package_root();
+        if ( is_wp_error( $package_root ) ) {
+            return $package_root;
+        }
+        $root = realpath( $package_root );
+        $path = realpath( $package_root . '/' . $relative );
+        if ( false === $root || false === $path || 0 !== strpos( $path, $root . DIRECTORY_SEPARATOR ) || ! is_file( $path ) ) {
+            return new WP_Error( 'starter_payload_file_missing', 'Bundled payload file is missing or outside the payload root: ' . $relative );
+        }
+        $expected = strtolower( (string) $expected );
+        if ( '' !== $expected && hash_file( 'sha256', $path ) !== $expected ) {
+            return new WP_Error( 'starter_payload_checksum_failed', 'Bundled payload checksum failed: ' . $relative );
+        }
+        return $path;
+    }
+
+    private static function install_font_system( array $font_system ) {
+        if ( empty( $font_system ) || empty( $font_system['faces'] ) || ! is_array( $font_system['faces'] ) ) {
+            return true;
+        }
+
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        if ( ! is_plugin_active( 'elementor/elementor.php' ) || ! is_plugin_active( 'elementor-pro/elementor-pro.php' ) ) {
+            return new WP_Error( 'starter_font_elementor_pro_required', 'A font system was selected, but Elementor and Elementor Pro are not both active.' );
+        }
+
+        $uploads = wp_upload_dir();
+        if ( ! empty( $uploads['error'] ) ) {
+            return new WP_Error( 'starter_font_upload_dir_failed', 'WordPress uploads directory is unavailable: ' . $uploads['error'] );
+        }
+        $system_id = sanitize_title( isset( $font_system['id'] ) ? $font_system['id'] : 'starter-fonts' );
+        $font_dir = trailingslashit( $uploads['basedir'] ) . 'elementor/custom-fonts/wp-starter-' . $system_id;
+        $font_url = trailingslashit( $uploads['baseurl'] ) . 'elementor/custom-fonts/wp-starter-' . $system_id;
+        if ( ! wp_mkdir_p( $font_dir ) ) {
+            return new WP_Error( 'starter_font_directory_failed', 'Could not create the Elementor custom-font directory.' );
+        }
+
+        $groups = array();
+        foreach ( $font_system['faces'] as $index => $face ) {
+            if ( ! is_array( $face ) ) {
+                continue;
+            }
+            $family = isset( $face['family'] ) ? sanitize_text_field( $face['family'] ) : '';
+            $weight = isset( $face['weight'] ) ? absint( $face['weight'] ) : 400;
+            $style  = isset( $face['style'] ) ? sanitize_key( $face['style'] ) : 'normal';
+            $format = isset( $face['format'] ) ? sanitize_key( $face['format'] ) : '';
+            if ( '' === $family || ! in_array( $weight, array( 100, 200, 300, 400, 500, 600, 700, 800, 900 ), true ) || ! in_array( $style, array( 'normal', 'italic', 'oblique' ), true ) || ! in_array( $format, array( 'woff2', 'woff', 'ttf' ), true ) ) {
+                return new WP_Error( 'starter_font_face_invalid', 'A font face in the build manifest is invalid.' );
+            }
+            $source = self::bundled_payload_file_path( isset( $face['file'] ) ? $face['file'] : '', isset( $face['sha256'] ) ? $face['sha256'] : '' );
+            if ( is_wp_error( $source ) ) {
+                return $source;
+            }
+            $filename = sanitize_file_name( basename( isset( $face['filename'] ) ? $face['filename'] : basename( $source ) ) );
+            if ( '' === $filename ) {
+                $filename = 'font-' . ( $index + 1 ) . '.' . $format;
+            }
+            $destination = trailingslashit( $font_dir ) . ( $index + 1 ) . '-' . $filename;
+            if ( ! copy( $source, $destination ) ) {
+                return new WP_Error( 'starter_font_copy_failed', 'Could not copy font file into WordPress uploads: ' . $filename );
+            }
+            if ( ! empty( $face['sha256'] ) && hash_file( 'sha256', $destination ) !== strtolower( (string) $face['sha256'] ) ) {
+                @unlink( $destination );
+                return new WP_Error( 'starter_font_copy_checksum_failed', 'Installed font checksum did not match: ' . $filename );
+            }
+            $url = trailingslashit( $font_url ) . rawurlencode( basename( $destination ) );
+            $key = strtolower( $family ) . '|' . $weight . '|' . $style;
+            if ( ! isset( $groups[ $family ] ) ) {
+                $groups[ $family ] = array();
+            }
+            if ( ! isset( $groups[ $family ][ $key ] ) ) {
+                $groups[ $family ][ $key ] = array(
+                    'font_type'   => 'static',
+                    'font_weight' => (string) $weight,
+                    'font_style'  => $style,
+                );
+            }
+            $groups[ $family ][ $key ][ $format ] = array( 'url' => esc_url_raw( $url ) );
+        }
+
+        $installed = 0;
+        foreach ( $groups as $family => $rows ) {
+            $existing = get_posts(
+                array(
+                    'post_type'      => 'elementor_font',
+                    'post_status'    => 'any',
+                    'posts_per_page' => 1,
+                    'title'          => $family,
+                    'fields'         => 'ids',
+                )
+            );
+            $post_id = ! empty( $existing ) ? absint( $existing[0] ) : 0;
+            if ( $post_id <= 0 ) {
+                $post_id = wp_insert_post(
+                    array(
+                        'post_type'   => 'elementor_font',
+                        'post_status' => 'publish',
+                        'post_title'  => $family,
+                    ),
+                    true
+                );
+                if ( is_wp_error( $post_id ) ) {
+                    return $post_id;
+                }
+            } else {
+                wp_update_post( array( 'ID' => $post_id, 'post_status' => 'publish', 'post_title' => $family ) );
+            }
+
+            wp_set_object_terms( $post_id, 'custom', 'elementor_font_type' );
+            $font_rows = array_values( $rows );
+            update_post_meta( $post_id, 'elementor_font_files', $font_rows );
+            update_post_meta( $post_id, 'elementor_font_face', self::generate_elementor_font_face_css( $family, $font_rows ) );
+            $installed++;
+        }
+
+        delete_option( 'elementor_fonts_manager_fonts' );
+        delete_option( 'elementor_fonts_manager_font_types' );
+        return $installed;
+    }
+
+    private static function generate_elementor_font_face_css( $family, array $rows ) {
+        $css = '';
+        $family_css = str_replace( array( "\\", "'" ), array( "\\\\", "\\'" ), (string) $family );
+        foreach ( $rows as $row ) {
+            $sources = array();
+            foreach ( array( 'woff2' => 'woff2', 'woff' => 'woff', 'ttf' => 'truetype' ) as $format => $css_format ) {
+                if ( ! empty( $row[ $format ]['url'] ) ) {
+                    $sources[] = "url('" . esc_url_raw( $row[ $format ]['url'] ) . "') format('" . $css_format . "')";
+                }
+            }
+            if ( empty( $sources ) ) {
+                continue;
+            }
+            $css .= "@font-face {\n";
+            $css .= "\tfont-family: '" . $family_css . "';\n";
+            $css .= "\tfont-style: " . sanitize_key( $row['font_style'] ) . ";\n";
+            $css .= "\tfont-weight: " . absint( $row['font_weight'] ) . ";\n";
+            $css .= "\tfont-display: auto;\n";
+            $css .= "\tsrc: " . implode( ",\n\t\t", $sources ) . ";\n}\n";
+        }
+        return $css;
+    }
+
     private static function install_language_archive( array $archive ) {
         $package = self::bundled_package_path( $archive );
         if ( is_wp_error( $package ) ) {
@@ -470,12 +605,222 @@ final class MMS_WP_Starter_Bootstrap {
         return is_wp_error( $result ) ? $result : true;
     }
 
+    private static function validate_configuration_schema( array $config ) {
+        $schema = absint( isset( $config['schema_version'] ) ? $config['schema_version'] : 0 );
+        if ( 1 === $schema ) {
+            return true;
+        }
+        if ( 2 !== $schema ) {
+            return new WP_Error( 'starter_config_schema_unsupported', 'Unsupported starter configuration schema.' );
+        }
+
+        $unknown = array_diff( array_keys( $config ), array( 'schema_version','exporter_version','generated_at','source','targets','wordpress','adapters','safety' ) );
+        if ( ! empty( $unknown ) ) {
+            return new WP_Error( 'starter_config_root_rejected', 'Snapshot contains unsupported top-level field(s): ' . implode( ', ', $unknown ) );
+        }
+        $wordpress_root = (array) ( $config['wordpress'] ?? array() );
+        $unknown = array_diff( array_keys( $wordpress_root ), array( 'options','permalink_structure','cleanup_default_content','reading','pages' ) );
+        if ( ! empty( $unknown ) ) {
+            return new WP_Error( 'starter_config_wordpress_root_rejected', 'Snapshot contains unsupported WordPress fields.' );
+        }
+        $adapter_root = (array) ( $config['adapters'] ?? array() );
+        $unknown = array_diff( array_keys( $adapter_root ), array( 'elementor','woocommerce','persian_woocommerce','code_snippets','filterx' ) );
+        if ( ! empty( $unknown ) ) {
+            return new WP_Error( 'starter_config_adapter_rejected', 'Snapshot contains unsupported adapter(s): ' . implode( ', ', $unknown ) );
+        }
+
+        $wordpress_allowed = array(
+            'blog_public','default_comment_status','default_ping_status','users_can_register','default_role','posts_per_page','posts_per_rss','rss_use_excerpt','timezone_string','date_format','time_format','start_of_week','use_smilies','default_post_format','require_name_email','comment_registration','close_comments_for_old_posts','close_comments_days_old','thread_comments','thread_comments_depth','page_comments','comments_per_page','default_comments_page','comment_order','comments_notify','moderation_notify','comment_moderation','comment_previously_approved','comment_max_links','show_avatars','avatar_rating','avatar_default','thumbnail_size_w','thumbnail_size_h','thumbnail_crop','medium_size_w','medium_size_h','medium_large_size_w','medium_large_size_h','large_size_w','large_size_h',
+        );
+        $wordpress_options = (array) ( $config['wordpress']['options'] ?? array() );
+        $unknown = array_diff( array_keys( $wordpress_options ), $wordpress_allowed );
+        if ( ! empty( $unknown ) ) {
+            return new WP_Error( 'starter_config_wordpress_option_rejected', 'Snapshot contains unsupported WordPress option(s): ' . implode( ', ', $unknown ) );
+        }
+
+        $reading = (array) ( $config['wordpress']['reading'] ?? array() );
+        $roles = array( '', 'home', 'about', 'contact', 'blog' );
+        foreach ( array( 'front_page_role', 'posts_page_role' ) as $key ) {
+            if ( isset( $reading[ $key ] ) && ! in_array( (string) $reading[ $key ], $roles, true ) ) {
+                return new WP_Error( 'starter_config_page_role_rejected', 'Snapshot contains an unsupported WordPress page role.' );
+            }
+        }
+
+        $elementor = (array) ( $config['adapters']['elementor'] ?? array() );
+        if ( ! empty( $elementor['options'] ) ) {
+            return new WP_Error( 'starter_config_elementor_options_rejected', 'Schema-v2 snapshots may not apply standalone Elementor options.' );
+        }
+        $exact = array( 'container_width','container_padding','space_between_widgets','page_title_selector','stretched_section_container','default_page_template','active_breakpoints' );
+        $prefixes = array( 'container_width_','container_padding_','space_between_widgets_','viewport_' );
+        foreach ( array_keys( (array) ( $elementor['kit_settings'] ?? array() ) ) as $key ) {
+            $ok = in_array( $key, $exact, true );
+            foreach ( $prefixes as $prefix ) {
+                if ( 0 === strpos( $key, $prefix ) ) {
+                    $ok = true;
+                    break;
+                }
+            }
+            if ( ! $ok ) {
+                return new WP_Error( 'starter_config_elementor_setting_rejected', 'Snapshot contains a non-structural Elementor setting: ' . sanitize_text_field( $key ) );
+            }
+        }
+
+        $woo_allowed = array(
+            'woocommerce_allowed_countries','woocommerce_all_except_countries','woocommerce_specific_allowed_countries','woocommerce_calc_taxes','woocommerce_cart_redirect_after_add','woocommerce_checkout_address_2_field','woocommerce_checkout_company_field','woocommerce_checkout_highlight_required_fields','woocommerce_checkout_phone_field','woocommerce_currency','woocommerce_currency_pos','woocommerce_default_customer_address','woocommerce_dimension_unit','woocommerce_downloads_add_hash_to_filename','woocommerce_downloads_count_partial','woocommerce_downloads_deliver_inline','woocommerce_downloads_grant_access_after_payment','woocommerce_downloads_redirect_fallback_allowed','woocommerce_downloads_require_login','woocommerce_enable_ajax_add_to_cart','woocommerce_enable_checkout_login_reminder','woocommerce_enable_coupons','woocommerce_enable_delayed_account_creation','woocommerce_enable_guest_checkout','woocommerce_enable_myaccount_registration','woocommerce_enable_review_rating','woocommerce_enable_reviews','woocommerce_enable_shipping_calc','woocommerce_enable_signup_and_login_from_checkout','woocommerce_file_download_method','woocommerce_hide_out_of_stock_items','woocommerce_hold_stock_minutes','woocommerce_manage_stock','woocommerce_notify_low_stock','woocommerce_notify_low_stock_amount','woocommerce_notify_no_stock','woocommerce_notify_no_stock_amount','woocommerce_price_decimal_sep','woocommerce_price_display_suffix','woocommerce_price_num_decimals','woocommerce_price_thousand_sep','woocommerce_prices_include_tax','woocommerce_registration_generate_password','woocommerce_registration_generate_username','woocommerce_review_rating_required','woocommerce_review_rating_verification_label','woocommerce_review_rating_verification_required','woocommerce_ship_to_countries','woocommerce_ship_to_destination','woocommerce_shipping_cost_requires_address','woocommerce_shipping_hide_rates_when_free','woocommerce_shipping_tax_class','woocommerce_single_image_width','woocommerce_tax_based_on','woocommerce_tax_classes','woocommerce_tax_display_cart','woocommerce_tax_display_shop','woocommerce_tax_round_at_subtotal','woocommerce_tax_total_display','woocommerce_thumbnail_image_width','woocommerce_weight_unit',
+        );
+        $unknown = array_diff( array_keys( (array) ( $config['adapters']['woocommerce']['options'] ?? array() ) ), $woo_allowed );
+        if ( ! empty( $unknown ) ) {
+            return new WP_Error( 'starter_config_woocommerce_option_rejected', 'Snapshot contains unsupported WooCommerce option(s): ' . implode( ', ', $unknown ) );
+        }
+        $unknown = array_diff( array_keys( (array) ( $config['adapters']['persian_woocommerce']['options'] ?? array() ) ), array( 'persian_woocommerce_translates' ) );
+        if ( ! empty( $unknown ) ) {
+            return new WP_Error( 'starter_config_persian_option_rejected', 'Snapshot contains unsupported Persian WooCommerce options.' );
+        }
+
+        $snippet_adapter = (array) ( $config['adapters']['code_snippets'] ?? array() );
+        $allowed_snippet_sections = array(
+            'general' => array( 'activate_by_default','enable_tags','enable_description','visual_editor_rows','list_order','disable_prism','hide_upgrade_menu','complete_uninstall','enable_flat_files','enable_admin_bar','admin_bar_snippet_limit' ),
+            'editor'  => array( 'indent_with_tabs','tab_size','indent_unit','font_size','wrap_lines','code_folding','line_numbers','auto_close_brackets','highlight_selection_matches','highlight_active_line','keymap','theme' ),
+        );
+        foreach ( (array) ( $snippet_adapter['settings'] ?? array() ) as $section => $values ) {
+            if ( ! isset( $allowed_snippet_sections[ $section ] ) || ! is_array( $values ) ) {
+                return new WP_Error( 'starter_config_snippet_settings_rejected', 'Snapshot contains an unsupported Code Snippets settings section.' );
+            }
+            $unknown = array_diff( array_keys( $values ), $allowed_snippet_sections[ $section ] );
+            if ( ! empty( $unknown ) ) {
+                return new WP_Error( 'starter_config_snippet_settings_rejected', 'Snapshot contains unsupported Code Snippets settings.' );
+            }
+        }
+        $snippet_fields = array( 'name','desc','code','tags','scope','priority','active','locked','portable_key','type' );
+        foreach ( (array) ( $snippet_adapter['snippets'] ?? array() ) as $snippet ) {
+            if ( ! is_array( $snippet ) || ! isset( $snippet['name'], $snippet['code'] ) ) {
+                return new WP_Error( 'starter_config_snippet_invalid', 'Snapshot contains an invalid Code Snippets record.' );
+            }
+            $unknown = array_diff( array_keys( $snippet ), $snippet_fields );
+            if ( ! empty( $unknown ) || ( isset( $snippet['scope'] ) && 'condition' === $snippet['scope'] ) ) {
+                return new WP_Error( 'starter_config_snippet_rejected', 'Snapshot contains unsupported Code Snippets fields or condition-backed snippets.' );
+            }
+        }
+        return true;
+    }
+
+    private static function starter_page_id_for_role( $role, array $wordpress ) {
+        $role = sanitize_key( (string) $role );
+        if ( '' === $role ) {
+            return 0;
+        }
+        foreach ( (array) ( $wordpress['pages'] ?? array() ) as $page ) {
+            if ( ! is_array( $page ) ) {
+                continue;
+            }
+            $page_role = sanitize_key( isset( $page['role'] ) ? $page['role'] : ( $page['slug'] ?? '' ) );
+            if ( $page_role !== $role ) {
+                continue;
+            }
+            $slug = sanitize_title( isset( $page['slug'] ) ? $page['slug'] : $role );
+            $found = $slug ? get_page_by_path( $slug, OBJECT, 'page' ) : null;
+            return $found ? absint( $found->ID ) : 0;
+        }
+        // Schema-v1 compatibility. Only known starter roles can reach here.
+        $found = get_page_by_path( $role, OBJECT, 'page' );
+        return $found ? absint( $found->ID ) : 0;
+    }
+
+    private static function apply_wordpress_reading_roles( array $wordpress ) {
+        $reading = isset( $wordpress['reading'] ) && is_array( $wordpress['reading'] ) ? $wordpress['reading'] : array();
+        $front_role = isset( $reading['front_page_role'] ) ? sanitize_key( $reading['front_page_role'] ) : '';
+        $posts_role = isset( $reading['posts_page_role'] ) ? sanitize_key( $reading['posts_page_role'] ) : '';
+
+        if ( '' === $front_role && ! empty( $reading['front_page_slug'] ) && in_array( $reading['front_page_slug'], array( 'home', 'about', 'contact', 'blog' ), true ) ) {
+            $front_role = sanitize_key( $reading['front_page_slug'] );
+        }
+        if ( '' === $posts_role && ! empty( $reading['posts_page_slug'] ) && in_array( $reading['posts_page_slug'], array( 'home', 'about', 'contact', 'blog' ), true ) ) {
+            $posts_role = sanitize_key( $reading['posts_page_slug'] );
+        }
+
+        if ( '' === $front_role ) {
+            update_option( 'show_on_front', 'posts' );
+            update_option( 'page_on_front', 0 );
+            update_option( 'page_for_posts', 0 );
+            return;
+        }
+
+        $front_id = self::starter_page_id_for_role( $front_role, $wordpress );
+        if ( $front_id <= 0 ) {
+            return;
+        }
+        update_option( 'show_on_front', 'page' );
+        update_option( 'page_on_front', $front_id );
+        $posts_id = '' !== $posts_role ? self::starter_page_id_for_role( $posts_role, $wordpress ) : 0;
+        update_option( 'page_for_posts', $posts_id );
+    }
+
+    private static function apply_code_snippets_adapter( array $adapter ) {
+        $snippets = isset( $adapter['snippets'] ) && is_array( $adapter['snippets'] ) ? $adapter['snippets'] : array();
+        $settings = isset( $adapter['settings'] ) && is_array( $adapter['settings'] ) ? $adapter['settings'] : array();
+        if ( empty( $snippets ) && empty( $settings ) ) {
+            return 0;
+        }
+        if ( ! function_exists( '\\Code_Snippets\\get_snippets' ) || ! function_exists( '\\Code_Snippets\\save_snippet' ) ) {
+            return new WP_Error( 'starter_code_snippets_api_missing', 'Code Snippets is active but its public snippet API is unavailable.' );
+        }
+
+        if ( ! empty( $settings ) ) {
+            $current = get_option( 'code_snippets_settings', array() );
+            $current = is_array( $current ) ? $current : array();
+            foreach ( $settings as $section => $values ) {
+                if ( ! is_array( $values ) ) {
+                    continue;
+                }
+                $current[ $section ] = array_merge( isset( $current[ $section ] ) && is_array( $current[ $section ] ) ? $current[ $section ] : array(), $values );
+            }
+            update_option( 'code_snippets_settings', $current );
+        }
+
+        $existing = \Code_Snippets\get_snippets();
+        $saved_count = 0;
+        foreach ( $snippets as $row ) {
+            $name  = sanitize_text_field( isset( $row['name'] ) ? $row['name'] : '' );
+            $scope = sanitize_key( isset( $row['scope'] ) ? $row['scope'] : 'global' );
+            if ( '' === $name || 'condition' === $scope ) {
+                continue;
+            }
+            $match_id = 0;
+            foreach ( $existing as $candidate ) {
+                if ( isset( $candidate->name, $candidate->scope ) && $candidate->name === $name && $candidate->scope === $scope ) {
+                    $match_id = absint( $candidate->id );
+                    break;
+                }
+            }
+            $data = array(
+                'id'       => $match_id,
+                'name'     => $name,
+                'desc'     => isset( $row['desc'] ) ? (string) $row['desc'] : '',
+                'code'     => isset( $row['code'] ) ? (string) $row['code'] : '',
+                'tags'     => isset( $row['tags'] ) ? $row['tags'] : array(),
+                'scope'    => $scope,
+                'priority' => isset( $row['priority'] ) ? absint( $row['priority'] ) : 10,
+                'active'   => ! empty( $row['active'] ),
+                'locked'   => ! empty( $row['locked'] ),
+                'network'  => false,
+            );
+            $saved = \Code_Snippets\save_snippet( $data );
+            if ( ! $saved || empty( $saved->id ) ) {
+                return new WP_Error( 'starter_code_snippet_save_failed', 'Could not create/update Code Snippets entry: ' . $name );
+            }
+            $saved_count++;
+            $existing = \Code_Snippets\get_snippets();
+        }
+        return $saved_count;
+    }
+
     private static function apply_configuration( array $config, array $build ) {
         $report = array(
             'wordpress_options'  => 0,
             'elementor_options'  => 0,
             'woocommerce_options'=> 0,
             'persian_options'    => 0,
+            'code_snippets_saved' => 0,
             'woocommerce_duplicates_removed' => 0,
             'elementor_kit_id'   => 0,
             'verified_at'        => gmdate( 'c' ),
@@ -499,6 +844,7 @@ final class MMS_WP_Starter_Bootstrap {
         // Only exporter-declared custom starter pages are created here.
         // WordPress and WooCommerce own their native/default pages.
         self::apply_pages( (array) ( $wordpress['pages'] ?? array() ) );
+        self::apply_wordpress_reading_roles( $wordpress );
 
         if ( ! empty( $wordpress['cleanup_default_content'] ) ) {
             self::cleanup_default_content();
@@ -527,6 +873,15 @@ final class MMS_WP_Starter_Bootstrap {
             $persian_options = (array) ( $config['adapters']['persian_woocommerce']['options'] ?? array() );
             self::apply_option_group( $persian_options );
             $report['persian_options'] = count( $persian_options );
+        }
+
+        $snippet_adapter = (array) ( $config['adapters']['code_snippets'] ?? array() );
+        if ( ! empty( $snippet_adapter ) && ( is_plugin_active( 'code-snippets/code-snippets.php' ) || function_exists( '\\Code_Snippets\\save_snippet' ) ) ) {
+            $snippet_result = self::apply_code_snippets_adapter( $snippet_adapter );
+            if ( is_wp_error( $snippet_result ) ) {
+                return $snippet_result;
+            }
+            $report['code_snippets_saved'] = absint( $snippet_result );
         }
 
         $kit_settings = (array) ( $config['adapters']['elementor']['kit_settings'] ?? array() );
@@ -715,6 +1070,41 @@ final class MMS_WP_Starter_Bootstrap {
             }
         }
 
+        $wordpress = (array) ( $config['wordpress'] ?? array() );
+        $reading = (array) ( $wordpress['reading'] ?? array() );
+        $front_role = sanitize_key( $reading['front_page_role'] ?? '' );
+        $posts_role = sanitize_key( $reading['posts_page_role'] ?? '' );
+        if ( 2 === absint( $config['schema_version'] ?? 1 ) ) {
+            $checked += 3;
+            $expected_front = '' !== $front_role ? self::starter_page_id_for_role( $front_role, $wordpress ) : 0;
+            $expected_posts = '' !== $posts_role ? self::starter_page_id_for_role( $posts_role, $wordpress ) : 0;
+            $expected_show = $expected_front > 0 ? 'page' : 'posts';
+            if ( (string) get_option( 'show_on_front', 'posts' ) !== $expected_show ) { $mismatches[] = 'show_on_front_role'; }
+            if ( absint( get_option( 'page_on_front', 0 ) ) !== $expected_front ) { $mismatches[] = 'front_page_role'; }
+            if ( absint( get_option( 'page_for_posts', 0 ) ) !== $expected_posts ) { $mismatches[] = 'posts_page_role'; }
+        }
+
+        $expected_snippets = (array) ( $config['adapters']['code_snippets']['snippets'] ?? array() );
+        if ( ! empty( $expected_snippets ) && function_exists( '\\Code_Snippets\\get_snippets' ) ) {
+            $actual_snippets = \Code_Snippets\get_snippets();
+            foreach ( $expected_snippets as $expected_snippet ) {
+                $checked++;
+                $found = false;
+                foreach ( $actual_snippets as $candidate ) {
+                    if ( (string) $candidate->name === (string) ( $expected_snippet['name'] ?? '' ) && (string) $candidate->scope === (string) ( $expected_snippet['scope'] ?? 'global' ) ) {
+                        $found = true;
+                        if ( (string) $candidate->code !== (string) ( $expected_snippet['code'] ?? '' ) || (bool) $candidate->active !== ! empty( $expected_snippet['active'] ) ) {
+                            $mismatches[] = 'code_snippet:' . sanitize_key( (string) ( $expected_snippet['name'] ?? 'snippet' ) );
+                        }
+                        break;
+                    }
+                }
+                if ( ! $found ) {
+                    $mismatches[] = 'code_snippet:' . sanitize_key( (string) ( $expected_snippet['name'] ?? 'snippet' ) );
+                }
+            }
+        }
+
         if ( ! empty( $mismatches ) ) {
             return new WP_Error(
                 'starter_configuration_verification_failed',
@@ -764,6 +1154,45 @@ final class MMS_WP_Starter_Bootstrap {
             if ( $post ) {
                 wp_delete_post( $post->ID, true );
             }
+        }
+    }
+
+    private static function delete_tree( $path ) {
+        if ( ! file_exists( $path ) && ! is_link( $path ) ) {
+            return;
+        }
+        if ( is_link( $path ) || is_file( $path ) ) {
+            @unlink( $path );
+            return;
+        }
+        $items = scandir( $path );
+        if ( is_array( $items ) ) {
+            foreach ( $items as $item ) {
+                if ( '.' === $item || '..' === $item ) {
+                    continue;
+                }
+                self::delete_tree( $path . DIRECTORY_SEPARATOR . $item );
+            }
+        }
+        @rmdir( $path );
+    }
+
+    private static function cleanup_payload_and_self() {
+        $root = self::package_root();
+        if ( ! is_wp_error( $root ) ) {
+            $real = realpath( $root );
+            $content = realpath( WP_CONTENT_DIR );
+            $base = $real ? basename( $real ) : '';
+            if ( $real && $content && 0 === strpos( $real, $content . DIRECTORY_SEPARATOR ) && ( 'starter-package' === $base || 0 === strpos( $base, '.wp-starter-' ) ) ) {
+                self::delete_tree( $real );
+            }
+        }
+        // This is a one-time installer. Remove only this MU-plugin file; never
+        // touch the mu-plugins directory or other MU plugins.
+        $self = realpath( __FILE__ );
+        $mu_root = realpath( WPMU_PLUGIN_DIR );
+        if ( $self && $mu_root && 0 === strpos( $self, $mu_root . DIRECTORY_SEPARATOR ) ) {
+            @unlink( $self );
         }
     }
 

@@ -5,6 +5,7 @@ import { extractZip } from "./archive.js";
 import { BuilderError } from "./errors.js";
 import { ensureDir, exists, findFileRecursive, sha256File, writeJson } from "./fs-utils.js";
 import { PackageRegistry, defaultLibraryDir } from "./registry.js";
+import { validatePortableSnapshot } from "./snapshot-policy.js";
 import type {
   ConfigSnapshotFile,
   ConfigSnapshotInspection,
@@ -21,7 +22,8 @@ import type {
 
 const INFRASTRUCTURE_PLUGIN_SLUGS = new Set([
   "wp-starter-exporter",
-  "site-starter"
+  "site-starter",
+  "wp-starter-bootstrap"
 ]);
 
 export interface AddConfigSnapshotOptions {
@@ -66,57 +68,41 @@ async function parseConfigExport(zipPath: string): Promise<{
   locale: string;
   theme: ConfigSnapshotRecord["theme"];
   plugins: SnapshotPluginRequirement[];
+  sourcePlugins: SnapshotPluginRequirement[];
 }> {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "wp-starter-config-"));
-  try {
-    await extractZip(zipPath, temp);
-    const configFile = await findFileRecursive(temp, "starter-config.json");
-    if (!configFile) {
-      throw new BuilderError("invalid_config_export", "starter-config.json was not found in the configuration export ZIP.");
-    }
+  const raw = await readFullConfigExport(zipPath);
+  const schema = Number(raw.schema_version);
+  if (![1, 2].includes(schema)) throw new BuilderError("invalid_config_export", `Unsupported starter-config schema_version: ${String(raw.schema_version)}`);
 
-    let raw: any;
-    try {
-      raw = JSON.parse(await readFile(configFile, "utf8"));
-    } catch (error) {
-      throw new BuilderError("invalid_config_export", `Could not parse starter-config.json: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  const generatedAt = requireString(raw.generated_at, "generated_at");
+  const wordpressVersion = requireString(raw.source?.wordpress_version, "source.wordpress_version");
+  const locale = requireString(raw.source?.locale, "source.locale");
+  const theme = {
+    slug: requireString(raw.source?.theme?.slug, "source.theme.slug"),
+    name: requireString(raw.source?.theme?.name, "source.theme.name"),
+    version: requireString(raw.source?.theme?.version, "source.theme.version")
+  };
 
-    if (raw.schema_version !== 1) {
-      throw new BuilderError("invalid_config_export", `Unsupported starter-config schema_version: ${String(raw.schema_version)}`);
-    }
+  const mapPluginRows = (rows: any[], activeOnly: boolean): SnapshotPluginRequirement[] => rows
+    .filter((plugin: any) => !activeOnly || plugin?.active === true)
+    .map((plugin: any, index: number) => {
+      const file = requireString(plugin.file, `${activeOnly ? "source.plugins" : "targets.plugins"}[${index}].file`);
+      return {
+        slug: pluginSlugFromFile(file),
+        name: requireString(plugin.name, `plugin[${index}].name`),
+        version: requireString(plugin.version, `plugin[${index}].version`),
+        file,
+        active: true as const
+      };
+    })
+    .filter((plugin: SnapshotPluginRequirement) => !INFRASTRUCTURE_PLUGIN_SLUGS.has(plugin.slug));
 
-    const generatedAt = requireString(raw.generated_at, "generated_at");
-    const wordpressVersion = requireString(raw.source?.wordpress_version, "source.wordpress_version");
-    const locale = requireString(raw.source?.locale, "source.locale");
-    const theme = {
-      slug: requireString(raw.source?.theme?.slug, "source.theme.slug"),
-      name: requireString(raw.source?.theme?.name, "source.theme.name"),
-      version: requireString(raw.source?.theme?.version, "source.theme.version")
-    };
-
-    if (!Array.isArray(raw.source?.plugins)) {
-      throw new BuilderError("invalid_config_export", "source.plugins must be an array.");
-    }
-
-    const plugins: SnapshotPluginRequirement[] = raw.source.plugins
-      .filter((plugin: any) => plugin?.active === true)
-      .map((plugin: any, index: number) => {
-        const file = requireString(plugin.file, `source.plugins[${index}].file`);
-        return {
-          slug: pluginSlugFromFile(file),
-          name: requireString(plugin.name, `source.plugins[${index}].name`),
-          version: requireString(plugin.version, `source.plugins[${index}].version`),
-          file,
-          active: true
-        };
-      })
-      .filter((plugin: SnapshotPluginRequirement) => !INFRASTRUCTURE_PLUGIN_SLUGS.has(plugin.slug));
-
-    return { generatedAt, wordpressVersion, locale, theme, plugins };
-  } finally {
-    await rm(temp, { recursive: true, force: true });
-  }
+  if (!Array.isArray(raw.source?.plugins)) throw new BuilderError("invalid_config_export", "source.plugins must be an array.");
+  const sourcePlugins = mapPluginRows(raw.source.plugins, true);
+  const targetRows = schema >= 2 ? raw.targets?.plugins : raw.source.plugins;
+  if (!Array.isArray(targetRows)) throw new BuilderError("invalid_config_export", schema >= 2 ? "targets.plugins must be an array." : "source.plugins must be an array.");
+  const plugins = mapPluginRows(targetRows, schema < 2);
+  return { generatedAt, wordpressVersion, locale, theme, plugins, sourcePlugins };
 }
 
 
@@ -144,11 +130,13 @@ async function readFullConfigExport(zipPath: string): Promise<any> {
     await extractZip(zipPath, temp);
     const configFile = await findFileRecursive(temp, "starter-config.json");
     if (!configFile) throw new BuilderError("invalid_config_export", "starter-config.json was not found in the configuration export ZIP.");
-    try {
-      return JSON.parse(await readFile(configFile, "utf8"));
-    } catch (error) {
-      throw new BuilderError("invalid_config_export", `Could not parse starter-config.json: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    let raw: any;
+    try { raw = JSON.parse(await readFile(configFile, "utf8")); }
+    catch (error) { throw new BuilderError("invalid_config_export", `Could not parse starter-config.json: ${error instanceof Error ? error.message : String(error)}`); }
+    const schema = Number(raw?.schema_version);
+    if (![1, 2].includes(schema)) throw new BuilderError("invalid_config_export", `Unsupported starter-config schema_version: ${String(raw?.schema_version)}`);
+    validatePortableSnapshot(raw);
+    return raw;
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -257,6 +245,7 @@ export class ConfigSnapshotRegistry {
       locale: parsed.locale,
       theme: parsed.theme,
       plugins: parsed.plugins,
+      sourcePlugins: parsed.sourcePlugins,
       zip: relativeZip.split(path.sep).join("/"),
       sha256: hash,
       sourceFilename: path.basename(absolute),
@@ -310,16 +299,14 @@ export class ConfigSnapshotRegistry {
   async inspect(id: string): Promise<ConfigSnapshotInspection> {
     const snapshot = await this.resolve(id);
     const raw = await readFullConfigExport(snapshot.absoluteZip);
-    if (Number(raw?.schema_version) !== 1) {
-      throw new BuilderError("invalid_config_export", `Unsupported starter-config schema_version: ${String(raw?.schema_version)}`);
-    }
+    const schema = Number(raw?.schema_version);
 
     const wordpress = recordObject(raw.wordpress);
     const wordpressOptions = recordObject(wordpress.options);
     const rawPages = Array.isArray(wordpress.pages) ? wordpress.pages : [];
     const pages = rawPages
       .filter((page: any) => page && typeof page === "object")
-      .map((page: any) => ({ title: String(page.title || ""), slug: String(page.slug || "") }))
+      .map((page: any) => ({ title: String(page.title || ""), slug: String(page.slug || page.role || "") }))
       .filter((page: { title: string; slug: string }) => page.title || page.slug);
 
     const adaptersObject = recordObject(raw.adapters);
@@ -329,91 +316,43 @@ export class ConfigSnapshotRegistry {
       const deferred = declaredStatus.toLowerCase().includes("deferred");
       const sections: ConfigSnapshotInspection["adapters"][number]["sections"] = [];
       const details: Record<string, unknown> = {};
-
       for (const [sectionKey, sectionValue] of Object.entries(adapter)) {
         if (["status", "reason"].includes(sectionKey)) continue;
-        const sectionObject = recordObject(sectionValue);
-        if (Object.keys(sectionObject).length > 0) {
-          sections.push({
-            key: sectionKey,
-            label: titleFromKey(sectionKey),
-            count: Object.keys(sectionObject).length,
-            values: sectionObject
-          });
-        } else {
-          details[sectionKey] = sectionValue;
+        if (key === "code_snippets" && sectionKey === "snippets") {
+          const list = Array.isArray(sectionValue) ? sectionValue : [];
+          details.snippets = list.map((item: any) => ({ name: String(item?.name || ""), scope: String(item?.scope || ""), active: item?.active === true, type: String(item?.type || "") }));
+          details.snippet_count = list.length;
+          continue;
         }
+        const sectionObject = recordObject(sectionValue);
+        if (Object.keys(sectionObject).length > 0) sections.push({ key: sectionKey, label: titleFromKey(sectionKey), count: Object.keys(sectionObject).length, values: sectionObject });
+        else details[sectionKey] = sectionValue;
       }
-
-      return {
-        key,
-        label: adapterLabel(key),
-        status: deferred ? "deferred" : sections.length ? "portable" : "metadata",
-        reason: typeof adapter.reason === "string" ? adapter.reason : undefined,
-        sections,
-        details
-      };
+      return { key, label: adapterLabel(key), status: deferred ? "deferred" : sections.length || (key === "code_snippets" && Array.isArray(adapter.snippets)) ? "portable" : "metadata", reason: typeof adapter.reason === "string" ? adapter.reason : undefined, sections, details };
     });
 
     const source = recordObject(raw.source);
     const sourceTheme = recordObject(source.theme);
-    const sourcePlugins = Array.isArray(source.plugins) ? source.plugins : [];
-    const plugins: SnapshotPluginRequirement[] = sourcePlugins
-      .filter((plugin: any) => plugin?.active === true)
-      .map((plugin: any) => {
-        const file = String(plugin.file || "");
-        return {
-          slug: pluginSlugFromFile(file),
-          name: String(plugin.name || pluginSlugFromFile(file)),
-          version: String(plugin.version || ""),
-          file,
-          active: true as const
-        };
-      })
-      .filter((plugin: SnapshotPluginRequirement) => !INFRASTRUCTURE_PLUGIN_SLUGS.has(plugin.slug));
+    const toPlugin = (plugin: any): SnapshotPluginRequirement => {
+      const file = String(plugin.file || "");
+      return { slug: pluginSlugFromFile(file), name: String(plugin.name || pluginSlugFromFile(file)), version: String(plugin.version || ""), file, active: true };
+    };
+    const sourcePlugins: SnapshotPluginRequirement[] = (Array.isArray(source.plugins) ? source.plugins : []).filter((plugin: any) => plugin?.active === true).map(toPlugin).filter((plugin) => !INFRASTRUCTURE_PLUGIN_SLUGS.has(plugin.slug));
+    const targetRows = schema >= 2 ? recordObject(raw.targets).plugins : sourcePlugins;
+    const targetPlugins: SnapshotPluginRequirement[] = Array.isArray(targetRows) ? targetRows.map(toPlugin).filter((plugin) => !INFRASTRUCTURE_PLUGIN_SLUGS.has(plugin.slug)) : sourcePlugins;
 
     const safetyRaw = recordObject(raw.safety);
     const safety: Record<string, boolean> = {};
     for (const [key, value] of Object.entries(safetyRaw)) safety[key] = value === true;
-
     const adapterOptions = adapters.reduce((sum, adapter) => sum + (adapter.sections.find((section) => section.key === "options")?.count || 0), 0);
     const adapterSettings = adapters.reduce((sum, adapter) => sum + adapter.sections.filter((section) => section.key !== "options").reduce((part, section) => part + section.count, 0), 0);
 
     return {
-      snapshotId: snapshot.id,
-      name: snapshot.name,
-      schemaVersion: Number(raw.schema_version),
-      exporterVersion: typeof raw.exporter_version === "string" ? raw.exporter_version : "unknown",
-      generatedAt: typeof raw.generated_at === "string" ? raw.generated_at : snapshot.generatedAt,
-      source: {
-        wordpressVersion: String(source.wordpress_version || snapshot.wordpressVersion),
-        phpVersion: String(source.php_version || "unknown"),
-        locale: String(source.locale || snapshot.locale),
-        theme: {
-          slug: String(sourceTheme.slug || snapshot.theme.slug),
-          name: String(sourceTheme.name || snapshot.theme.name),
-          version: String(sourceTheme.version || snapshot.theme.version)
-        },
-        plugins
-      },
-      wordpress: {
-        options: wordpressOptions,
-        optionCount: Object.keys(wordpressOptions).length,
-        permalinkStructure: String(wordpress.permalink_structure || ""),
-        cleanupDefaultContent: wordpress.cleanup_default_content === true,
-        pages
-      },
-      adapters,
-      safety,
-      totals: {
-        wordpressOptions: Object.keys(wordpressOptions).length,
-        adapterOptions,
-        adapterSettings,
-        pages: pages.length,
-        activePlugins: plugins.length,
-        portableAdapters: adapters.filter((adapter) => adapter.status === "portable").length,
-        deferredAdapters: adapters.filter((adapter) => adapter.status === "deferred").length
-      }
+      snapshotId: snapshot.id, name: snapshot.name, schemaVersion: schema, exporterVersion: typeof raw.exporter_version === "string" ? raw.exporter_version : "unknown", generatedAt: typeof raw.generated_at === "string" ? raw.generated_at : snapshot.generatedAt,
+      source: { wordpressVersion: String(source.wordpress_version || snapshot.wordpressVersion), phpVersion: String(source.php_version || "unknown"), locale: String(source.locale || snapshot.locale), theme: { slug: String(sourceTheme.slug || snapshot.theme.slug), name: String(sourceTheme.name || snapshot.theme.name), version: String(sourceTheme.version || snapshot.theme.version) }, plugins: sourcePlugins, targetPlugins },
+      wordpress: { options: wordpressOptions, optionCount: Object.keys(wordpressOptions).length, permalinkStructure: String(wordpress.permalink_structure || ""), cleanupDefaultContent: wordpress.cleanup_default_content === true, pages },
+      adapters, safety,
+      totals: { wordpressOptions: Object.keys(wordpressOptions).length, adapterOptions, adapterSettings, pages: pages.length, activePlugins: sourcePlugins.length, targetPlugins: targetPlugins.length, portableAdapters: adapters.filter((adapter) => adapter.status === "portable").length, deferredAdapters: adapters.filter((adapter) => adapter.status === "deferred").length }
     };
   }
 
@@ -435,8 +374,8 @@ export class ConfigSnapshotRegistry {
     const rightThemeCoord = { slug: rightTheme.slug, name: rightTheme.name, version: rightTheme.version };
     if (!valuesEqual(leftThemeCoord, rightThemeCoord)) binaryChanges.push({ kind: "changed", packageKind: "theme", key: "theme", before: leftThemeCoord, after: rightThemeCoord });
 
-    const leftPlugins = new Map(left.source.plugins.map((plugin) => [plugin.slug, plugin]));
-    const rightPlugins = new Map(right.source.plugins.map((plugin) => [plugin.slug, plugin]));
+    const leftPlugins = new Map(left.source.targetPlugins.map((plugin) => [plugin.slug, plugin]));
+    const rightPlugins = new Map(right.source.targetPlugins.map((plugin) => [plugin.slug, plugin]));
     const pluginSlugs = [...new Set([...leftPlugins.keys(), ...rightPlugins.keys()])].sort();
     for (const slug of pluginSlugs) {
       const before = leftPlugins.get(slug);

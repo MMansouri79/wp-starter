@@ -5,6 +5,7 @@ let currentEditingProfileFile = "";
 const titles = {
   overview: ["Overview", "Your local WordPress starter workspace."],
   packages: ["Packages", "Manage versioned WordPress, theme, and plugin ZIPs."],
+  fonts: ["Fonts", "Manage reusable font systems and detected Elementor Pro font faces."],
   configs: ["Configurations", "Reference-site exports and their package requirements."],
   profiles: ["Profiles", "Manage reusable, version-pinned build profiles."],
   build: ["Build", "Choose exact package versions and generate a complete offline WordPress ZIP."],
@@ -61,9 +62,27 @@ function renderPackages() {
   document.querySelectorAll(".remove-package").forEach(btn => btn.onclick = () => removePackage(btn));
 }
 
+function renderFonts() {
+  const systems = state.fonts || [];
+  $("#fonts-list").innerHTML = systems.map(system => {
+    const families = [...new Set((system.faces || []).map(face => face.family))];
+    const faces = (system.faces || []).map(face => `<span class="version-pill">${esc(face.family)} · ${esc(face.weight)} ${esc(face.style)} · ${esc(face.format.toUpperCase())}</span>`).join("");
+    const skipped = (system.skipped || []).length ? `<details class="inspect-details"><summary>Skipped files <span>${system.skipped.length}</span></summary>${(system.skipped || []).map(item => `<div class="kv-row"><code>${esc(item.filename)}</code><span>${esc(item.reason)}</span></div>`).join("")}</details>` : "";
+    return `<div class="card font-card"><div><strong>${esc(system.name)}</strong><small><code>${esc(system.id)}</code> · ${system.faces.length} usable face${system.faces.length === 1 ? "" : "s"} · ${families.length} famil${families.length === 1 ? "y" : "ies"}</small><div class="version-list">${faces}</div>${skipped}</div><div class="action-list"><button class="tiny danger remove-font" data-id="${escAttr(system.id)}">Remove</button></div></div>`;
+  }).join("") || `<div class="empty">No font systems yet. Import a ZIP containing files such as MyFont-Regular.woff2, MyFont-Bold.woff2, and MyFont-ExtraBold.woff2.</div>`;
+  document.querySelectorAll(".remove-font").forEach(btn => btn.onclick = () => removeFontSystem(btn.dataset.id));
+}
+
+function renderFontSystemOptions(previous = "") {
+  const systems = state.fonts || [];
+  $("#build-font-system").innerHTML = [`<option value="">No font system</option>`, ...systems.map(system => `<option value="${escAttr(system.id)}">${esc(system.name)} · ${system.faces.length} faces</option>`)].join("");
+  if (systems.some(system => system.id === previous)) $("#build-font-system").value = previous;
+}
+
 function render() {
   const previousConfig = $("#build-config")?.value ?? "";
   const previousProfile = $("#profile-select")?.value ?? "";
+  const previousFontSystem = $("#build-font-system")?.value ?? "";
   const previousCompareLeft = $("#compare-left")?.value ?? "";
   const previousCompareRight = $("#compare-right")?.value ?? "";
   $("#version").textContent = `GUI ${state.version}`;
@@ -73,6 +92,8 @@ function render() {
   $("#stat-profiles").textContent = state.profiles.length;
   $("#stat-builds").textContent = state.builds.length;
   renderPackages();
+  renderFonts();
+  renderFontSystemOptions(previousFontSystem);
 
   $("#configs-list").innerHTML = state.configs.map(c => `<div class="card"><div><strong>${esc(c.name)}</strong><small>${esc(c.id)} · WP ${esc(c.wordpressVersion)} · ${esc(c.locale)} · ${esc(c.theme.slug)}@${esc(c.theme.version)} · ${c.plugins.length} plugins</small></div><div class="action-list"><button class="secondary inspect-config" data-id="${escAttr(c.id)}">Inspect</button><button class="secondary check-config" data-id="${escAttr(c.id)}">Check packages</button></div></div>`).join("") || `<div class="empty">No configuration snapshots yet. You can still create package-only builds.</div>`;
 
@@ -96,7 +117,7 @@ function render() {
   $("#profile-select").innerHTML = profileOpts || `<option value="">No profiles created</option>`;
   if (state.profiles.some(p => p.file === previousProfile)) $("#profile-select").value = previousProfile;
 
-  $("#profiles-manager").innerHTML = state.profiles.map(p => `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`).join("") || `<div class="empty">No profiles yet. Create one from the Build page.</div>`;
+  $("#profiles-manager").innerHTML = state.profiles.map(p => `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.fontSystem ? ` · Font: ${esc(p.fontSystem)}` : ""}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`).join("") || `<div class="empty">No profiles yet. Create one from the Build page.</div>`;
 
   const buildCard = (b, compact = false) => `<div class="build-card"><div><strong>${esc(b.file)}</strong><small>${b.profile ? `Profile: ${esc(b.profile)} · ` : ""}${b.locale ? `${esc(b.locale)} · ` : ""}${b.configurationEnabled ? "Snapshot" : "Packages only"} · ${fmtBytes(b.size)} · ${new Date(b.modifiedAt).toLocaleString()}</small>${!compact && b.sha256 ? `<code class="hash">${esc(b.sha256)}</code>` : ""}</div><div class="build-card-actions"><a class="tiny primary-ish" href="/download/${encodeURIComponent(b.file)}">Download</a>${b.profileFile ? `<button class="tiny rebuild" data-profile="${escAttr(b.profileFile)}">Build again</button>` : ""}${compact ? "" : `<button class="tiny danger delete-build" data-file="${escAttr(b.file)}">Delete</button>`}</div></div>`;
   $("#recent-builds").innerHTML = state.builds.slice(0, 5).map(b => buildCard(b, true)).join("") || `<div class="empty">No builds yet.</div>`;
@@ -129,6 +150,16 @@ async function removePackage(btn) {
     if (btn.dataset.variant) q.set("variant", btn.dataset.variant);
     await request(`/api/packages?${q}`, { method: "DELETE" });
     flash(`Removed ${label}.`);
+    await refresh();
+  } catch (e) { flash(e.message, true); }
+}
+
+async function removeFontSystem(id) {
+  const system = (state.fonts || []).find(item => item.id === id);
+  if (!confirm(`Remove font system ${system?.name || id}? Profiles using it will stop resolving until another font system is selected.`)) return;
+  try {
+    await request(`/api/fonts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    flash(`Removed font system ${system?.name || id}.`);
     await refresh();
   } catch (e) { flash(e.message, true); }
 }
@@ -216,7 +247,8 @@ async function inspectConfig(id) {
 
     const reqRows = requirements.map(r => `<tr><td><span class="status-chip ${r.status === "available" ? "ok" : "missing"}">${r.status === "available" ? "Available" : "Missing"}</span></td><td>${esc(r.kind)}</td><td><code>${esc(r.slug)}</code></td><td>${esc(r.version)}${r.variant ? ` · ${esc(r.variant)}` : ""}</td></tr>`).join("");
     const pageRows = i.wordpress.pages.map(p => `<span class="entity-pill"><strong>${esc(p.title)}</strong><code>${esc(p.slug)}</code></span>`).join("") || `<span class="muted">No starter pages.</span>`;
-    const pluginRows = i.source.plugins.map(p => `<span class="entity-pill"><strong>${esc(p.name)}</strong><code>${esc(p.slug)}@${esc(p.version)}</code></span>`).join("") || `<span class="muted">No active target plugins.</span>`;
+    const pluginRows = i.source.plugins.map(p => `<span class="entity-pill"><strong>${esc(p.name)}</strong><code>${esc(p.slug)}@${esc(p.version)}</code></span>`).join("") || `<span class="muted">No source plugins recorded.</span>`;
+    const targetPluginRows = (i.source.targetPlugins || []).map(p => `<span class="entity-pill"><strong>${esc(p.name)}</strong><code>${esc(p.slug)}@${esc(p.version)}</code></span>`).join("") || `<span class="muted">No starter target plugins selected.</span>`;
 
     const adapterCards = i.adapters.map(adapter => {
       const [statusLabel, statusClass] = adapterStatusLabel(adapter.status);
@@ -249,7 +281,7 @@ async function inspectConfig(id) {
           <div><span>Portable adapters</span><strong>${i.totals.portableAdapters}</strong></div>
           <div><span>Deferred adapters</span><strong>${i.totals.deferredAdapters}</strong></div>
         </div>
-        <section class="inspect-section"><h3>Source environment</h3><div class="source-grid"><div><span>WordPress</span><strong>${esc(i.source.wordpressVersion)}</strong></div><div><span>PHP</span><strong>${esc(i.source.phpVersion)}</strong></div><div><span>Locale</span><strong>${esc(i.source.locale)}</strong></div><div><span>Theme</span><strong>${esc(i.source.theme.name)} ${esc(i.source.theme.version)}</strong></div></div><div class="entity-list">${pluginRows}</div></section>
+        <section class="inspect-section"><h3>Source environment</h3><div class="source-grid"><div><span>WordPress</span><strong>${esc(i.source.wordpressVersion)}</strong></div><div><span>PHP</span><strong>${esc(i.source.phpVersion)}</strong></div><div><span>Locale</span><strong>${esc(i.source.locale)}</strong></div><div><span>Theme</span><strong>${esc(i.source.theme.name)} ${esc(i.source.theme.version)}</strong></div></div><h4>Source plugin inventory</h4><div class="entity-list">${pluginRows}</div><h4>Starter target packages</h4><div class="entity-list">${targetPluginRows}</div></section>
       </div>
 
       <div class="inspect-tab-panel" data-tab="packages">
@@ -420,6 +452,7 @@ async function createProfile() {
     themeSlug: theme.slug,
     themeVersion: theme.version,
     pluginVersions,
+    fontSystemId: $("#build-font-system").value,
     sourceFile: currentEditingProfileFile
   };
   try {
@@ -452,6 +485,7 @@ async function loadProfileIntoEditor(file, duplicate = false) {
     $("#build-name").value = duplicate ? `${profile.name}-copy` : profile.name;
     $("#build-locale").value = profile.locale || "en_US";
     await loadBuildSelection(profile.config?.id || "");
+    $("#build-font-system").value = profile.fontSystem?.id || "";
 
     const wpValue = JSON.stringify({ version: profile.wordpress.version, variant: profile.wordpress.variant || "en_US" });
     if ([...$("#build-wordpress").options].some(o => o.value === wpValue)) $("#build-wordpress").value = wpValue;
@@ -479,6 +513,7 @@ function resetProfileEditor() {
   $("#build-name").dataset.changed = "";
   $("#build-locale").dataset.changed = "";
   $("#build-config").value = "";
+  $("#build-font-system").value = "";
   $("#cancel-profile-edit").classList.add("hidden");
   $("#create-profile").textContent = "Save Profile";
   loadBuildSelection("");
@@ -561,6 +596,7 @@ function setBusy(on) { document.body.classList.toggle("busy", on); }
 document.querySelectorAll(".nav").forEach(btn => btn.onclick = () => goView(btn.dataset.view));
 $("#refresh").onclick = () => refresh().catch(e => flash(e.message, true));
 $("#package-file").onchange = e => uploadFiles([...e.target.files], "packages").catch(e => flash(e.message, true));
+$("#font-file").onchange = e => uploadFiles([...e.target.files], "fonts").catch(e => flash(e.message, true));
 $("#config-file").onchange = e => uploadFiles([...e.target.files], "configs").catch(e => flash(e.message, true));
 const dz = $("#package-drop");
 ["dragenter", "dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("drag"); }));

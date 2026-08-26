@@ -5,3 +5,6 @@ export * from "./profile.js";
 export * from "./registry.js";
 export * from "./types.js";
 export * from "./snapshot.js";
+export * from "./fonts.js";
+export * from "./snapshot-policy.js";
+export * from "./archive.js";

@@ -6,6 +6,7 @@ import {
   buildStarter,
   BuilderError,
   defaultLibraryDir,
+  FontSystemRegistry,
   inspectPackage,
   loadProfile,
   PackageRegistry,
@@ -14,7 +15,7 @@ import {
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.16";
+const VERSION = "0.1.0-alpha.18";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;
@@ -30,7 +31,10 @@ Usage:
   wp-starter config check <id> [--library <dir>]
   wp-starter config compare <left-id> <right-id> [--library <dir>]
   wp-starter config remove <id> [--library <dir>]
-  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--wordpress-version <version>] [--wordpress-variant <locale>] [--theme-version <version>] [--plugin-version <slug=version>]... [--exclude-plugin <slug>]... [--library <dir>] [--replace]
+  wp-starter font add <fonts.zip> [--name <name>] [--library <dir>] [--replace]
+  wp-starter font list [--library <dir>]
+  wp-starter font remove <id> [--library <dir>]
+  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--wordpress-version <version>] [--wordpress-variant <locale>] [--theme-version <version>] [--plugin-version <slug=version>]... [--exclude-plugin <slug>]... [--font-system <id>] [--library <dir>] [--replace]
   wp-starter profile check <profile.json> [--library <dir>]
   wp-starter library path [--library <dir>]
   wp-starter build --profile <profile.json> --output <starter.zip> [--library <dir>]
@@ -283,6 +287,32 @@ async function handleConfig(): Promise<void> {
   usage();
 }
 
+async function handleFont(): Promise<void> {
+  const action = process.argv[3];
+  const input = process.argv[4];
+  const registry = new FontSystemRegistry(libraryDir());
+  if (action === "add") {
+    if (!input || input.startsWith("--")) usage();
+    const record = await registry.add(input, { name: getArg("--name") ?? undefined, replace: hasFlag("--replace") });
+    console.log(`Added font system: ${record.name} (${record.id})`);
+    console.table(record.faces.map((face) => ({ Family: face.family, Weight: face.weight, Style: face.style, Format: face.format, File: face.filename })));
+    if (record.skipped.length) console.table(record.skipped.map((item) => ({ Skipped: item.filename, Reason: item.reason })));
+    return;
+  }
+  if (action === "list") {
+    const records = await registry.list();
+    console.table(records.map((record) => ({ ID: record.id, Name: record.name, Faces: record.faces.length, Skipped: record.skipped.length })));
+    return;
+  }
+  if (action === "remove") {
+    if (!input || input.startsWith("--")) usage();
+    const removed = await registry.remove(input);
+    console.log(`Removed font system: ${removed.name} (${removed.id})`);
+    return;
+  }
+  usage();
+}
+
 async function fileExists(target: string): Promise<boolean> {
   try {
     await access(target);
@@ -322,7 +352,8 @@ async function handleProfile(): Promise<void> {
       wordpressVariant: getArg("--wordpress-variant") ?? undefined,
       themeVersion: getArg("--theme-version") ?? undefined,
       pluginVersions,
-      excludePlugins: getArgs("--exclude-plugin")
+      excludePlugins: getArgs("--exclude-plugin"),
+      fontSystemId: getArg("--font-system")
     });
 
     await mkdir(path.dirname(absoluteOutput), { recursive: true });
@@ -335,6 +366,7 @@ async function handleProfile(): Promise<void> {
     console.log(`WordPress: ${profile.wordpress.version}${profile.wordpress.variant ? ` (${profile.wordpress.variant})` : ""}`);
     console.log(`Theme: ${profile.theme ? `${profile.theme.slug}@${profile.theme.version}` : "WordPress default"}`);
     console.log(`Plugins: ${profile.plugins.length}`);
+    console.log(`Font system: ${profile.fontSystem?.id || "none"}`);
     return;
   }
 
@@ -401,6 +433,11 @@ async function main(): Promise<void> {
 
   if (command === "config") {
     await handleConfig();
+    return;
+  }
+
+  if (command === "font") {
+    await handleFont();
     return;
   }
 
