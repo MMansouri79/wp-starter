@@ -1,7 +1,7 @@
 {
   "name": "wp-starter-system",
   "private": true,
-  "version": "0.1.0-alpha.21",
+  "version": "0.1.0-alpha.22",
   "description": "Offline WordPress starter build system: exporter, local builder and bootstrap.",
   "type": "module",
   "scripts": {

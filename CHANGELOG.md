@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.22
+
+- Fix first-login provisioning races by running real plugin activation hooks instead of silent activation.
+- Prevent AJAX, cron and REST requests from advancing the Bootstrap state machine.
+- Activate dependency-sensitive plugins in a deterministic order: Elementor, WooCommerce, Elementor Pro, then dependants.
+- Prepare a valid Elementor Kit before WooCommerce/Elementor Pro activation.
+- Guard WooCommerce activation with a temporary maintenance barrier and verify its required database tables before continuing.
+
 ## 0.1.0-alpha.21 - 2026-08-26
 
 - Fixed Elementor Pro Custom Fonts provisioning so each installed WOFF2 face is registered as a real WordPress Media attachment.

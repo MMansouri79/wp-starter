@@ -15,7 +15,7 @@ import {
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.21";
+const VERSION = "0.1.0-alpha.22";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;

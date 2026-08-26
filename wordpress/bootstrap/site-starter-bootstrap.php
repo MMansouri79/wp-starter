@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.21
+ * Version: 0.1.0-alpha.22
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -15,7 +15,7 @@ final class MMS_WP_Starter_Bootstrap {
     const ERROR_OPTION    = 'mms_wp_starter_bootstrap_error';
     const REPORT_OPTION   = 'mms_wp_starter_bootstrap_report';
     const REVISION_OPTION = 'mms_wp_starter_bootstrap_revision';
-    const CONFIG_REVISION = 4;
+    const CONFIG_REVISION = 5;
 
     public static function init() {
         add_action( 'admin_init', array( __CLASS__, 'maybe_run' ), 1 );
@@ -24,6 +24,14 @@ final class MMS_WP_Starter_Bootstrap {
 
     public static function maybe_run() {
         if ( wp_installing() || ! is_admin() || ! current_user_can( 'manage_options' ) ) {
+            return;
+        }
+
+        // Never advance provisioning from background admin requests. AJAX runners
+        // (notably Action Scheduler) can overlap plugin activation and observe a
+        // half-installed plugin database. Only a normal administrator page load
+        // is allowed to advance the state machine.
+        if ( ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() ) || ( function_exists( 'wp_doing_cron' ) && wp_doing_cron() ) || ( defined( 'REST_REQUEST' ) && REST_REQUEST ) ) {
             return;
         }
 
@@ -86,14 +94,28 @@ final class MMS_WP_Starter_Bootstrap {
                 self::save_state( array( 'phase' => 'install_plugins', 'plugin_index' => $index + 1 ) );
                 self::continue_setup();
             }
-            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => array_keys( $plugins ), 'activation_failures' => 0 ) );
+            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => self::ordered_activation_queue( $plugins ), 'activation_failures' => 0, 'elementor_prepared' => false ) );
             self::continue_setup();
         }
 
         if ( 'activate_plugins' === $phase ) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
             $plugins = array_values( (array) ( $build['plugins'] ?? array() ) );
-            $queue   = array_values( (array) ( $state['activation_queue'] ?? array_keys( $plugins ) ) );
+            $queue   = array_values( (array) ( $state['activation_queue'] ?? self::ordered_activation_queue( $plugins ) ) );
             $failed  = absint( $state['activation_failures'] ?? 0 );
+            $elementor_prepared = ! empty( $state['elementor_prepared'] );
+
+            // Elementor Pro and WooCommerce both update Kit settings during their
+            // own activation/install flows. Make sure Elementor has a real active
+            // Kit on a request where Elementor was loaded normally before either
+            // of those plugins is activated.
+            if ( ! $elementor_prepared && self::build_has_plugin( $plugins, 'elementor/elementor.php' ) && is_plugin_active( 'elementor/elementor.php' ) ) {
+                $kit_result = self::ensure_elementor_kit( array() );
+                if ( is_wp_error( $kit_result ) ) { self::fail( $kit_result->get_error_message() ); return; }
+                self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => $queue, 'activation_failures' => $failed, 'elementor_prepared' => true ) );
+                self::continue_setup();
+            }
+
             if ( empty( $queue ) ) {
                 self::save_state( array( 'phase' => 'fonts' ) );
                 self::continue_setup();
@@ -108,7 +130,7 @@ final class MMS_WP_Starter_Bootstrap {
             } else {
                 $failed = 0;
             }
-            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => $queue, 'activation_failures' => $failed ) );
+            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => $queue, 'activation_failures' => $failed, 'elementor_prepared' => $elementor_prepared ) );
             self::continue_setup();
         }
 
@@ -422,6 +444,80 @@ final class MMS_WP_Starter_Bootstrap {
         return true;
     }
 
+    private static function ordered_activation_queue( array $plugins ) {
+        $priorities = array(
+            'elementor/elementor.php'             => 10,
+            'woocommerce/woocommerce.php'         => 20,
+            'elementor-pro/elementor-pro.php'     => 30,
+            'code-snippets/code-snippets.php'     => 40,
+            'persian-woocommerce/woocommerce-persian.php' => 50,
+        );
+        $queue = array_keys( array_values( $plugins ) );
+        usort( $queue, function ( $a, $b ) use ( $plugins, $priorities ) {
+            $file_a = isset( $plugins[ $a ]['file'] ) ? (string) $plugins[ $a ]['file'] : '';
+            $file_b = isset( $plugins[ $b ]['file'] ) ? (string) $plugins[ $b ]['file'] : '';
+            $priority_a = $priorities[ $file_a ] ?? 100;
+            $priority_b = $priorities[ $file_b ] ?? 100;
+            return $priority_a === $priority_b ? $a <=> $b : $priority_a <=> $priority_b;
+        } );
+        return $queue;
+    }
+
+    private static function build_has_plugin( array $plugins, $file ) {
+        foreach ( $plugins as $plugin ) {
+            if ( is_array( $plugin ) && isset( $plugin['file'] ) && $file === (string) $plugin['file'] ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function begin_activation_maintenance() {
+        $path = ABSPATH . '.maintenance';
+        if ( file_exists( $path ) ) {
+            return false;
+        }
+        $payload = '<?php $upgrading = ' . time() . "; // WP Starter plugin activation
+";
+        if ( false === @file_put_contents( $path, $payload, LOCK_EX ) ) {
+            return new WP_Error( 'starter_maintenance_failed', 'Could not create a temporary maintenance lock while activating WooCommerce.' );
+        }
+        return true;
+    }
+
+    private static function end_activation_maintenance( $created ) {
+        if ( true === $created ) {
+            @unlink( ABSPATH . '.maintenance' );
+        }
+    }
+
+    private static function ensure_woocommerce_ready() {
+        global $wpdb;
+        $required = array(
+            $wpdb->prefix . 'woocommerce_attribute_taxonomies',
+            $wpdb->prefix . 'woocommerce_sessions',
+            $wpdb->prefix . 'wc_order_stats',
+        );
+        $missing = array();
+        foreach ( $required as $table ) {
+            $found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+            if ( $found !== $table ) {
+                $missing[] = $table;
+            }
+        }
+        if ( ! empty( $missing ) && class_exists( 'WC_Install' ) && is_callable( array( 'WC_Install', 'install' ) ) ) {
+            WC_Install::install();
+            $missing = array();
+            foreach ( $required as $table ) {
+                $found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+                if ( $found !== $table ) {
+                    $missing[] = $table;
+                }
+            }
+        }
+        return empty( $missing ) ? true : new WP_Error( 'starter_woocommerce_not_ready', 'WooCommerce activation finished before required database tables were available: ' . implode( ', ', $missing ) );
+    }
+
     private static function activate_plugin_component( array $plugin ) {
         require_once ABSPATH . 'wp-admin/includes/plugin.php';
 
@@ -435,11 +531,30 @@ final class MMS_WP_Starter_Bootstrap {
         }
 
         if ( is_plugin_active( $file ) ) {
-            return true;
+            return 'woocommerce/woocommerce.php' === $file ? self::ensure_woocommerce_ready() : true;
         }
 
-        $activated = activate_plugin( $file, '', false, true );
-        return is_wp_error( $activated ) ? $activated : true;
+        // `silent=true` suppresses the plugin-specific activation hook. That is
+        // unacceptable for installers such as WooCommerce because their schema,
+        // roles and options are created by that hook. Keep a short maintenance
+        // barrier around WooCommerce so concurrent cron/AJAX/frontend requests
+        // cannot load it while its tables are still being created.
+        $maintenance = 'woocommerce/woocommerce.php' === $file ? self::begin_activation_maintenance() : false;
+        if ( is_wp_error( $maintenance ) ) {
+            return $maintenance;
+        }
+        try {
+            $activated = activate_plugin( $file, '', false, false );
+            if ( is_wp_error( $activated ) ) {
+                return $activated;
+            }
+            if ( 'woocommerce/woocommerce.php' === $file ) {
+                return self::ensure_woocommerce_ready();
+            }
+            return true;
+        } finally {
+            self::end_activation_maintenance( $maintenance );
+        }
     }
 
     private static function bundled_payload_file_path( $relative, $expected = '' ) {

@@ -20,7 +20,7 @@ import {
   PackageRegistry
 } from "../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.21";
+const VERSION = "0.1.0-alpha.22";
 const SESSION_TOKEN = randomBytes(32).toString("hex");
 const SESSION_COOKIE = `wp_starter_session=${SESSION_TOKEN}`;
 const here = path.dirname(fileURLToPath(import.meta.url));

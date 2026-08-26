@@ -38,6 +38,22 @@ test("bootstrap registers Elementor font files as WordPress attachments with id 
   assert.equal(bootstrap.includes("'post_mime_type' => 'font/woff2'"), true);
   assert.equal(bootstrap.includes("'id'  => absint( $attachment_id )"), true);
   assert.equal(bootstrap.includes("'url' => esc_url_raw( $url )"), true);
-  assert.equal(bootstrap.includes("const CONFIG_REVISION = 4;"), true);
+  assert.equal(bootstrap.includes("const CONFIG_REVISION = 5;"), true);
   assert.match(bootstrap, /\$completed && \$revision < self::CONFIG_REVISION[\s\S]{0,180}'phase' => 'fonts'/);
+});
+
+
+test("bootstrap runs real activation hooks and serializes WooCommerce first boot", async () => {
+  const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
+  assert.equal(bootstrap.includes("activate_plugin( $file, '', false, false )"), true, "plugin activation hooks must run");
+  assert.equal(bootstrap.includes("wp_doing_ajax()"), true, "AJAX requests must not advance provisioning");
+  assert.equal(bootstrap.includes("ordered_activation_queue"), true);
+  assert.match(bootstrap, /'elementor\/elementor\.php'\s*=>\s*10/);
+  assert.match(bootstrap, /'woocommerce\/woocommerce\.php'\s*=>\s*20/);
+  assert.match(bootstrap, /'elementor-pro\/elementor-pro\.php'\s*=>\s*30/);
+  assert.equal(bootstrap.includes("begin_activation_maintenance"), true);
+  assert.equal(bootstrap.includes("ensure_woocommerce_ready"), true);
+  assert.equal(bootstrap.includes("woocommerce_attribute_taxonomies"), true);
+  assert.equal(bootstrap.includes("woocommerce_sessions"), true);
+  assert.equal(bootstrap.includes("wc_order_stats"), true);
 });
