@@ -20,7 +20,7 @@ import {
   PackageRegistry
 } from "../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.18";
+const VERSION = "0.1.0-alpha.19";
 const SESSION_TOKEN = randomBytes(32).toString("hex");
 const SESSION_COOKIE = `wp_starter_session=${SESSION_TOKEN}`;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -355,7 +355,7 @@ async function api(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/fonts") {
     const filename = url.searchParams.get("filename") || "fonts.zip";
-    const replace = url.searchParams.get("replace") === "1";
+    const replace = url.searchParams.get("replace") !== "0";
     const name = String(url.searchParams.get("name") || "").trim() || undefined;
     const upload = await receiveZip(req, filename);
     try {
@@ -369,7 +369,7 @@ async function api(req, res, url) {
 
   if (req.method === "DELETE" && url.pathname === "/api/fonts") {
     const id = String(url.searchParams.get("id") || "").trim();
-    if (!id) throw new BuilderError("invalid_request", "Font system id is required.");
+    if (!id) throw new BuilderError("invalid_request", "Font profile id is required.");
     json(res, 200, await new FontSystemRegistry(libraryRoot).remove(id));
     return true;
   }

@@ -47,8 +47,8 @@
 
       <section class="view" id="view-fonts">
         <div class="panel">
-          <div class="panel-head"><div><h2>Font Systems</h2><p>Import a ZIP of static font files. Family, weight, and style are detected and the selected system is installed as Elementor Pro Custom Fonts during provisioning.</p></div><label class="primary file-button">+ Add Font ZIP<input id="font-file" type="file" accept=".zip" multiple></label></div>
-          <p class="field-help">Supported for this test release: WOFF2, WOFF, TTF. Variable fonts and OTF are detected but skipped with an explanation.</p>
+          <div class="panel-head"><div><h2>Font Profiles</h2><p>Import a ZIP containing WOFF2 files. Each detected font family becomes a separate reusable profile with its weights and styles grouped automatically.</p></div><label class="primary file-button">+ Add Font ZIP<input id="font-file" type="file" accept=".zip" multiple></label></div>
+          <p class="field-help">WOFF2 only. WOFF, TTF, OTF and other formats are ignored. Duplicate weight/style faces are collapsed automatically.</p>
           <div id="fonts-list" class="cards"></div>
         </div>
       </section>
@@ -81,7 +81,7 @@
             <label>Destination locale<input id="build-locale" value="en_US" autocomplete="off"></label>
             <label>WordPress package<select id="build-wordpress"></select></label>
             <label>Theme package<select id="build-theme"></select></label>
-            <label>Font system <span class="optional">optional</span><select id="build-font-system"></select><small class="field-help">Font systems are independent from snapshots and are registered as Elementor Pro Custom Fonts.</small></label>
+            <label>Font profile <span class="optional">optional</span><select id="build-font-system"></select><small class="field-help">Font profiles are independent from snapshots and are registered as Elementor Pro Custom Fonts.</small></label>
             <div class="field"><span class="label">Plugins and versions</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div></div>
             <div class="profile-actions"><button id="create-profile" class="primary">Save Profile</button><button id="cancel-profile-edit" class="secondary hidden">Cancel Edit</button></div>
           </div>

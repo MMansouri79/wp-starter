@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.0-alpha.19 - 2026-08-26
+
+### WOFF2-only font profiles
+
+- Reworked Font Systems into one-family Font Profiles in the Builder GUI.
+- Font ZIP imports now inspect WOFF2 files only; WOFF, TTF, OTF, and other formats are ignored.
+- A single ZIP can create multiple profiles automatically, one per detected font family.
+- Font profile names are derived from matching family folders/filenames, including common variants such as `FaNum` and `NoEn`.
+- Duplicate family/weight/style WOFF2 slots are collapsed deterministically.
+- Re-importing the same archive through the GUI replaces profiles created from that archive, including legacy alpha.18 multi-format imports.
+- Legacy profiles containing non-WOFF2 faces are visible but blocked from new builds until re-imported.
+- Elementor Pro font installation in Bootstrap is now WOFF2-only.
+- Added Builder Core and GUI regression tests for multi-family profile splitting and duplicate-face handling.
+
 ## 0.1.0-alpha.18 - 2026-08-26
 
 ### Security hardening, target selection, Code Snippets restore, and Font Systems

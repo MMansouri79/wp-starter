@@ -15,7 +15,7 @@ import {
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.18";
+const VERSION = "0.1.0-alpha.19";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;
@@ -293,10 +293,13 @@ async function handleFont(): Promise<void> {
   const registry = new FontSystemRegistry(libraryDir());
   if (action === "add") {
     if (!input || input.startsWith("--")) usage();
-    const record = await registry.add(input, { name: getArg("--name") ?? undefined, replace: hasFlag("--replace") });
-    console.log(`Added font system: ${record.name} (${record.id})`);
-    console.table(record.faces.map((face) => ({ Family: face.family, Weight: face.weight, Style: face.style, Format: face.format, File: face.filename })));
-    if (record.skipped.length) console.table(record.skipped.map((item) => ({ Skipped: item.filename, Reason: item.reason })));
+    const records = await registry.add(input, { name: getArg("--name") ?? undefined, replace: hasFlag("--replace") });
+    console.log(`Added ${records.length} font profile${records.length === 1 ? "" : "s"}: ${records.map((record) => record.name).join(", ")}`);
+    for (const record of records) {
+      console.log(`\n${record.name} (${record.id})`);
+      console.table(record.faces.map((face) => ({ Weight: face.weight, Style: face.style, Format: face.format, File: face.filename })));
+      if (record.skipped.length) console.table(record.skipped.map((item) => ({ Ignored: item.filename, Reason: item.reason })));
+    }
     return;
   }
   if (action === "list") {
@@ -307,7 +310,7 @@ async function handleFont(): Promise<void> {
   if (action === "remove") {
     if (!input || input.startsWith("--")) usage();
     const removed = await registry.remove(input);
-    console.log(`Removed font system: ${removed.name} (${removed.id})`);
+    console.log(`Removed font profile: ${removed.name} (${removed.id})`);
     return;
   }
   usage();

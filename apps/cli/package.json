@@ -1,7 +1,7 @@
 {
   "name": "@wp-starter/cli",
   "private": true,
-  "version": "0.1.0-alpha.18",
+  "version": "0.1.0-alpha.19",
   "type": "module",
   "bin": {
     "wp-starter": "dist/index.js"

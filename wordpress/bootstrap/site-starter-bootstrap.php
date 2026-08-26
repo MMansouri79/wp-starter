@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.18
+ * Version: 0.1.0-alpha.19
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -493,7 +493,7 @@ final class MMS_WP_Starter_Bootstrap {
             $weight = isset( $face['weight'] ) ? absint( $face['weight'] ) : 400;
             $style  = isset( $face['style'] ) ? sanitize_key( $face['style'] ) : 'normal';
             $format = isset( $face['format'] ) ? sanitize_key( $face['format'] ) : '';
-            if ( '' === $family || ! in_array( $weight, array( 100, 200, 300, 400, 500, 600, 700, 800, 900 ), true ) || ! in_array( $style, array( 'normal', 'italic', 'oblique' ), true ) || ! in_array( $format, array( 'woff2', 'woff', 'ttf' ), true ) ) {
+            if ( '' === $family || ! in_array( $weight, array( 100, 200, 300, 400, 500, 600, 700, 800, 900 ), true ) || ! in_array( $style, array( 'normal', 'italic', 'oblique' ), true ) || 'woff2' !== $format ) {
                 return new WP_Error( 'starter_font_face_invalid', 'A font face in the build manifest is invalid.' );
             }
             $source = self::bundled_payload_file_path( isset( $face['file'] ) ? $face['file'] : '', isset( $face['sha256'] ) ? $face['sha256'] : '' );
@@ -572,7 +572,7 @@ final class MMS_WP_Starter_Bootstrap {
         $family_css = str_replace( array( "\\", "'" ), array( "\\\\", "\\'" ), (string) $family );
         foreach ( $rows as $row ) {
             $sources = array();
-            foreach ( array( 'woff2' => 'woff2', 'woff' => 'woff', 'ttf' => 'truetype' ) as $format => $css_format ) {
+            foreach ( array( 'woff2' => 'woff2' ) as $format => $css_format ) {
                 if ( ! empty( $row[ $format ]['url'] ) ) {
                     $sources[] = "url('" . esc_url_raw( $row[ $format ]['url'] ) . "') format('" . $css_format . "')";
                 }

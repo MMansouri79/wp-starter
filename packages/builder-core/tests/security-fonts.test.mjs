@@ -25,22 +25,49 @@ test("ZIP validator rejects traversal entries before extraction", async () => {
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
 
-test("font registry detects static weights/styles and skips variable fonts", async () => {
+test("font registry imports WOFF2 only and creates one named profile per detected family", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "wp-starter-font-registry-"));
   try {
-    const source = path.join(temp, "source"); await mkdir(source, { recursive: true });
-    for (const name of ["Peyda-Regular.woff2", "Peyda-SemiBold.woff2", "Peyda-Bold.woff2", "Peyda-ExtraBold.woff2", "Peyda-Italic.woff2", "Peyda-Variable.woff2"]) {
-      await writeFile(path.join(source, name), `fake-${name}`);
+    const source = path.join(temp, "source");
+    const yekan = path.join(source, "Pro", "Yekan Bakh", "WOFF2");
+    const fanum = path.join(source, "Pro", "Yekan Bakh FaNum", "WOFF2");
+    await mkdir(yekan, { recursive: true }); await mkdir(fanum, { recursive: true });
+    for (const name of ["YekanBakh-Regular.woff2", "YekanBakh-SemiBold.woff2", "YekanBakh-Bold.woff2", "YekanBakh-ExtraBold.woff2", "YekanBakh-Italic.woff2", "YekanBakh-Variable.woff2"]) {
+      await writeFile(path.join(yekan, name), `fake-${name}`);
     }
-    const zip = path.join(temp, "Peyda.zip"); await zipDir(source, zip);
+    await writeFile(path.join(fanum, "YekanBakhFaNum-Regular.woff2"), "fanum-regular");
+    await writeFile(path.join(fanum, "YekanBakhFaNum-Bold.woff2"), "fanum-bold");
+    // Other formats in the same archive are deliberately ignored.
+    await writeFile(path.join(yekan, "YekanBakh-Bold.ttf"), "ttf");
+    await writeFile(path.join(yekan, "YekanBakh-Bold.woff"), "woff");
+    const zip = path.join(temp, "font1403.zip"); await zipDir(source, zip);
     const registry = new FontSystemRegistry(path.join(temp, "library"));
-    const system = await registry.add(zip, { name: "Peyda" });
+    const profiles = await registry.add(zip, { replace: true });
+    assert.deepEqual(profiles.map((profile) => profile.name), ["Yekan Bakh", "Yekan Bakh FaNum"]);
+    const system = profiles[0];
     assert.equal(system.faces.length, 5);
+    assert(system.faces.every((face) => face.format === "woff2"));
     assert.deepEqual(system.faces.map((face) => [face.weight, face.style]), [[400,"italic"],[400,"normal"],[600,"normal"],[700,"normal"],[800,"normal"]]);
     assert.equal(system.skipped.length, 1);
-    assert.match(system.skipped[0].reason, /Variable font/i);
+    assert.match(system.skipped[0].reason, /Variable WOFF2/i);
     const resolved = await registry.resolve(system.id);
     assert.equal(resolved.faces.length, 5);
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});
+
+test("font registry collapses duplicate WOFF2 weight/style slots", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "wp-starter-font-dedupe-"));
+  try {
+    const source = path.join(temp, "source");
+    await mkdir(path.join(source, "Yekan Bakh", "WOFF2", "copy"), { recursive: true });
+    await writeFile(path.join(source, "Yekan Bakh", "WOFF2", "YekanBakh-Black.woff2"), "black-a");
+    await writeFile(path.join(source, "Yekan Bakh", "WOFF2", "copy", "YekanBakh-Black.woff2"), "black-b");
+    const zip = path.join(temp, "Yekan.zip"); await zipDir(source, zip);
+    const [profile] = await new FontSystemRegistry(path.join(temp, "library")).add(zip, { replace: true });
+    assert.equal(profile.faces.length, 1);
+    assert.equal(profile.faces[0].weight, 900);
+    assert.equal(profile.skipped.length, 1);
+    assert.match(profile.skipped[0].reason, /Duplicate 900 normal WOFF2 face/i);
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
 
@@ -56,7 +83,7 @@ test("font-enabled profiles require Elementor Pro and bundle detected faces", as
     const proZip = await makePlugin(temp, "elementor-pro", "Elementor Pro", "4.2.1");
     const packages = new PackageRegistry(library); await packages.add(wpZip); await packages.add(elementorZip); await packages.add(proZip);
     const fonts = path.join(temp, "fonts"); await mkdir(fonts, { recursive: true }); await writeFile(path.join(fonts, "Peyda-Bold.woff2"), "font");
-    const fontZip = path.join(temp, "fonts.zip"); await zipDir(fonts, fontZip); const system = await new FontSystemRegistry(library).add(fontZip, { name: "Peyda" });
+    const fontZip = path.join(temp, "fonts.zip"); await zipDir(fonts, fontZip); const [system] = await new FontSystemRegistry(library).add(fontZip, { name: "Peyda", replace: true });
     await assert.rejects(() => createProfileFromPackages({ libraryDir: library, name: "bad", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", plugins: { elementor: "4.2.1" }, fontSystemId: system.id }), (error) => error?.code === "font_dependencies_missing");
     const doc = await createProfileFromPackages({ libraryDir: library, name: "font-build", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", plugins: { elementor: "4.2.1", "elementor-pro": "4.2.1" }, fontSystemId: system.id });
     const profilePath = path.join(temp, "profile.json"); await writeFile(profilePath, JSON.stringify(doc));

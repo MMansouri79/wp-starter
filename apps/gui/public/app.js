@@ -5,7 +5,7 @@ let currentEditingProfileFile = "";
 const titles = {
   overview: ["Overview", "Your local WordPress starter workspace."],
   packages: ["Packages", "Manage versioned WordPress, theme, and plugin ZIPs."],
-  fonts: ["Fonts", "Manage reusable font systems and detected Elementor Pro font faces."],
+  fonts: ["Fonts", "Manage reusable WOFF2 font profiles for Elementor Pro."],
   configs: ["Configurations", "Reference-site exports and their package requirements."],
   profiles: ["Profiles", "Manage reusable, version-pinned build profiles."],
   build: ["Build", "Choose exact package versions and generate a complete offline WordPress ZIP."],
@@ -65,17 +65,18 @@ function renderPackages() {
 function renderFonts() {
   const systems = state.fonts || [];
   $("#fonts-list").innerHTML = systems.map(system => {
-    const families = [...new Set((system.faces || []).map(face => face.family))];
-    const faces = (system.faces || []).map(face => `<span class="version-pill">${esc(face.family)} · ${esc(face.weight)} ${esc(face.style)} · ${esc(face.format.toUpperCase())}</span>`).join("");
-    const skipped = (system.skipped || []).length ? `<details class="inspect-details"><summary>Skipped files <span>${system.skipped.length}</span></summary>${(system.skipped || []).map(item => `<div class="kv-row"><code>${esc(item.filename)}</code><span>${esc(item.reason)}</span></div>`).join("")}</details>` : "";
-    return `<div class="card font-card"><div><strong>${esc(system.name)}</strong><small><code>${esc(system.id)}</code> · ${system.faces.length} usable face${system.faces.length === 1 ? "" : "s"} · ${families.length} famil${families.length === 1 ? "y" : "ies"}</small><div class="version-list">${faces}</div>${skipped}</div><div class="action-list"><button class="tiny danger remove-font" data-id="${escAttr(system.id)}">Remove</button></div></div>`;
-  }).join("") || `<div class="empty">No font systems yet. Import a ZIP containing files such as MyFont-Regular.woff2, MyFont-Bold.woff2, and MyFont-ExtraBold.woff2.</div>`;
+    const legacy = (system.faces || []).some(face => face.format !== "woff2");
+    const faces = (system.faces || []).map(face => `<span class="version-pill">${esc(face.weight)} ${esc(face.style)}${face.format === "woff2" ? "" : ` · ${esc(face.format.toUpperCase())}`}</span>`).join("");
+    const skipped = (system.skipped || []).length ? `<details class="inspect-details"><summary>Ignored WOFF2 files <span>${system.skipped.length}</span></summary>${(system.skipped || []).map(item => `<div class="kv-row"><code>${esc(item.filename)}</code><span>${esc(item.reason)}</span></div>`).join("")}</details>` : "";
+    const legacyNote = legacy ? `<small class="field-help">Legacy multi-format profile. Re-import the original ZIP with this Builder to replace it with clean WOFF2-only family profiles.</small>` : "";
+    return `<div class="card font-card"><div><strong>${esc(system.name)}</strong><small><code>${esc(system.id)}</code> · ${system.faces.length} WOFF2 face${system.faces.length === 1 ? "" : "s"}</small>${legacyNote}<div class="version-list">${faces}</div>${skipped}</div><div class="action-list"><button class="tiny danger remove-font" data-id="${escAttr(system.id)}">Remove</button></div></div>`;
+  }).join("") || `<div class="empty">No font profiles yet. Import one ZIP containing one or more WOFF2 font families. Each detected family becomes its own profile automatically.</div>`;
   document.querySelectorAll(".remove-font").forEach(btn => btn.onclick = () => removeFontSystem(btn.dataset.id));
 }
 
 function renderFontSystemOptions(previous = "") {
   const systems = state.fonts || [];
-  $("#build-font-system").innerHTML = [`<option value="">No font system</option>`, ...systems.map(system => `<option value="${escAttr(system.id)}">${esc(system.name)} · ${system.faces.length} faces</option>`)].join("");
+  $("#build-font-system").innerHTML = [`<option value="">No font profile</option>`, ...systems.map(system => `<option value="${escAttr(system.id)}">${esc(system.name)} · ${system.faces.length} faces</option>`)].join("");
   if (systems.some(system => system.id === previous)) $("#build-font-system").value = previous;
 }
 
@@ -156,10 +157,10 @@ async function removePackage(btn) {
 
 async function removeFontSystem(id) {
   const system = (state.fonts || []).find(item => item.id === id);
-  if (!confirm(`Remove font system ${system?.name || id}? Profiles using it will stop resolving until another font system is selected.`)) return;
+  if (!confirm(`Remove font profile ${system?.name || id}? Build profiles using it will stop resolving until another font profile is selected.`)) return;
   try {
     await request(`/api/fonts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-    flash(`Removed font system ${system?.name || id}.`);
+    flash(`Removed font profile ${system?.name || id}.`);
     await refresh();
   } catch (e) { flash(e.message, true); }
 }

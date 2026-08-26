@@ -41,6 +41,7 @@ test("GUI serves the workspace and local API", async () => {
     const html = await htmlResponse.text();
     assert.match(html, /WP Starter Builder/);
     assert.match(html, /Package Library/);
+    assert.match(html, /Font Profiles/);
     assert.match(html, /Saved Profiles/);
     assert.match(html, /Build History/);
     assert.match(html, /Configuration Inspector/);
@@ -225,6 +226,41 @@ test("GUI can create a package-only profile and expose build progress", async ()
     const finalState = await (await authFetch(`${baseUrl}/api/state`)).json();
     assert.equal(finalState.builds.length, 0);
     assert.equal(finalState.profiles.length, 0);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("GUI font import splits a multi-family ZIP into WOFF2-only named profiles", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wp-starter-gui-fonts-"));
+  const library = path.join(root, "library");
+  const previous = process.env.WP_STARTER_HOME;
+  process.env.WP_STARTER_HOME = library;
+  const { createGuiServer } = await import(`../index.mjs?font-test=${Date.now()}`);
+  const server = createGuiServer();
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try {
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+    const authFetch = await localSession(baseUrl);
+    const a = path.join(root, "font-src", "Yekan Bakh", "WOFF2");
+    const b = path.join(root, "font-src", "Yekan Bakh FaNum", "WOFF2");
+    await mkdir(a, { recursive: true }); await mkdir(b, { recursive: true });
+    await writeFile(path.join(a, "YekanBakh-Regular.woff2"), "a400");
+    await writeFile(path.join(a, "YekanBakh-Bold.woff2"), "a700");
+    await writeFile(path.join(a, "YekanBakh-Bold.ttf"), "ignored");
+    await writeFile(path.join(b, "YekanBakhFaNum-Regular.woff2"), "b400");
+    await writeFile(path.join(b, "YekanBakhFaNum-ExtraBold.woff2"), "b800");
+    const zip = path.join(root, "font1403.zip"); await zipDir(path.join(root, "font-src"), zip);
+    const upload = await authFetch(`${baseUrl}/api/fonts?filename=font1403.zip`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: await readFile(zip) });
+    assert.equal(upload.status, 200);
+    const imported = await upload.json();
+    assert.deepEqual(imported.map((profile) => profile.name), ["Yekan Bakh", "Yekan Bakh FaNum"]);
+    const state = await (await authFetch(`${baseUrl}/api/state`)).json();
+    assert.deepEqual(state.fonts.map((profile) => profile.name), ["Yekan Bakh", "Yekan Bakh FaNum"]);
+    assert(state.fonts.every((profile) => profile.faces.every((face) => face.format === "woff2")));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;
