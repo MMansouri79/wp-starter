@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { buildStarter, createZip, extractZip, inspectPackage, loadProfile, PackageRegistry } from "../dist/index.js";
-const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
+const repoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 
 async function zipDir(source, destination) {
   await createZip(source, destination);

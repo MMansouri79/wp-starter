@@ -48,6 +48,8 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(html, /Saved Profiles/);
     assert.match(html, /Build History/);
     assert.match(html, /Configuration Inspector/);
+    assert.match(html, /<select id="build-locale"/);
+    assert.doesNotMatch(html, /<input id="build-locale"/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME;

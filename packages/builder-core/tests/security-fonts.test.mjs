@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { buildStarter, ConfigSnapshotRegistry, createProfileFromPackages, createZip, FontSystemRegistry, loadProfile, PackageRegistry, validateZipArchive } from "../dist/index.js";
-const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
+const repoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 async function zipDir(source, destination) { await createZip(source, destination); }
 async function traversalZip(destination) {
   const name = Buffer.from("../escape.php");
@@ -118,7 +119,7 @@ test("schema-v2 snapshots separate source inventory from starter targets and rej
         ] },
         targets: { plugins: [{ file: "elementor/elementor.php", name: "Elementor", version: "4.2.1" }] },
         wordpress: { options, permalink_structure: "/%postname%/", cleanup_default_content: true, reading: { front_page_role: "home", posts_page_role: "blog" }, pages: [{ role:"home", slug:"home", title:"Home" }, { role:"blog", slug:"blog", title:"Blog" }] },
-        adapters: { elementor: { options: {}, kit_settings: { container_width: { size: 1300, unit: "px" } }, policy:"structural_layout_only" }, woocommerce:{options:{}}, persian_woocommerce:{options:{}}, code_snippets:{status:"portable",settings:{},snippets:[]}, filterx:{status:"deferred_to_phase_2",reason:"deferred"} },
+        adapters: { elementor: { options: {}, kit_settings: { container_width: { size: 1300, unit: "px" } }, policy:"structural_layout_only", templates: [{ id: "elementor-header", name: "Header", type: "header", document: [{ id: "root", elType: "section", settings: {}, elements: [] }] }] }, woocommerce:{options:{}}, persian_woocommerce:{options:{}}, code_snippets:{status:"portable",settings:{},snippets:[]}, filterx:{status:"deferred_to_phase_2",reason:"deferred"} },
         safety: { users_exported:false, uploads_exported:false, arbitrary_options_exported:false, credentials_exported:false, raw_database_exported:false, site_specific_ids_intentionally_excluded:true, source_inventory_is_target_packages:false, elementor_site_identity_exported:false, elementor_design_system_exported:false, elementor_visual_styles_exported:false, elementor_license_connection_exported:false, elementor_theme_builder_conditions_exported:false, code_snippets_code_exported:true, code_snippets_code_requires_secret_review:true }
       }));
       await writeFile(path.join(dir, "export-manifest.json"), "{}"); const zip = path.join(temp, `${name}.zip`); await zipDir(dir, zip); return zip;

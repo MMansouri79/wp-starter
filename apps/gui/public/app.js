@@ -409,10 +409,47 @@ function themeCoordinateValue(p) { return JSON.stringify({ slug: p.slug, version
 function decodeCoordinate(value) { try { return JSON.parse(value); } catch { return { version: value, variant: "" }; } }
 function decodeTheme(value) { try { return value ? JSON.parse(value) : { slug: "", version: "" }; } catch { return { slug: "", version: value }; } }
 
+function localeLabel(locale) {
+  const labels = {
+    en_US: "English (United States)",
+    fa_IR: "فارسی (ایران)",
+    ar: "العربية",
+    de_DE: "Deutsch",
+    es_ES: "Español",
+    fr_FR: "Français",
+    it_IT: "Italiano",
+    tr_TR: "Türkçe"
+  };
+  return labels[locale] ? `${locale} · ${labels[locale]}` : locale;
+}
+
+function availableLocales(config = null) {
+  const locales = new Set(wordpressPackages().map(packageVariant));
+  if (config?.locale) locales.add(config.locale);
+  const current = $("#build-locale")?.value;
+  if (current) locales.add(current);
+  if (!locales.size) locales.add("en_US");
+  return [...locales].sort((a, b) => {
+    if (a === "en_US") return -1;
+    if (b === "en_US") return 1;
+    return a.localeCompare(b);
+  });
+}
+
+function renderLocaleOptions(config = null, selectedLocale = null) {
+  const select = $("#build-locale");
+  const selected = selectedLocale || select.value || config?.locale || "en_US";
+  const locales = availableLocales(config);
+  if (selected && !locales.includes(selected)) locales.push(selected);
+  select.innerHTML = locales.map(locale => `<option value="${escAttr(locale)}">${esc(localeLabel(locale))}</option>`).join("");
+  select.value = locales.includes(selected) ? selected : locales[0] || "en_US";
+  select.disabled = wordpressPackages().length === 0;
+}
+
 function renderWordPressOptions(config = null) {
   const packages = wordpressPackages();
   $("#build-wordpress").innerHTML = packages.map(p => `<option value="${escAttr(coordinateValue(p))}">${esc(p.version)} · ${esc(packageVariant(p))}</option>`).join("") || `<option value="">No WordPress packages</option>`;
-  const locale = $("#build-locale").value.trim() || config?.locale || "en_US";
+  const locale = $("#build-locale").value || config?.locale || "en_US";
   const preferred = config
     ? packages.find(p => p.version === config.wordpressVersion && packageVariant(p) === locale) || packages.find(p => p.version === config.wordpressVersion && packageVariant(p) === "en_US") || packages.find(p => p.version === config.wordpressVersion) || packages[0]
     : packages.find(p => packageVariant(p) === locale) || packages.find(p => packageVariant(p) === "en_US") || packages[0];
@@ -445,6 +482,7 @@ async function loadBuildSelection(id) {
     currentReport = id ? await request(`/api/configs/${encodeURIComponent(id)}/check`) : null;
     if (!$("#build-name").dataset.changed) $("#build-name").value = config ? safeUiName(config.id) : "package-only";
     if (!$("#build-locale").dataset.changed) $("#build-locale").value = config?.locale || "en_US";
+    renderLocaleOptions(config, $("#build-locale").value);
     renderWordPressOptions(config);
     renderThemeOptions(config);
 
@@ -459,7 +497,7 @@ async function loadBuildSelection(id) {
 
 function selectWordPressForLocale() {
   const config = state.configs.find(c => c.id === $("#build-config").value) || null;
-  const locale = $("#build-locale").value.trim();
+  const locale = $("#build-locale").value;
   const packages = wordpressPackages();
   const preferred = config
     ? packages.find(p => p.version === config.wordpressVersion && packageVariant(p) === locale) || packages.find(p => packageVariant(p) === locale)
@@ -480,7 +518,7 @@ async function createProfile() {
   const body = {
     configId,
     name: $("#build-name").value.trim() || "starter",
-    locale: $("#build-locale").value.trim() || "en_US",
+    locale: $("#build-locale").value || "en_US",
     excludedPlugins: excluded,
     wordpressVersion: wp.version,
     wordpressVariant: wp.variant,
@@ -639,7 +677,15 @@ const dz = $("#package-drop");
 dz.addEventListener("drop", e => uploadFiles([...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith(".zip")), "packages").catch(e => flash(e.message, true)));
 $("#build-config").onchange = e => loadBuildSelection(e.target.value);
 $("#build-name").oninput = e => e.target.dataset.changed = "1";
-$("#build-locale").oninput = e => { e.target.dataset.changed = "1"; selectWordPressForLocale(); };
+$("#build-locale").onchange = e => { e.target.dataset.changed = "1"; selectWordPressForLocale(); };
+$("#build-wordpress").onchange = e => {
+  const selected = decodeCoordinate(e.target.value);
+  const locale = selected.variant || "en_US";
+  if ([...$("#build-locale").options].some(option => option.value === locale)) {
+    $("#build-locale").value = locale;
+    $("#build-locale").dataset.changed = "1";
+  }
+};
 $("#create-profile").onclick = createProfile;
 $("#cancel-profile-edit").onclick = resetProfileEditor;
 $("#new-profile").onclick = () => { resetProfileEditor(); goView("build"); };

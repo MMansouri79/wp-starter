@@ -28,10 +28,11 @@ for (const name of names) {
   try {
     await extractZip(archive, temp);
     const entries = await files(temp);
+    const hasEntry = (relative) => entries.includes(relative) || entries.some((entry) => entry.endsWith(`/${relative}`));
     const forbidden = entries.filter((entry) => /(^|\/)(node_modules|\.git|private-packages)(\/|$)|\.local\.json$/i.test(entry));
     if (forbidden.length) throw new Error(`${name} contains forbidden entries: ${forbidden.join(", ")}`);
-    if (name.includes("builder") && !entries.includes("wp-content/mu-plugins/site-starter-bootstrap.php")) throw new Error("Builder artifact is missing the bootstrap runtime.");
-    if (name.includes("exporter") && !entries.includes("wp-starter-exporter/starter-exporter.php")) throw new Error("Exporter artifact is missing the plugin entrypoint.");
+    if (name.includes("builder") && !hasEntry("wordpress/bootstrap/site-starter-bootstrap.php")) throw new Error("Builder artifact is missing the bootstrap runtime.");
+    if (name.includes("exporter") && !hasEntry("starter-exporter.php")) throw new Error("Exporter artifact is missing the plugin entrypoint.");
     console.log(`Verified ${name} (${entries.length} files).`);
   } finally {
     await rm(temp, { recursive: true, force: true });

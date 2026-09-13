@@ -16,6 +16,7 @@ final class MMS_WP_Starter_Bootstrap {
     const REPORT_OPTION   = 'mms_wp_starter_bootstrap_report';
     const REVISION_OPTION = 'mms_wp_starter_bootstrap_revision';
     const CONFIG_REVISION = 6;
+    const VNEXT_MANIFEST_FILENAME = 'starter-design-system.json';
 
     public static function init() {
         add_action( 'admin_init', array( __CLASS__, 'maybe_run' ), 1 );
@@ -76,13 +77,16 @@ final class MMS_WP_Starter_Bootstrap {
         }
 
         $vnext = array();
-        if ( ! empty( $build['vnext']['path'] ) ) {
-            $vnext = self::read_json( $root . '/' . ltrim( (string) $build['vnext']['path'], '/\\' ) );
+        if ( ! empty( $build['vnext'] ) ) {
+            // The Builder writes starter-design-system.json and records its relative path in the build manifest.
+            $vnext_relative_path = ! empty( $build['vnext']['path'] ) ? (string) $build['vnext']['path'] : self::VNEXT_MANIFEST_FILENAME;
+            $vnext_path = $root . '/' . ltrim( $vnext_relative_path, '/\\' );
+            $vnext = self::read_json( $vnext_path );
             if ( is_wp_error( $vnext ) ) {
                 self::fail( $vnext->get_error_message() );
                 return;
             }
-            if ( ! empty( $build['vnext']['sha256'] ) && hash_file( 'sha256', $root . '/' . ltrim( (string) $build['vnext']['path'], '/\\' ) ) !== (string) $build['vnext']['sha256'] ) {
+            if ( ! empty( $build['vnext']['sha256'] ) && hash_file( 'sha256', $vnext_path ) !== (string) $build['vnext']['sha256'] ) {
                 self::fail( 'The vNext design-system manifest checksum does not match the build manifest.' );
                 return;
             }
@@ -874,6 +878,18 @@ final class MMS_WP_Starter_Bootstrap {
                 return new WP_Error( 'starter_config_elementor_setting_rejected', 'Snapshot contains a non-structural Elementor setting: ' . sanitize_text_field( $key ) );
             }
         }
+        if ( ! empty( $elementor['templates'] ) && ! is_array( $elementor['templates'] ) ) {
+            return new WP_Error( 'starter_config_elementor_templates_invalid', 'Elementor templates must be an array.' );
+        }
+        foreach ( (array) ( $elementor['templates'] ?? array() ) as $index => $template ) {
+            if ( ! is_array( $template ) || empty( $template['id'] ) || empty( $template['name'] ) || ! isset( $template['document'] ) || ! is_array( $template['document'] ) ) {
+                return new WP_Error( 'starter_config_elementor_template_invalid', 'Elementor template ' . absint( $index + 1 ) . ' is invalid.' );
+            }
+            $unknown = array_diff( array_keys( $template ), array( 'id', 'name', 'type', 'document' ) );
+            if ( ! empty( $unknown ) ) {
+                return new WP_Error( 'starter_config_elementor_template_rejected', 'Elementor template contains unsupported field(s): ' . implode( ', ', $unknown ) );
+            }
+        }
 
         $woo_allowed = array(
             'woocommerce_allowed_countries','woocommerce_all_except_countries','woocommerce_specific_allowed_countries','woocommerce_calc_taxes','woocommerce_cart_redirect_after_add','woocommerce_checkout_address_2_field','woocommerce_checkout_company_field','woocommerce_checkout_highlight_required_fields','woocommerce_checkout_phone_field','woocommerce_currency','woocommerce_currency_pos','woocommerce_default_customer_address','woocommerce_dimension_unit','woocommerce_downloads_add_hash_to_filename','woocommerce_downloads_count_partial','woocommerce_downloads_deliver_inline','woocommerce_downloads_grant_access_after_payment','woocommerce_downloads_redirect_fallback_allowed','woocommerce_downloads_require_login','woocommerce_enable_ajax_add_to_cart','woocommerce_enable_checkout_login_reminder','woocommerce_enable_coupons','woocommerce_enable_delayed_account_creation','woocommerce_enable_guest_checkout','woocommerce_enable_myaccount_registration','woocommerce_enable_review_rating','woocommerce_enable_reviews','woocommerce_enable_shipping_calc','woocommerce_enable_signup_and_login_from_checkout','woocommerce_file_download_method','woocommerce_hide_out_of_stock_items','woocommerce_hold_stock_minutes','woocommerce_manage_stock','woocommerce_notify_low_stock','woocommerce_notify_low_stock_amount','woocommerce_notify_no_stock','woocommerce_notify_no_stock_amount','woocommerce_price_decimal_sep','woocommerce_price_display_suffix','woocommerce_price_num_decimals','woocommerce_price_thousand_sep','woocommerce_prices_include_tax','woocommerce_registration_generate_password','woocommerce_registration_generate_username','woocommerce_review_rating_required','woocommerce_review_rating_verification_label','woocommerce_review_rating_verification_required','woocommerce_ship_to_countries','woocommerce_ship_to_destination','woocommerce_shipping_cost_requires_address','woocommerce_shipping_hide_rates_when_free','woocommerce_shipping_tax_class','woocommerce_single_image_width','woocommerce_tax_based_on','woocommerce_tax_classes','woocommerce_tax_display_cart','woocommerce_tax_display_shop','woocommerce_tax_round_at_subtotal','woocommerce_tax_total_display','woocommerce_thumbnail_image_width','woocommerce_weight_unit',
@@ -1031,6 +1047,7 @@ final class MMS_WP_Starter_Bootstrap {
             'woocommerce_options'=> 0,
             'persian_options'    => 0,
             'code_snippets_saved' => 0,
+            'elementor_templates' => 0,
             'woocommerce_duplicates_removed' => 0,
             'elementor_kit_id'   => 0,
             'verified_at'        => gmdate( 'c' ),
@@ -1061,6 +1078,11 @@ final class MMS_WP_Starter_Bootstrap {
         }
 
         require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+        $elementor_templates = (array) ( $config['adapters']['elementor']['templates'] ?? array() );
+        if ( ! empty( $elementor_templates ) && ! is_plugin_active( 'elementor/elementor.php' ) ) {
+            return new WP_Error( 'starter_elementor_templates_required', 'Elementor must be active before portable Elementor templates can be imported.' );
+        }
 
         if ( is_plugin_active( 'elementor/elementor.php' ) ) {
             $elementor_options = (array) ( $config['adapters']['elementor']['options'] ?? array() );
@@ -1101,6 +1123,11 @@ final class MMS_WP_Starter_Bootstrap {
                 return $kit_result;
             }
             $report['elementor_kit_id'] = absint( $kit_result );
+            $template_result = self::apply_elementor_templates_adapter( $elementor_templates, $kit_result );
+            if ( is_wp_error( $template_result ) ) {
+                return $template_result;
+            }
+            $report['elementor_templates'] = absint( $template_result );
         }
 
         flush_rewrite_rules( false );
@@ -1114,6 +1141,79 @@ final class MMS_WP_Starter_Bootstrap {
         update_option( self::REPORT_OPTION, $report, false );
 
         return true;
+    }
+
+    private static function apply_elementor_templates_adapter( array $templates, $kit_id ) {
+        if ( empty( $templates ) ) {
+            return 0;
+        }
+        if ( ! post_type_exists( 'elementor_library' ) ) {
+            return new WP_Error( 'starter_elementor_templates_unavailable', 'Elementor template storage is unavailable.' );
+        }
+
+        $settings = get_post_meta( absint( $kit_id ), '_elementor_page_settings', true );
+        $settings = is_array( $settings ) ? $settings : array();
+        $logical  = array();
+        foreach ( array( 'system_colors' => 'color', 'system_typography' => 'typography' ) as $setting_key => $prefix ) {
+            foreach ( (array) ( $settings[ $setting_key ] ?? array() ) as $row ) {
+                if ( is_array( $row ) && ! empty( $row['_id'] ) ) {
+                    $logical[ 'elementor:' . $prefix . ':' . (string) $row['_id'] ] = (string) $row['_id'];
+                }
+            }
+        }
+
+        $template_ids = array();
+        foreach ( $templates as $template ) {
+            if ( ! is_array( $template ) || empty( $template['id'] ) ) {
+                return new WP_Error( 'starter_config_elementor_template_invalid', 'An Elementor template is missing its logical ID.' );
+            }
+            $portable_id = sanitize_key( (string) $template['id'] );
+            $existing = get_posts(
+                array(
+                    'post_type'      => 'elementor_library',
+                    'post_status'    => 'any',
+                    'meta_key'       => '_wp_starter_template_id',
+                    'meta_value'     => $portable_id,
+                    'posts_per_page' => 1,
+                )
+            );
+            $post_id = ! empty( $existing ) ? absint( $existing[0]->ID ) : 0;
+            $post = array(
+                'post_title'  => sanitize_text_field( (string) ( $template['name'] ?? $portable_id ) ),
+                'post_type'   => 'elementor_library',
+                'post_status' => 'publish',
+            );
+            if ( $post_id > 0 ) {
+                $post['ID'] = $post_id;
+            }
+            $post_id = wp_insert_post( $post, true );
+            if ( is_wp_error( $post_id ) ) {
+                return $post_id;
+            }
+            $template_ids[ $portable_id ] = absint( $post_id );
+            $logical[ 'template:' . $portable_id ] = absint( $post_id );
+        }
+
+        $saved = 0;
+        foreach ( $templates as $template ) {
+            $portable_id = sanitize_key( (string) $template['id'] );
+            $missing = array();
+            $document = self::remap_vnext_value( (array) $template['document'], $logical, $missing, 'template.' . $portable_id );
+            if ( ! empty( $missing ) ) {
+                return new WP_Error( 'starter_elementor_template_unresolved_reference', 'Elementor template ' . $portable_id . ' contains unresolved references: ' . implode( ', ', $missing ) );
+            }
+            $post_id = $template_ids[ $portable_id ];
+            update_post_meta( $post_id, '_wp_starter_template_id', $portable_id );
+            update_post_meta( $post_id, '_elementor_template_type', sanitize_key( (string) ( $template['type'] ?? 'generic' ) ) );
+            update_post_meta( $post_id, '_elementor_edit_mode', 'builder' );
+            update_post_meta( $post_id, '_elementor_data', wp_slash( wp_json_encode( $document ) ) );
+            $saved++;
+        }
+
+        if ( isset( \Elementor\Plugin::$instance->files_manager ) && method_exists( \Elementor\Plugin::$instance->files_manager, 'clear_cache' ) ) {
+            \Elementor\Plugin::$instance->files_manager->clear_cache();
+        }
+        return $saved;
     }
 
     private static function apply_vnext_design_system( array $payload ) {
@@ -1379,6 +1479,15 @@ final class MMS_WP_Starter_Bootstrap {
             $kit_id = absint( get_option( 'elementor_active_kit' ) );
             if ( $kit_id <= 0 || ! get_post( $kit_id ) ) {
                 $mismatches[] = 'elementor_active_kit';
+            }
+
+            foreach ( (array) ( $config['adapters']['elementor']['templates'] ?? array() ) as $template ) {
+                $checked++;
+                $template_id = sanitize_key( (string) ( $template['id'] ?? '' ) );
+                $found = $template_id ? get_posts( array( 'post_type' => 'elementor_library', 'post_status' => 'any', 'meta_key' => '_wp_starter_template_id', 'meta_value' => $template_id, 'posts_per_page' => 1, 'fields' => 'ids' ) ) : array();
+                if ( empty( $found ) ) {
+                    $mismatches[] = 'elementor_template:' . $template_id;
+                }
             }
         }
 

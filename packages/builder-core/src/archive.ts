@@ -178,17 +178,17 @@ export async function extractZip(zipPath: string, destination: string): Promise<
 
 export async function createZip(sourceDir: string, destinationZip: string): Promise<void> {
   const root = path.resolve(sourceDir);
-  const files = await collectFiles(root);
+  const entries = await collectEntries(root);
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;
 
-  for (const file of files) {
-    const data = await readFile(file.absolute);
-    const compressed = deflateRawSync(data, { level: 9 });
-    const method = compressed.length < data.length ? 8 : 0;
+  for (const entry of entries) {
+    const data = entry.directory ? Buffer.alloc(0) : await readFile(entry.absolute);
+    const compressed = entry.directory ? Buffer.alloc(0) : deflateRawSync(data, { level: 9 });
+    const method = entry.directory ? 0 : compressed.length < data.length ? 8 : 0;
     const payload = method === 8 ? compressed : data;
-    const name = Buffer.from(file.name, "utf8");
+    const name = Buffer.from(entry.name, "utf8");
     const crc = crc32(data);
     const local = Buffer.alloc(30 + name.length + payload.length);
     local.writeUInt32LE(0x04034b50, 0);
@@ -213,6 +213,7 @@ export async function createZip(sourceDir: string, destinationZip: string): Prom
     central.writeUInt32LE(payload.length, 20);
     central.writeUInt32LE(data.length, 24);
     central.writeUInt16LE(name.length, 28);
+    if (entry.directory) central.writeUInt32LE(0x10, 38);
     central.writeUInt32LE(offset, 42);
     name.copy(central, 46);
     centrals.push(central);
@@ -223,8 +224,8 @@ export async function createZip(sourceDir: string, destinationZip: string): Prom
   const centralData = Buffer.concat(centrals);
   const end = Buffer.alloc(22);
   end.writeUInt32LE(EOCD_SIGNATURE, 0);
-  end.writeUInt16LE(files.length, 8);
-  end.writeUInt16LE(files.length, 10);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
   end.writeUInt32LE(centralData.length, 12);
   end.writeUInt32LE(centralOffset, 16);
   await ensureDir(path.dirname(path.resolve(destinationZip)));
@@ -293,12 +294,17 @@ async function readZipEntries(zipPath: string): Promise<ZipEntry[]> {
   return result;
 }
 
-async function collectFiles(root: string, current = root): Promise<Array<{ absolute: string; name: string }>> {
-  const result: Array<{ absolute: string; name: string }> = [];
+async function collectEntries(root: string, current = root): Promise<Array<{ absolute: string; name: string; directory: boolean }>> {
+  const result: Array<{ absolute: string; name: string; directory: boolean }> = [];
   for (const entry of await readdir(current, { withFileTypes: true })) {
     const absolute = path.join(current, entry.name);
-    if (entry.isDirectory()) result.push(...await collectFiles(root, absolute));
-    else if (entry.isFile()) result.push({ absolute, name: path.relative(root, absolute).split(path.sep).join("/") });
+    const name = path.relative(root, absolute).split(path.sep).join("/");
+    if (entry.isDirectory()) {
+      result.push({ absolute, name: `${name}/`, directory: true });
+      result.push(...await collectEntries(root, absolute));
+    } else if (entry.isFile()) {
+      result.push({ absolute, name, directory: false });
+    }
   }
   return result.sort((left, right) => left.name.localeCompare(right.name));
 }

@@ -68,11 +68,19 @@ export function validatePortableSnapshot(raw: any): void {
   rejectUnknown(adapters, ADAPTERS, "adapters");
 
   const elementor = object(adapters.elementor);
-  rejectUnknown(elementor, new Set(["options","kit_settings","policy"]), "adapters.elementor");
+  rejectUnknown(elementor, new Set(["options","kit_settings","policy","templates"]), "adapters.elementor");
   if (Object.keys(object(elementor.options)).length) throw new BuilderError("unsafe_config_snapshot", "Elementor standalone options are not permitted in schema-v2 snapshots.");
   for (const key of Object.keys(object(elementor.kit_settings))) {
     if (!ELEMENTOR_EXACT.has(key) && !ELEMENTOR_PREFIXES.some((prefix) => key.startsWith(prefix))) throw new BuilderError("unsafe_config_snapshot", `Elementor Kit setting is outside the structural allowlist: ${key}`);
   }
+  if (!Array.isArray(elementor.templates || [])) throw new BuilderError("invalid_config_export", "adapters.elementor.templates must be an array.");
+  (elementor.templates || []).forEach((template: any, index: number) => {
+    const row = object(template);
+    rejectUnknown(row, new Set(["id", "name", "type", "document"]), `adapters.elementor.templates[${index}]`);
+    if (typeof row.id !== "string" || typeof row.name !== "string" || !Array.isArray(row.document)) {
+      throw new BuilderError("invalid_config_export", `Elementor template ${index + 1} must contain id, name, and document.`);
+    }
+  });
 
   const woo = object(adapters.woocommerce);
   rejectUnknown(woo, new Set(["options"]), "adapters.woocommerce");

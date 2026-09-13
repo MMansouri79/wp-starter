@@ -25,6 +25,7 @@ final class Exporter {
         $target_files   = isset( $selection['starter_plugins'] ) && is_array( $selection['starter_plugins'] )
             ? array_map( 'strval', $selection['starter_plugins'] )
             : $this->default_target_plugin_files( $source_plugins );
+        $elementor_templates = $this->elementor_templates_adapter( $selection );
 
         return array(
             'schema_version'   => 2,
@@ -56,6 +57,7 @@ final class Exporter {
                     'options'      => array(),
                     'kit_settings' => $this->elementor_kit_settings(),
                     'policy'       => 'structural_layout_only',
+                    'templates'    => $elementor_templates,
                 ),
                 'woocommerce' => array(
                     'options' => $this->read_options( $this->whitelists['woocommerce_options'] ),
@@ -158,6 +160,55 @@ final class Exporter {
         return $rows;
     }
 
+    public function elementor_template_inventory() {
+        if ( ! post_type_exists( 'elementor_library' ) ) {
+            return array();
+        }
+
+        $posts = get_posts(
+            array(
+                'post_type'      => 'elementor_library',
+                'post_status'    => 'any',
+                'posts_per_page' => -1,
+                'orderby'        => 'title',
+                'order'          => 'ASC',
+                'no_found_rows'  => true,
+            )
+        );
+        $rows = array();
+        foreach ( $posts as $post ) {
+            // Elementor normally stores the document as JSON in _elementor_data.
+            // Keep an explicit post-content fallback for older/imported library
+            // items whose document was saved there instead.
+            $document = get_post_meta( $post->ID, '_elementor_data', true );
+            if ( is_string( $document ) ) {
+                $document = json_decode( trim( $document ), true );
+            }
+            if ( ! is_array( $document ) && is_string( $post->post_content ) && '' !== trim( $post->post_content ) ) {
+                $document = json_decode( trim( $post->post_content ), true );
+            }
+            if ( ! is_array( $document ) ) {
+                continue;
+            }
+            $type = get_post_meta( $post->ID, '_elementor_template_type', true );
+            if ( '' === $type ) {
+                $type = get_post_meta( $post->ID, 'elementor_library_type', true );
+            }
+            $type = sanitize_key( $type ? $type : 'generic' );
+            $portable_id = 'elementor-' . substr( hash( 'sha256', $type . '|' . $post->post_name . '|' . $post->post_title ), 0, 16 );
+            $rows[] = array(
+                'source_id'   => absint( $post->ID ),
+                'id'          => $portable_id,
+                'name'        => (string) $post->post_title,
+                'type'        => $type,
+                'status'      => (string) $post->post_status,
+                'modified'    => (string) $post->post_modified_gmt,
+                'document'    => $document,
+            );
+        }
+        return $rows;
+    }
+
     public function default_reading_roles() {
         $front_slug = $this->page_slug_from_option( 'page_on_front' );
         $posts_slug = $this->page_slug_from_option( 'page_for_posts' );
@@ -197,6 +248,55 @@ final class Exporter {
             }
         }
         return $portable;
+    }
+
+    private function elementor_templates_adapter( array $selection ) {
+        $inventory = $this->elementor_template_inventory();
+        $selected = isset( $selection['starter_elementor_templates'] ) && is_array( $selection['starter_elementor_templates'] )
+            ? array_map( 'absint', $selection['starter_elementor_templates'] )
+            : array();
+        if ( empty( $selected ) || empty( $inventory ) ) {
+            return array();
+        }
+
+        $by_source_id = array();
+        foreach ( $inventory as $row ) {
+            $by_source_id[ (string) $row['source_id'] ] = $row['id'];
+        }
+
+        $templates = array();
+        foreach ( $inventory as $row ) {
+            if ( ! in_array( $row['source_id'], $selected, true ) ) {
+                continue;
+            }
+            $templates[] = array(
+                'id'       => $row['id'],
+                'name'     => $row['name'],
+                'type'     => $row['type'],
+                'document' => $this->portable_template_value( $row['document'], $by_source_id ),
+            );
+        }
+        return $templates;
+    }
+
+    private function portable_template_value( $value, array $template_map, $key = '' ) {
+        if ( is_array( $value ) ) {
+            $result = array();
+            foreach ( $value as $child_key => $child ) {
+                if ( in_array( $child_key, array( 'template_id', 'templateId' ), true ) && ( is_scalar( $child ) || is_null( $child ) ) ) {
+                    $source_id = (string) $child;
+                    $portable_id = isset( $template_map[ $source_id ] ) ? $template_map[ $source_id ] : 'missing-' . substr( hash( 'sha256', $source_id ), 0, 16 );
+                    $result[ $child_key ] = array( '$wpStarterRef' => 'template:' . $portable_id );
+                } else {
+                    $result[ $child_key ] = $this->portable_template_value( $child, $template_map, (string) $child_key );
+                }
+            }
+            return $result;
+        }
+        if ( is_string( $value ) && preg_match( '#^globals/(colors|typography)\\?id=([A-Za-z0-9_-]+)$#', $value, $matches ) ) {
+            return array( '$wpStarterRef' => 'elementor:' . ( 'colors' === $matches[1] ? 'color:' : 'typography:' ) . $matches[2] );
+        }
+        return $value;
     }
 
     private function starts_with_any( $value, array $prefixes ) {

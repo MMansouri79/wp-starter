@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: WP Starter Exporter
- * Description: Exports explicitly approved portable starter configuration from a reference WordPress site.
- * Version: 0.2.0-alpha.4
+ * Description: پیکربندی قابل انتقال و انتخاب‌شده سایت مرجع را برای ساخت سایت آغازگر صادر می‌کند.
+ * Version: 0.2.0-alpha.5
  * Author: MMansouri79
  */
 
@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'MMS_WP_STARTER_EXPORTER_VERSION', '0.2.0-alpha.4' );
+define( 'MMS_WP_STARTER_EXPORTER_VERSION', '0.2.0-alpha.5' );
 define( 'MMS_WP_STARTER_EXPORTER_DIR', plugin_dir_path( __FILE__ ) );
 
 require_once MMS_WP_STARTER_EXPORTER_DIR . 'includes/class-exporter.php';
