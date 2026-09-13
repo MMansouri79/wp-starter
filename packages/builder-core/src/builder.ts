@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { createZip, extractZip } from "./archive.js";
 import { BuilderError } from "./errors.js";
+import { compatibilityReport } from "./compatibility.js";
 import {
   copyDirectoryContents,
   detectPackageRoot,
@@ -64,7 +65,7 @@ async function createCanonicalPackageZip(options: {
   return sha256File(options.outputZip);
 }
 
-export async function buildStarter(options: BuildOptions): Promise<{ outputZip: string; sha256: string; manifest: StarterBuildManifest }> {
+export async function buildStarter(options: BuildOptions): Promise<{ outputZip: string; sha256: string; manifest: StarterBuildManifest; compatibility: NonNullable<StarterBuildManifest["compatibility"]> }> {
   const { profile } = options;
   const workRoot = await mkdtemp(path.join(os.tmpdir(), "wp-starter-"));
   const coreExtract = path.join(workRoot, "wordpress-extract");
@@ -109,12 +110,13 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       const themeBundlePath = path.join(bundledThemeDir, themeBundleName);
       const themeBundleSha256 = await createCanonicalPackageZip({
         sourceZip: profile.theme.zip,
-        installDir: profile.theme.slug,
+        installDir: profile.theme.installDir || profile.theme.slug,
         outputZip: themeBundlePath,
         workDir: path.join(workRoot, "canonical-theme")
       });
       bundledTheme = {
-        ...profile.theme,
+        slug: profile.theme.slug,
+        version: profile.theme.version,
         zip: themeBundleRelative,
         sha256: themeBundleSha256
       };
@@ -141,13 +143,17 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       const bundlePath = path.join(bundledPluginDir, bundleName);
       const sha256 = await createCanonicalPackageZip({
         sourceZip: plugin.zip,
-        installDir: plugin.slug,
+        installDir: plugin.installDir || plugin.slug,
         outputZip: bundlePath,
         workDir: path.join(workRoot, `canonical-plugin-${index}`)
       });
 
       bundledPlugins.push({
-        ...plugin,
+        slug: plugin.slug,
+        version: plugin.version,
+        file: plugin.file,
+        required: plugin.required,
+        ...(plugin.locales ? { locales: plugin.locales } : {}),
         zip: bundleRelative,
         sha256
       });
@@ -238,7 +244,8 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       configExport,
       fontSystem: bundledFontSystem,
       languageArchives: bundledLanguages,
-      vnext
+      vnext,
+      compatibility: compatibilityReport(profile)
     };
 
     await emit(options, { percent: 87, stage: "manifest", message: "Writing build manifest…" });
@@ -256,7 +263,8 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
     return {
       outputZip,
       sha256,
-      manifest
+      manifest,
+      compatibility: manifest.compatibility!
     };
   } finally {
     if (!options.keepWorkDir) {

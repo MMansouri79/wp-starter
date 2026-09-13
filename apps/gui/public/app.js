@@ -154,7 +154,7 @@ function render() {
 
   $("#profiles-manager").innerHTML = state.profiles.map(p => `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.fontSystem ? ` · Font: ${esc(p.fontSystem)}` : ""}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`).join("") || `<div class="empty">No profiles yet. Create one from the Build page.</div>`;
 
-  const buildCard = (b, compact = false) => `<div class="build-card"><div><strong>${esc(b.file)}</strong><small>${b.profile ? `Profile: ${esc(b.profile)} · ` : ""}${b.locale ? `${esc(b.locale)} · ` : ""}${b.configurationEnabled ? "Snapshot" : "Packages only"} · ${fmtBytes(b.size)} · ${new Date(b.modifiedAt).toLocaleString()}</small>${!compact && b.sha256 ? `<code class="hash">${esc(b.sha256)}</code>` : ""}</div><div class="build-card-actions"><a class="tiny primary-ish" href="/download/${encodeURIComponent(b.file)}">Download</a>${b.profileFile ? `<button class="tiny rebuild" data-profile="${escAttr(b.profileFile)}">Build again</button>` : ""}${compact ? "" : `<button class="tiny danger delete-build" data-file="${escAttr(b.file)}">Delete</button>`}</div></div>`;
+  const buildCard = (b, compact = false) => `<div class="build-card"><div><strong>${esc(b.file)}</strong><small>${b.profile ? `Profile: ${esc(b.profile)} · ` : ""}${b.locale ? `${esc(b.locale)} · ` : ""}${b.configurationEnabled ? "Snapshot" : "Packages only"} · ${fmtBytes(b.size)} · ${new Date(b.modifiedAt).toLocaleString()}</small>${b.compatibility?.status === "upgrade-warning" ? `<small class="compatibility-inline">Upgrade warning: ${esc(b.compatibility.warnings.map(w => `${w.slug} ${w.exportedVersion} → ${w.selectedVersion}`).join(", "))}</small>` : ""}${!compact && b.sha256 ? `<code class="hash">${esc(b.sha256)}</code>` : ""}</div><div class="build-card-actions"><a class="tiny primary-ish" href="/download/${encodeURIComponent(b.file)}">Download</a>${b.profileFile ? `<button class="tiny rebuild" data-profile="${escAttr(b.profileFile)}">Build again</button>` : ""}${compact ? "" : `<button class="tiny danger delete-build" data-file="${escAttr(b.file)}">Delete</button>`}</div></div>`;
   $("#recent-builds").innerHTML = state.builds.slice(0, 5).map(b => buildCard(b, true)).join("") || `<div class="empty">No builds yet.</div>`;
   $("#build-history").innerHTML = state.builds.map(b => buildCard(b, false)).join("") || `<div class="empty">No builds yet.</div>`;
 
@@ -454,6 +454,7 @@ function renderWordPressOptions(config = null) {
     ? packages.find(p => p.version === config.wordpressVersion && packageVariant(p) === locale) || packages.find(p => p.version === config.wordpressVersion && packageVariant(p) === "en_US") || packages.find(p => p.version === config.wordpressVersion) || packages[0]
     : packages.find(p => packageVariant(p) === locale) || packages.find(p => packageVariant(p) === "en_US") || packages[0];
   if (preferred) $("#build-wordpress").value = coordinateValue(preferred);
+  renderPackageUpgradeMeta(config);
 }
 
 function renderThemeOptions(config = null) {
@@ -467,13 +468,66 @@ function renderThemeOptions(config = null) {
     const preferred = packages.find(p => p.version === config.theme.version) || packages[0];
     if (preferred) $("#build-theme").value = themeCoordinateValue(preferred);
   }
+  renderPackageUpgradeMeta(config);
+}
+
+function renderPackageUpgradeMeta(config = null) {
+  const wpMeta = $("#build-wordpress-meta");
+  const themeMeta = $("#build-theme-meta");
+  if (!config) {
+    if (wpMeta) wpMeta.innerHTML = "";
+    if (themeMeta) themeMeta.innerHTML = "";
+    return;
+  }
+  const wp = decodeCoordinate($("#build-wordpress").value);
+  const theme = decodeTheme($("#build-theme").value);
+  const render = (element, exported, selected) => {
+    if (!element || !exported) return;
+    const newer = selected && selectedVersionIsNewer(selected, exported);
+    element.innerHTML = `Exporter: ${esc(exported)}${newer ? ` <span class="upgrade-badge">Newer version</span>` : ""}`;
+  };
+  render(wpMeta, config.wordpressVersion, wp.version);
+  render(themeMeta, config.theme?.version, theme.version);
 }
 
 function pluginChoice(plugin, checked) {
   const available = pluginPackages(plugin.slug);
   const preferred = available.find(p => p.version === plugin.version) || available[0];
   const opts = available.map(p => `<option value="${escAttr(p.version)}" ${preferred && p.version === preferred.version ? "selected" : ""}>${esc(p.version)}</option>`).join("");
-  return `<label class="check package-choice"><input type="checkbox" value="${escAttr(plugin.slug)}" ${checked && available.length ? "checked" : ""} ${available.length ? "" : "disabled"}><span class="plugin-name">${esc(plugin.name)}</span><select class="plugin-version" data-slug="${escAttr(plugin.slug)}" ${available.length ? "" : "disabled"}>${opts || `<option>Missing</option>`}</select><span class="meta ${available.length ? "status-ok" : "status-missing"}">${available.length ? `${available.length} version${available.length === 1 ? "" : "s"}` : "missing"}</span></label>`;
+  return `<label class="check package-choice"><input type="checkbox" value="${escAttr(plugin.slug)}" ${checked && available.length ? "checked" : ""} ${available.length ? "" : "disabled"}><span class="plugin-name"><strong>${esc(plugin.name)}</strong><small>Exporter: ${esc(plugin.version)}</small></span><select class="plugin-version" data-slug="${escAttr(plugin.slug)}" data-exported-version="${escAttr(plugin.version)}" ${available.length ? "" : "disabled"}>${opts || `<option>Missing</option>`}</select><span class="upgrade-badge hidden">Newer version</span><span class="meta ${available.length ? "status-ok" : "status-missing"}">${available.length ? `${available.length} version${available.length === 1 ? "" : "s"}` : "missing"}</span></label>`;
+}
+
+function selectedVersionIsNewer(selected, exported) { return compareVersions(exported, selected) > 0; }
+
+function updatePluginUpgradeWarning(select) {
+  const row = select.closest(".package-choice");
+  const badge = row?.querySelector(".upgrade-badge");
+  if (!badge) return false;
+  const newer = !select.disabled && selectedVersionIsNewer(select.value, select.dataset.exportedVersion || "");
+  badge.classList.toggle("hidden", !newer);
+  return newer;
+}
+
+function renderCompatibilityPreview() {
+  const box = $("#build-compatibility");
+  if (!box) return;
+  const config = state.configs.find(c => c.id === $("#build-config").value);
+  renderPackageUpgradeMeta(config);
+  const upgrades = [];
+  if (config) {
+    const wp = decodeCoordinate($("#build-wordpress").value);
+    const theme = decodeTheme($("#build-theme").value);
+    if (wp.version && selectedVersionIsNewer(wp.version, config.wordpressVersion)) upgrades.push({ slug: "wordpress", exportedVersion: config.wordpressVersion, selectedVersion: wp.version });
+    if (theme.version && config.theme?.version && selectedVersionIsNewer(theme.version, config.theme.version)) upgrades.push({ slug: theme.slug, exportedVersion: config.theme.version, selectedVersion: theme.version });
+    upgrades.push(...[...document.querySelectorAll("#build-plugins .plugin-version")].filter(updatePluginUpgradeWarning).map(select => ({ slug: select.dataset.slug, exportedVersion: select.dataset.exportedVersion, selectedVersion: select.value })));
+  }
+  if (!upgrades.length) {
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    return;
+  }
+  box.classList.remove("hidden");
+  box.innerHTML = `<strong>Upgrade warning</strong><span>Exported settings will be preserved. The selected package versions are newer than the reference site and should be tested.</span><ul>${upgrades.map(item => `<li>${esc(item.slug)} ${esc(item.exportedVersion)} → ${esc(item.selectedVersion)}</li>`).join("")}</ul>`;
 }
 
 async function loadBuildSelection(id) {
@@ -492,6 +546,8 @@ async function loadBuildSelection(id) {
       const availablePlugins = groups("plugin").map(records => ({ slug: records[0].slug, name: displayName(records), version: records[0].version }));
       $("#build-plugins").innerHTML = availablePlugins.map(plugin => pluginChoice(plugin, false)).join("") || `<span class="muted">No plugin packages in the library.</span>`;
     }
+    document.querySelectorAll("#build-plugins .plugin-version").forEach(select => select.addEventListener("change", renderCompatibilityPreview));
+    renderCompatibilityPreview();
   } catch (e) { flash(e.message, true); }
 }
 
@@ -503,6 +559,8 @@ function selectWordPressForLocale() {
     ? packages.find(p => p.version === config.wordpressVersion && packageVariant(p) === locale) || packages.find(p => packageVariant(p) === locale)
     : packages.find(p => packageVariant(p) === locale);
   if (preferred) $("#build-wordpress").value = coordinateValue(preferred);
+  renderPackageUpgradeMeta(config);
+  renderCompatibilityPreview();
 }
 
 async function createProfile() {
@@ -531,7 +589,12 @@ async function createProfile() {
   try {
     setBusy(true);
     const data = await request("/api/profiles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    flash(`Profile ${data.profile.name} saved${configId ? "." : " without a configuration snapshot."}`);
+    if (data.compatibility?.status === "upgrade-warning") {
+      const upgrades = data.compatibility.warnings.map(w => `${w.slug} ${w.exportedVersion} → ${w.selectedVersion}`).join(", ");
+      flash(`Profile ${data.profile.name} saved with upgrade warning: ${upgrades}`);
+    } else {
+      flash(`Profile ${data.profile.name} saved${configId ? "." : " without a configuration snapshot."}`);
+    }
     currentEditingProfileFile = "";
     $("#cancel-profile-edit").classList.add("hidden");
     $("#create-profile").textContent = "Save Profile";
@@ -571,8 +634,10 @@ async function loadProfileIntoEditor(file, duplicate = false) {
       const select = row.querySelector(".plugin-version");
       const version = selected.get(input.value);
       input.checked = !!version;
-      if (version && [...select.options].some(o => o.value === version)) select.value = version;
+    if (version && [...select.options].some(o => o.value === version)) select.value = version;
     });
+
+    renderCompatibilityPreview();
 
     $("#cancel-profile-edit").classList.toggle("hidden", duplicate);
     $("#create-profile").textContent = duplicate ? "Save Copy" : "Save Changes";
@@ -631,6 +696,15 @@ function showBuildProgress(percent, message, status = "running", detail = "") {
   $("#build-progress-detail").textContent = detail || (status === "running" ? "The Builder is working locally. You can keep this window open." : "");
 }
 
+function formatBuildFailure(message) {
+  const text = String(message || "Build failed.");
+  if (!text.startsWith("Build blocked:")) return { heading: text, detail: "Check the error and try again." };
+  return {
+    heading: "Build blocked",
+    detail: text.replace(/\s*Build blocked:\s*/g, "\n").replace(/\s+Solution:\s*/g, "\nSolution: ").trim()
+  };
+}
+
 async function pollBuildJob(id) {
   while (true) {
     const job = await request(`/api/build-jobs/${encodeURIComponent(id)}`);
@@ -652,13 +726,16 @@ async function build() {
     const started = await request("/api/build-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileFile }) });
     const data = await pollBuildJob(started.id);
     const r = $("#build-result");
-    r.innerHTML = `<strong>Build complete</strong><br>${esc(data.file)}<br><small>SHA-256: ${esc(data.sha256)}</small><br><br><a href="${data.download}">Download build ZIP</a>`;
+    const compatibility = data.compatibility;
+    const warning = compatibility?.status === "upgrade-warning" ? `<div class="compatibility-box"><strong>Build allowed with warnings</strong><span>Exported settings will be preserved. The selected package versions are newer than the reference site and should be tested.</span><ul>${compatibility.warnings.map(item => `<li>${esc(item.slug)} ${esc(item.exportedVersion)} → ${esc(item.selectedVersion)}</li>`).join("")}</ul></div>` : "";
+    r.innerHTML = `<strong>Build complete</strong><br>${esc(data.file)}<br><small>SHA-256: ${esc(data.sha256)}</small>${warning}<br><a href="${data.download}">Download build ZIP</a>`;
     r.classList.remove("hidden");
     flash("Build completed successfully.");
     await refresh();
     showBuildProgress(100, "Build complete.", "complete", data.file);
   } catch (e) {
-    showBuildProgress(Number($("#build-progress-percent").textContent.replace("%", "")) || 0, e.message, "failed", "Check the error and try again.");
+    const failure = formatBuildFailure(e.message);
+    showBuildProgress(Number($("#build-progress-percent").textContent.replace("%", "")) || 0, failure.heading, "failed", failure.detail);
     flash(e.message, true);
   } finally {
     $("#build-button").disabled = false;
@@ -685,7 +762,9 @@ $("#build-wordpress").onchange = e => {
     $("#build-locale").value = locale;
     $("#build-locale").dataset.changed = "1";
   }
+  renderCompatibilityPreview();
 };
+$("#build-theme").onchange = () => renderCompatibilityPreview();
 $("#create-profile").onclick = createProfile;
 $("#cancel-profile-edit").onclick = resetProfileEditor;
 $("#new-profile").onclick = () => { resetProfileEditor(); goView("build"); };

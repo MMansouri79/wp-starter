@@ -260,6 +260,10 @@ export interface ArtifactRef {
   version: string;
   zip: string;
   variant?: string;
+  /** Registry metadata carried on loaded profiles; omitted from stored profile documents. */
+  installDir?: string;
+  requiresWordPress?: string;
+  requiresPhp?: string;
 }
 
 export interface ThemeRef extends ArtifactRef {
@@ -271,6 +275,8 @@ export interface PluginRef extends ArtifactRef {
   file: string;
   required?: boolean;
   locales?: string[];
+  /** Registry metadata carried on loaded profiles; omitted from stored profile documents. */
+  requiresPlugins?: string[];
 }
 
 export interface LanguageArchiveRef {
@@ -354,6 +360,30 @@ export interface BuildProfile {
   fontSystem?: ResolvedFontSystem | null;
   languageArchives?: LanguageArchiveRef[];
   vnext?: VNextBuildPayload | null;
+  /** Export metadata resolved from a configuration snapshot at load time. */
+  configurationSource?: {
+    wordpressVersion: string;
+    locale: string;
+    theme: { slug: string; version: string };
+    plugins: Array<{ slug: string; version: string }>;
+    exportedPlugins?: Array<{ slug: string; version: string }>;
+  };
+}
+
+export type CompatibilityStatus = "known-good" | "upgrade-warning" | "unsupported";
+
+export interface CompatibilityWarning {
+  slug: string;
+  exportedVersion: string;
+  selectedVersion: string;
+  message: string;
+}
+
+export interface CompatibilityReport {
+  status: CompatibilityStatus;
+  baselineId?: string;
+  warnings: CompatibilityWarning[];
+  errors: string[];
 }
 
 export interface BuildInputHash {
@@ -379,6 +409,7 @@ export interface StarterBuildManifest {
   } | null;
   languageArchives: Array<LanguageArchiveRef & { sha256: string }>;
   vnext?: { path: string; sha256: string } | null;
+  compatibility?: CompatibilityReport;
 }
 
 export interface BuildProgress {

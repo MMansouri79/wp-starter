@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -18,7 +18,7 @@ import {
   FontSystemRegistry,
   loadProfile,
   PackageRegistry,
-  assertKnownGoodProfile,
+  compatibilityReport,
   writeJson,
   VNextResourceRegistry,
   assertValidReport,
@@ -181,7 +181,8 @@ async function listBuilds() {
       profileFile: String(meta.profileFile || ""),
       locale: String(meta.locale || ""),
       sha256: String(meta.sha256 || ""),
-      configurationEnabled: meta.configurationEnabled === true
+      configurationEnabled: meta.configurationEnabled === true,
+      compatibility: meta.compatibility || null
     });
   }
   return output.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
@@ -262,6 +263,18 @@ async function createOrUpdateProfile(body) {
   });
 }
 
+async function reportForProfileDocument(profileDocument) {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wp-starter-profile-report-"));
+  const tempProfile = path.join(tempDir, "profile.json");
+  try {
+    await writeFile(tempProfile, JSON.stringify(profileDocument));
+    const loaded = await loadProfile(tempProfile, { libraryDir: libraryRoot });
+    return compatibilityReport(loaded);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 async function performBuild(profileFile, onProgress) {
   const safeProfile = safeName(String(profileFile || ""), "");
   if (!safeProfile || !safeProfile.endsWith(".json")) {
@@ -269,7 +282,8 @@ async function performBuild(profileFile, onProgress) {
   }
   const profilePath = path.join(profilesDir, safeProfile);
   const profile = await loadProfile(profilePath, { libraryDir: libraryRoot });
-  assertKnownGoodProfile(profile);
+  const compatibility = compatibilityReport(profile);
+  if (compatibility.status === "unsupported") throw new BuilderError("unsupported_compatibility", compatibility.errors.join(" "));
   await mkdir(buildsDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
   const outputName = `${safeName(profile.name, "starter")}-${timestamp}.zip`;
@@ -283,11 +297,13 @@ async function performBuild(profileFile, onProgress) {
     locale: profile.locale,
     sha256: result.sha256,
     configurationEnabled: result.manifest.configurationEnabled === true,
+    compatibility: result.compatibility || result.manifest.compatibility || compatibility,
     createdAt: new Date().toISOString()
   });
   return {
     file: outputName,
     sha256: result.sha256,
+    compatibility: result.compatibility || result.manifest.compatibility || compatibility,
     manifest: result.manifest,
     download: `/download/${encodeURIComponent(outputName)}`
   };
@@ -462,7 +478,25 @@ async function api(req, res, url) {
     if (sourceFile && sourceFile.endsWith(".json") && sourceFile !== filename) {
       await rm(path.join(profilesDir, sourceFile), { force: true });
     }
-    json(res, 200, { profile, file: filename });
+    json(res, 200, { profile, file: filename, compatibility: await reportForProfileDocument(profile) });
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/profiles/compatibility") {
+    const body = await readJsonBody(req);
+    const profile = await createOrUpdateProfile(body);
+    json(res, 200, { compatibility: await reportForProfileDocument(profile) });
+    return true;
+  }
+
+  if (url.pathname.startsWith("/api/profiles/") && url.pathname.endsWith("/compatibility") && req.method === "GET") {
+    const filename = path.basename(decodeURIComponent(url.pathname.slice("/api/profiles/".length, -"/compatibility".length)));
+    const target = path.join(profilesDir, filename);
+    if (!filename.endsWith(".json") || path.dirname(target) !== profilesDir) {
+      throw new BuilderError("invalid_request", "Invalid profile filename.");
+    }
+    const profile = await loadProfile(target, { libraryDir: libraryRoot });
+    json(res, 200, { compatibility: compatibilityReport(profile) });
     return true;
   }
 

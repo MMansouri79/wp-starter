@@ -50,6 +50,12 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(html, /Configuration Inspector/);
     assert.match(html, /<select id="build-locale"/);
     assert.doesNotMatch(html, /<input id="build-locale"/);
+    const appJs = await (await authFetch(`${base}/app.js`)).text();
+    assert.match(appJs, /Exporter:/);
+    assert.match(appJs, /Newer version/);
+    assert.match(appJs, /build-theme-meta/);
+    assert.match(appJs, /build-wordpress-meta/);
+    assert.match(appJs, /Exported settings will be preserved/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME;
@@ -120,6 +126,7 @@ test("GUI profile API can pin package versions and localized WordPress variants"
     assert.equal(profileData.profile.schemaVersion, 6);
     assert.equal(profileData.profile.wordpress.variant, "en_US");
     assert.equal(profileData.profile.plugins[0].version, "4.2.1");
+    assert.equal(profileData.compatibility.status, "unsupported");
 
     const renamedRes = await authFetch(`${baseUrl}/api/profiles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       configId: "snapshot-20260824050124", name: "renamed-profile", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", themeVersion: "3.4.9", pluginVersions: { elementor: "4.2.1" }, sourceFile: profileData.file

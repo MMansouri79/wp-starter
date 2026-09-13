@@ -94,10 +94,10 @@
             <label>Configuration snapshot <span class="optional">optional</span><select id="build-config"></select><small class="field-help">Choose “No snapshot” to build only WordPress/theme/plugins without applying starter settings.</small></label>
             <label>Profile name<input id="build-name" value="test-build" autocomplete="off"></label>
             <label>Destination locale<select id="build-locale" aria-label="Destination locale"></select></label>
-            <label>WordPress package<select id="build-wordpress"></select></label>
-            <label>Theme package<select id="build-theme"></select></label>
+            <label>WordPress package<select id="build-wordpress"></select><span id="build-wordpress-meta" class="package-upgrade-meta"></span></label>
+            <label>Theme package<select id="build-theme"></select><span id="build-theme-meta" class="package-upgrade-meta"></span></label>
             <label>Font profile <span class="optional">optional</span><select id="build-font-system"></select><small class="field-help">Font profiles are independent from snapshots and are registered as Elementor Pro Custom Fonts.</small></label>
-            <div class="field"><span class="label">Plugins and versions</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div></div>
+            <div class="field"><span class="label">Plugins and versions</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div><div id="build-compatibility" class="compatibility-box hidden" aria-live="polite"></div></div>
             <div class="profile-actions"><button id="create-profile" class="primary">Save Profile</button><button id="cancel-profile-edit" class="secondary hidden">Cancel Edit</button></div>
           </div>
           <div class="panel">

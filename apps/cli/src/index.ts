@@ -13,6 +13,7 @@ import {
   ConfigSnapshotRegistry,
   createProfileFromSnapshot,
   assertKnownGoodProfile,
+  compatibilityReport,
   writeJson
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
@@ -404,8 +405,22 @@ async function handleCompatibility(): Promise<void> {
   const input = process.argv[4];
   if (action !== "check" || !input || input.startsWith("--")) usage();
   const profile = await loadProfile(input, { libraryDir: libraryDir() });
-  assertKnownGoodProfile(profile);
-  console.log(`Known-good compatibility entry matched for ${profile.name}.`);
+  const report = compatibilityReport(profile);
+  if (report.status === "unsupported") {
+    throw new BuilderError("unsupported_compatibility", report.errors.join(" "));
+  }
+  console.log(`Status: ${report.status === "upgrade-warning" ? "UPGRADE WARNING" : "KNOWN-GOOD"}`);
+  if (report.baselineId) console.log(`Baseline: ${report.baselineId}`);
+  const wordpressWarning = report.warnings.find((warning) => warning.slug === "wordpress");
+  const themeWarning = profile.theme ? report.warnings.find((warning) => warning.slug === profile.theme?.slug) : undefined;
+  const pluginWarnings = report.warnings.filter((warning) => warning.slug !== "wordpress" && warning !== themeWarning);
+  if (wordpressWarning) console.log(`WordPress upgrade: ${wordpressWarning.exportedVersion} → ${wordpressWarning.selectedVersion}`);
+  if (themeWarning) console.log(`Theme upgrade: ${themeWarning.slug}: ${themeWarning.exportedVersion} → ${themeWarning.selectedVersion}`);
+  if (pluginWarnings.length) {
+    console.log("");
+    console.log("Plugin upgrades:");
+    for (const warning of pluginWarnings) console.log(`- ${warning.slug}: ${warning.exportedVersion} → ${warning.selectedVersion}`);
+  }
 }
 
 async function handleBuild(): Promise<void> {
@@ -419,7 +434,14 @@ async function handleBuild(): Promise<void> {
   const library = libraryDir();
 
   const profile = await loadProfile(profilePath, { libraryDir: library });
-  assertKnownGoodProfile(profile);
+  const report = compatibilityReport(profile);
+  if (report.status === "unsupported") throw new BuilderError("unsupported_compatibility", report.errors.join(" "));
+  if (report.status === "upgrade-warning") {
+    console.log("Build allowed with warnings:");
+    for (const warning of report.warnings) console.log(`${warning.slug}: ${warning.exportedVersion} → ${warning.selectedVersion}`);
+    console.log("Exported settings will be preserved. The selected plugin versions are newer than the reference site and should be tested.");
+    console.log("");
+  }
 
   console.log(`Building profile: ${profile.name}`);
   console.log(`Locale: ${profile.locale}`);
@@ -437,6 +459,7 @@ async function handleBuild(): Promise<void> {
   console.log("Build complete.");
   console.log(`Output: ${result.outputZip}`);
   console.log(`SHA-256: ${result.sha256}`);
+  if (result.compatibility.status === "upgrade-warning") console.log("Compatibility: UPGRADE WARNING");
 }
 
 async function main(): Promise<void> {

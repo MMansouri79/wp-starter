@@ -177,6 +177,7 @@ test("builds a package-only profile without a configuration snapshot or custom t
     assert.equal(result.manifest.configurationEnabled, false);
     assert.equal(result.manifest.configExport, null);
     assert.equal(result.manifest.theme, null);
+    assert.equal(result.compatibility.status, "known-good");
     assert.equal(progress.at(-1)?.percent, 100);
 
     const unpack = path.join(temp, "unpacked");
