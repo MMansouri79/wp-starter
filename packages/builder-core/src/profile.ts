@@ -57,7 +57,7 @@ async function loadLegacySchema1(raw: any, absolute: string): Promise<BuildProfi
     wordpress: { version: raw.wordpress.version, zip: resolveLocal(raw.wordpress.zip) },
     theme: { slug: raw.theme.slug, version: raw.theme.version, zip: resolveLocal(raw.theme.zip) },
     plugins: raw.plugins.map((plugin: any, index: number) => ({ slug: requireString(plugin.slug, `plugins[${index}].slug`), file: requireString(plugin.file, `plugins[${index}].file`), version: requireString(plugin.version, `plugins[${index}].version`), zip: resolveLocal(requireString(plugin.zip, `plugins[${index}].zip`)), required: plugin.required !== false, locales: Array.isArray(plugin.locales) ? plugin.locales.map(String) : undefined })),
-    configExport: resolveLocal(raw.configExport), fontSystem: null,
+    configExport: resolveLocal(raw.configExport), fontSystem: null, vnext: null,
     languageArchives: Array.isArray(raw.languageArchives) ? raw.languageArchives.map((archive: any, index: number) => ({ locale: requireString(archive.locale, `languageArchives[${index}].locale`), zip: resolveLocal(requireString(archive.zip, `languageArchives[${index}].zip`)) })) : []
   };
 }
@@ -67,7 +67,7 @@ async function loadLegacySchema2(raw: any, absolute: string, options: LoadProfil
   if (!Array.isArray(raw.plugins)) throw new BuilderError("invalid_profile", "plugins must be an array.");
   const libraryDir = path.resolve(options.libraryDir || defaultLibraryDir()); const { wordpress, theme, plugins } = await resolveRegistryArtifacts(raw, libraryDir);
   const base = path.dirname(absolute); const resolveLocal = (input: string) => path.resolve(base, input);
-  return { schemaVersion: 2, name: raw.name, locale: raw.locale, wordpress: { version: raw.wordpress.version, variant: wordpress.variant, zip: wordpress.absoluteZip }, theme: theme ? { slug: theme.installDir, version: raw.theme.version, zip: theme.absoluteZip } : null, plugins, configExport: resolveLocal(raw.configExport), fontSystem: null, languageArchives: Array.isArray(raw.languageArchives) ? raw.languageArchives.map((archive: any, index: number) => ({ locale: requireString(archive.locale, `languageArchives[${index}].locale`), zip: resolveLocal(requireString(archive.zip, `languageArchives[${index}].zip`)) })) : [] };
+  return { schemaVersion: 2, name: raw.name, locale: raw.locale, wordpress: { version: raw.wordpress.version, variant: wordpress.variant, zip: wordpress.absoluteZip }, theme: theme ? { slug: theme.installDir, version: raw.theme.version, zip: theme.absoluteZip } : null, plugins, configExport: resolveLocal(raw.configExport), fontSystem: null, vnext: null, languageArchives: Array.isArray(raw.languageArchives) ? raw.languageArchives.map((archive: any, index: number) => ({ locale: requireString(archive.locale, `languageArchives[${index}].locale`), zip: resolveLocal(requireString(archive.zip, `languageArchives[${index}].zip`)) })) : [] };
 }
 
 async function loadRegistryProfile(raw: any, absolute: string, options: LoadProfileOptions, schemaVersion: 3 | 4 | 5 | 6): Promise<BuildProfile> {
@@ -85,7 +85,7 @@ async function loadRegistryProfile(raw: any, absolute: string, options: LoadProf
     schemaVersion, name: raw.name, locale: raw.locale,
     wordpress: { version: raw.wordpress.version, variant: wordpress.variant, zip: wordpress.absoluteZip },
     theme: theme ? { slug: theme.installDir, version: raw.theme.version, zip: theme.absoluteZip } : null,
-    plugins, configExport: snapshot ? snapshot.absoluteZip : null, fontSystem,
+    plugins, configExport: snapshot ? snapshot.absoluteZip : null, fontSystem, vnext: raw.vnext ?? null,
     languageArchives: Array.isArray(raw.languageArchives) ? raw.languageArchives.map((archive: any, index: number) => ({ locale: requireString(archive.locale, `languageArchives[${index}].locale`), zip: resolveLocal(requireString(archive.zip, `languageArchives[${index}].zip`)) })) : []
   };
 }

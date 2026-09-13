@@ -10,11 +10,12 @@
     "lint:php": "php scripts/lint-php.php",
     "check": "npm run build && npm run test && npm run lint:php",
     "package:builder": "npm run build && node scripts/package-builder.mjs",
-    "package:exporter": "node scripts/package-exporter.mjs"
+    "package:exporter": "node scripts/package-exporter.mjs",
+    "verify:artifacts": "npm run package:builder && npm run package:exporter && node scripts/verify-artifacts.mjs"
   },
   "devDependencies": {
-    "@types/node": "^22.15.0",
-    "typescript": "^5.8.3"
+    "@types/node": "22.15.0",
+    "typescript": "5.8.3"
   },
   "engines": {
     "node": ">=20"

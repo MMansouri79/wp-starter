@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { open, stat } from "node:fs/promises";
+import { inflateRawSync, deflateRawSync } from "node:zlib";
+import { open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BuilderError } from "./errors.js";
 import { ensureDir } from "./fs-utils.js";
@@ -11,31 +11,6 @@ const MAX_ENTRIES = 200_000;
 const MAX_UNCOMPRESSED_TOTAL = 4 * 1024 * 1024 * 1024;
 const MAX_SINGLE_ENTRY = 1024 * 1024 * 1024;
 const MAX_COMPRESSION_RATIO = 2_000;
-
-async function run(command: string, args: string[], cwd?: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true
-    });
-
-    let stderr = "";
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-
-    child.on("error", (error) => reject(error));
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new BuilderError("archive_command_failed", `${command} exited with ${code}: ${stderr.trim()}`));
-    });
-  });
-}
-
-function psQuote(value: string): string {
-  return "'" + value.replaceAll("'", "''") + "'";
-}
 
 function validateEntryName(rawName: string): string {
   if (!rawName || rawName.includes("\0")) {
@@ -190,41 +165,140 @@ export async function extractZip(zipPath: string, destination: string): Promise<
   await validateZipArchive(zipPath);
   await ensureDir(destination);
 
-  if (process.platform === "win32") {
-    const script = [
-      "Add-Type -AssemblyName System.IO.Compression.FileSystem;",
-      `$src=${psQuote(path.resolve(zipPath))};`,
-      `$dst=${psQuote(path.resolve(destination))};`,
-      "[System.IO.Compression.ZipFile]::ExtractToDirectory($src,$dst);"
-    ].join(" ");
-    await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-    return;
+  for (const entry of await readZipEntries(zipPath)) {
+    const target = path.join(destination, entry.name);
+    if (entry.name.endsWith("/")) {
+      await ensureDir(target);
+      continue;
+    }
+    await ensureDir(path.dirname(target));
+    await writeFile(target, entry.data);
   }
-
-  await run("unzip", ["-q", path.resolve(zipPath), "-d", path.resolve(destination)]);
 }
 
 export async function createZip(sourceDir: string, destinationZip: string): Promise<void> {
-  if (process.platform === "win32") {
-    const script = [
-      "Add-Type -AssemblyName System.IO.Compression;",
-      "Add-Type -AssemblyName System.IO.Compression.FileSystem;",
-      `$src=${psQuote(path.resolve(sourceDir))};`,
-      `$dst=${psQuote(path.resolve(destinationZip))};`,
-      "if (Test-Path $dst) { Remove-Item -Force $dst };",
-      "$root=[System.IO.Path]::GetFullPath($src);",
-      "$archive=[System.IO.Compression.ZipFile]::Open($dst,[System.IO.Compression.ZipArchiveMode]::Create);",
-      "try {",
-      "Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object {",
-      "$relative=$_.FullName.Substring($root.Length).TrimStart([char]92,[char]47);",
-      "$entryName=$relative.Replace([char]92,[char]47);",
-      "[System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$_.FullName,$entryName,[System.IO.Compression.CompressionLevel]::Optimal) | Out-Null;",
-      "};",
-      "} finally { $archive.Dispose(); }"
-    ].join(" ");
-    await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-    return;
+  const root = path.resolve(sourceDir);
+  const files = await collectFiles(root);
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const data = await readFile(file.absolute);
+    const compressed = deflateRawSync(data, { level: 9 });
+    const method = compressed.length < data.length ? 8 : 0;
+    const payload = method === 8 ? compressed : data;
+    const name = Buffer.from(file.name, "utf8");
+    const crc = crc32(data);
+    const local = Buffer.alloc(30 + name.length + payload.length);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x800, 6);
+    local.writeUInt16LE(method, 8);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(payload.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    name.copy(local, 30);
+    payload.copy(local, 30 + name.length);
+    locals.push(local);
+
+    const central = Buffer.alloc(46 + name.length);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x800, 8);
+    central.writeUInt16LE(method, 10);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(payload.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt32LE(offset, 42);
+    name.copy(central, 46);
+    centrals.push(central);
+    offset += local.length;
   }
 
-  await run("zip", ["-qr", path.resolve(destinationZip), "."], path.resolve(sourceDir));
+  const centralOffset = offset;
+  const centralData = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(EOCD_SIGNATURE, 0);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralData.length, 12);
+  end.writeUInt32LE(centralOffset, 16);
+  await ensureDir(path.dirname(path.resolve(destinationZip)));
+  await writeFile(destinationZip, Buffer.concat([...locals, centralData, end]));
+}
+
+interface ZipEntry {
+  name: string;
+  data: Buffer;
+}
+
+function crc32(data: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+async function readZipEntries(zipPath: string): Promise<ZipEntry[]> {
+  const archive = await readFile(path.resolve(zipPath));
+  let eocd = -1;
+  for (let index = archive.length - 22; index >= Math.max(0, archive.length - MAX_EOCD_SEARCH); index--) {
+    if (archive.readUInt32LE(index) === EOCD_SIGNATURE) { eocd = index; break; }
+  }
+  if (eocd < 0) throw new BuilderError("invalid_archive", "ZIP end-of-central-directory record was not found.");
+  const entries = archive.readUInt16LE(eocd + 10);
+  const centralSize = archive.readUInt32LE(eocd + 12);
+  const centralOffset = archive.readUInt32LE(eocd + 16);
+  if (centralOffset + centralSize > archive.length) throw new BuilderError("invalid_archive", "ZIP central directory points outside the archive.");
+
+  const result: ZipEntry[] = [];
+  let cursor = centralOffset;
+  for (let index = 0; index < entries; index++) {
+    if (archive.readUInt32LE(cursor) !== CENTRAL_SIGNATURE) throw new BuilderError("invalid_archive", `ZIP central directory entry ${index + 1} is malformed.`);
+    const flags = archive.readUInt16LE(cursor + 8);
+    const method = archive.readUInt16LE(cursor + 10);
+    const compressedSize = archive.readUInt32LE(cursor + 20);
+    const uncompressedSize = archive.readUInt32LE(cursor + 24);
+    const nameLength = archive.readUInt16LE(cursor + 28);
+    const extraLength = archive.readUInt16LE(cursor + 30);
+    const commentLength = archive.readUInt16LE(cursor + 32);
+    const localOffset = archive.readUInt32LE(cursor + 42);
+    const rawName = archive.subarray(cursor + 46, cursor + 46 + nameLength).toString("utf8");
+    const name = validateEntryName(rawName);
+    cursor += 46 + nameLength + extraLength + commentLength;
+    if ((flags & 0x1) !== 0) throw new BuilderError("unsafe_archive", `Encrypted ZIP entries are not accepted: ${name}`);
+    if (localOffset + 30 > archive.length || archive.readUInt32LE(localOffset) !== 0x04034b50) throw new BuilderError("invalid_archive", `ZIP local entry is invalid: ${name}`);
+    const localNameLength = archive.readUInt16LE(localOffset + 26);
+    const localExtraLength = archive.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const compressedData = archive.subarray(dataStart, dataStart + compressedSize);
+    if (compressedData.length !== compressedSize) throw new BuilderError("invalid_archive", `ZIP entry is truncated: ${name}`);
+    let data: Buffer;
+    try {
+      data = method === 0 ? Buffer.from(compressedData) : method === 8 ? inflateRawSync(compressedData) : (() => { throw new BuilderError("unsupported_archive", `ZIP compression method ${method} is not supported: ${name}`); })();
+    } catch (error) {
+      if (error instanceof BuilderError) throw error;
+      throw new BuilderError("invalid_archive", `Could not extract ZIP entry ${name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (data.length !== uncompressedSize) throw new BuilderError("invalid_archive", `ZIP entry size mismatch: ${name}`);
+    if (crc32(data) !== archive.readUInt32LE(cursor - (46 + nameLength + extraLength + commentLength) + 16)) throw new BuilderError("invalid_archive", `ZIP entry checksum mismatch: ${name}`);
+    result.push({ name, data });
+  }
+  return result;
+}
+
+async function collectFiles(root: string, current = root): Promise<Array<{ absolute: string; name: string }>> {
+  const result: Array<{ absolute: string; name: string }> = [];
+  for (const entry of await readdir(current, { withFileTypes: true })) {
+    const absolute = path.join(current, entry.name);
+    if (entry.isDirectory()) result.push(...await collectFiles(root, absolute));
+    else if (entry.isFile()) result.push({ absolute, name: path.relative(root, absolute).split(path.sep).join("/") });
+  }
+  return result.sort((left, right) => left.name.localeCompare(right.name));
 }

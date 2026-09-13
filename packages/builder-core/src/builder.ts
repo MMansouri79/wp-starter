@@ -210,6 +210,14 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       await emit(options, { percent: 78, stage: "configuration", message: "No configuration snapshot selected. Settings import will be skipped." });
     }
 
+    let vnext: StarterBuildManifest["vnext"] = null;
+    if (profile.vnext) {
+      await emit(options, { percent: 80, stage: "design_system", message: "Embedding vNext design-system resources…" });
+      const designSystemPath = path.join(starterDataDir, "starter-design-system.json");
+      await writeJson(designSystemPath, profile.vnext);
+      vnext = { path: "starter-design-system.json", sha256: await sha256File(designSystemPath) };
+    }
+
     await emit(options, { percent: 82, stage: "bootstrap", message: "Adding offline bootstrap…" });
     await cp(path.resolve(options.bootstrapFile), path.join(muPluginDir, "site-starter-bootstrap.php"), { force: true });
 
@@ -229,7 +237,8 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       plugins: bundledPlugins,
       configExport,
       fontSystem: bundledFontSystem,
-      languageArchives: bundledLanguages
+      languageArchives: bundledLanguages,
+      vnext
     };
 
     await emit(options, { percent: 87, stage: "manifest", message: "Writing build manifest…" });

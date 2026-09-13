@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { access, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { access, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BuilderError } from "./errors.js";
 
@@ -87,5 +88,12 @@ export async function findFileRecursive(rootDir: string, filename: string): Prom
 
 export async function writeJson(target: string, value: unknown): Promise<void> {
   await ensureDir(path.dirname(target));
-  await writeFile(target, JSON.stringify(value, null, 2) + "\n", "utf8");
+  const absolute = path.resolve(target);
+  const temporary = `${absolute}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", "utf8");
+    await rename(temporary, absolute);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }

@@ -6,6 +6,9 @@ const titles = {
   overview: ["Overview", "Your local WordPress starter workspace."],
   packages: ["Packages", "Manage versioned WordPress, theme, and plugin ZIPs."],
   fonts: ["Fonts", "Manage reusable WOFF2 font profiles for Elementor Pro."],
+  typography: ["Typography", "Manage Builder-owned semantic typography profiles."],
+  colors: ["Colors", "Manage Builder-owned Elementor and semantic color profiles."],
+  "design-systems": ["Design Systems", "Compose vNext design-system resources and portable templates."],
   configs: ["Configurations", "Reference-site exports and their package requirements."],
   profiles: ["Profiles", "Manage reusable, version-pinned build profiles."],
   build: ["Build", "Choose exact package versions and generate a complete offline WordPress ZIP."],
@@ -101,6 +104,15 @@ function renderFontSystemOptions(previous = "") {
   if (systems.some(system => system.id === previous)) $("#build-font-system").value = previous;
 }
 
+function renderVNext() {
+  const resources = state.vnext || { typography: [], colors: [], designSystems: [], templates: [] };
+  const renderCards = (items, empty) => items.length ? items.map(item => `<div class="card"><div><strong>${esc(item.name || item.id)}</strong><small><code>${esc(item.id)}</code></small></div><span class="badge">vNext</span></div>`).join("") : `<div class="empty">${empty}</div>`;
+  $("#typography-list").innerHTML = renderCards(resources.typography, "No typography profiles yet. vNext resource editing will be enabled after the model is validated.");
+  $("#colors-list").innerHTML = renderCards(resources.colors, "No color profiles yet. vNext resource editing will be enabled after the model is validated.");
+  $("#design-systems-list").innerHTML = renderCards(resources.designSystems, "No design systems yet.");
+  $("#templates-list").innerHTML = renderCards(resources.templates, "No portable templates yet.");
+}
+
 function render() {
   const previousConfig = $("#build-config")?.value ?? "";
   const previousProfile = $("#profile-select")?.value ?? "";
@@ -115,6 +127,7 @@ function render() {
   $("#stat-builds").textContent = state.builds.length;
   renderPackages();
   renderFonts();
+  renderVNext();
   renderFontSystemOptions(previousFontSystem);
 
   $("#configs-list").innerHTML = state.configs.map(c => `<div class="card"><div><strong>${esc(c.name)}</strong><small>${esc(c.id)} · WP ${esc(c.wordpressVersion)} · ${esc(c.locale)} · ${esc(c.theme.slug)}@${esc(c.theme.version)} · ${c.plugins.length} plugins</small></div><div class="action-list"><button class="secondary inspect-config" data-id="${escAttr(c.id)}">Inspect</button><button class="secondary check-config" data-id="${escAttr(c.id)}">Check packages</button></div></div>`).join("") || `<div class="empty">No configuration snapshots yet. You can still create package-only builds.</div>`;

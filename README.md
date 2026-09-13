@@ -38,6 +38,12 @@ In the GUI, open **Configurations → Inspect** to review a snapshot through Ove
 
 The comparison model currently covers WordPress/theme/plugin coordinates, WordPress options and permalink behavior, adapter values, starter pages, adapter status, and exporter safety boundaries. Builder alpha.22 also separates source inventory from starter targets, restores selected Code Snippets idempotently, hardens local/build-time archive handling and installer cleanup, and adds reusable WOFF2-only Font Profiles. One font ZIP may contain several families; each family is split into its own named profile and installed into Elementor Pro Custom Fonts as real WordPress Media attachments, allowing Elementor's Edit Font screen to display each WOFF2 file normally. The Fonts screen also shows each WOFF2 filename beside its detected numeric CSS weight, readable weight name, and style so detection can be audited before building. Phase 2 continues with formal adapter remapping and portable object-backed structures such as Elementor templates and FilterX definitions.
 
+## Stabilization and vNext
+
+The stabilization line keeps alpha profile schemas through v6 and build manifests through v4 while adding reproducible dependency installation, cross-platform in-process ZIP handling, atomic local-library writes, a published [compatibility matrix](docs/COMPATIBILITY.md), and build-time compatibility enforcement for configuration-enabled profiles.
+
+Builder Core also exposes an isolated vNext resource API for Builder-owned Typography Profiles, Color Profiles, Design Systems, and logical Portable Template references. These resources use a separate schema namespace and are transported through `starter-design-system.json`; the bootstrap creates deterministic Elementor global color/typography IDs and remaps portable template references without changing the alpha profile format. See [the vNext design-system notes](docs/VNEXT-DESIGN-SYSTEM.md).
+
 ## Quick start
 
 Install the exporter on the reference site and download `starter-config.zip`.

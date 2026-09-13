@@ -8,3 +8,6 @@ export * from "./snapshot.js";
 export * from "./fonts.js";
 export * from "./snapshot-policy.js";
 export * from "./archive.js";
+export * from "./compatibility.js";
+export * from "./vnext.js";
+export * from "./fs-utils.js";

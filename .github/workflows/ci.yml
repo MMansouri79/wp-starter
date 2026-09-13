@@ -6,7 +6,12 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['20', '22']
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -14,17 +19,25 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node }}
 
       - name: Install Node dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build TypeScript
         run: npm run build
 
       - name: Run builder tests
-        run: node --test packages/builder-core/tests/*.test.mjs
+        run: npm test
 
+      - name: Package and verify artifacts
+        run: npm run verify:artifacts
+
+  php-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:

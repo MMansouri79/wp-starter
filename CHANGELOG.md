@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Stabilization and vNext foundation
+
+- Added a committed npm lockfile and CI coverage for Node 20/22 across Windows, macOS, and Linux.
+- Replaced shell-dependent ZIP creation/extraction with an in-process implementation that validates paths, compression, sizes, and entry checksums.
+- Added atomic JSON persistence for package registries, snapshots, fonts, profiles, and build metadata.
+- Added the published known-good compatibility matrix and default build-time rejection of unsupported configuration combinations.
+- Added isolated vNext Typography Profile, Color Profile, Design System, Font Asset, and Portable Template APIs with semantic validation and logical-reference remapping.
+- Added optional vNext design-system transport and Elementor bootstrap application with deterministic global IDs, template remapping, verification errors, and revision-based reruns.
+
 ## 0.1.0-alpha.22
 
 - Fix first-login provisioning races by running real plugin activation hooks instead of silent activation.

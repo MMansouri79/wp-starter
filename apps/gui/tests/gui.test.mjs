@@ -42,6 +42,9 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(html, /WP Starter Builder/);
     assert.match(html, /Package Library/);
     assert.match(html, /Font Profiles/);
+    assert.match(html, /Typography Profiles/);
+    assert.match(html, /Color Profiles/);
+    assert.match(html, /Design Systems/);
     assert.match(html, /Saved Profiles/);
     assert.match(html, /Build History/);
     assert.match(html, /Configuration Inspector/);
@@ -53,11 +56,9 @@ test("GUI serves the workspace and local API", async () => {
   }
 });
 
-import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { promisify } from "node:util";
-const execFileAsync = promisify(execFile);
-async function zipDir(source, destination) { await execFileAsync("zip", ["-qr", destination, "."], { cwd: source }); }
+import { createZip } from "../../../packages/builder-core/dist/index.js";
+async function zipDir(source, destination) { await createZip(source, destination); }
 
 test("GUI profile API can pin package versions and localized WordPress variants", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "wp-starter-gui-profile-"));

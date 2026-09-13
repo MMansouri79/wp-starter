@@ -14,6 +14,9 @@
         <button class="nav active" data-view="overview">Overview</button>
         <button class="nav" data-view="packages">Packages</button>
         <button class="nav" data-view="fonts">Fonts</button>
+        <button class="nav" data-view="typography">Typography</button>
+        <button class="nav" data-view="colors">Colors</button>
+        <button class="nav" data-view="design-systems">Design Systems</button>
         <button class="nav" data-view="configs">Configurations</button>
         <button class="nav" data-view="profiles">Profiles</button>
         <button class="nav" data-view="build">Build</button>
@@ -51,6 +54,18 @@
           <p class="field-help">WOFF2 only. WOFF, TTF, OTF and other formats are ignored. Duplicate weight/style faces are collapsed automatically.</p>
           <div id="fonts-list" class="cards"></div>
         </div>
+      </section>
+
+      <section class="view" id="view-typography">
+        <div class="panel"><div class="panel-head"><div><h2>Typography Profiles</h2><p>Builder-owned semantic typography resources for body, headings, buttons, and forms.</p></div></div><div id="typography-list" class="cards"></div></div>
+      </section>
+
+      <section class="view" id="view-colors">
+        <div class="panel"><div class="panel-head"><div><h2>Color Profiles</h2><p>Builder-owned Elementor global and semantic color resources.</p></div></div><div id="colors-list" class="cards"></div></div>
+      </section>
+
+      <section class="view" id="view-design-systems">
+        <div class="panel"><div class="panel-head"><div><h2>Design Systems</h2><p>Compose font bindings, typography profiles, and color profiles before a vNext build.</p></div></div><div id="design-systems-list" class="cards"></div><h3>Portable Templates</h3><div id="templates-list" class="cards"></div></div>
       </section>
 
       <section class="view" id="view-configs">

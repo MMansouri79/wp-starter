@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   buildStarter,
@@ -11,7 +11,9 @@ import {
   loadProfile,
   PackageRegistry,
   ConfigSnapshotRegistry,
-  createProfileFromSnapshot
+  createProfileFromSnapshot,
+  assertKnownGoodProfile,
+  writeJson
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
@@ -31,6 +33,7 @@ Usage:
   wp-starter config check <id> [--library <dir>]
   wp-starter config compare <left-id> <right-id> [--library <dir>]
   wp-starter config remove <id> [--library <dir>]
+  wp-starter compatibility check <profile.json> [--library <dir>]
   wp-starter font add <fonts.zip> [--name <name>] [--library <dir>] [--replace]
   wp-starter font list [--library <dir>]
   wp-starter font remove <id> [--library <dir>]
@@ -359,8 +362,7 @@ async function handleProfile(): Promise<void> {
       fontSystemId: getArg("--font-system")
     });
 
-    await mkdir(path.dirname(absoluteOutput), { recursive: true });
-    await writeFile(absoluteOutput, JSON.stringify(profile, null, 2) + "\n", "utf8");
+    await writeJson(absoluteOutput, profile);
 
     console.log(`Created profile: ${profile.name}`);
     console.log(`Output: ${absoluteOutput}`);
@@ -376,6 +378,7 @@ async function handleProfile(): Promise<void> {
   if (action === "check") {
     if (!input || input.startsWith("--")) usage();
     const profile = await loadProfile(input, { libraryDir: libraryDir() });
+    assertKnownGoodProfile(profile);
     console.log(`Profile: ${profile.name}`);
     console.log(`Schema: ${profile.schemaVersion}`);
     console.log(`Locale: ${profile.locale}`);
@@ -396,6 +399,15 @@ async function handleProfile(): Promise<void> {
   usage();
 }
 
+async function handleCompatibility(): Promise<void> {
+  const action = process.argv[3];
+  const input = process.argv[4];
+  if (action !== "check" || !input || input.startsWith("--")) usage();
+  const profile = await loadProfile(input, { libraryDir: libraryDir() });
+  assertKnownGoodProfile(profile);
+  console.log(`Known-good compatibility entry matched for ${profile.name}.`);
+}
+
 async function handleBuild(): Promise<void> {
   const profilePath = getArg("--profile");
   const outputPath = getArg("--output");
@@ -407,6 +419,7 @@ async function handleBuild(): Promise<void> {
   const library = libraryDir();
 
   const profile = await loadProfile(profilePath, { libraryDir: library });
+  assertKnownGoodProfile(profile);
 
   console.log(`Building profile: ${profile.name}`);
   console.log(`Locale: ${profile.locale}`);
@@ -446,6 +459,11 @@ async function main(): Promise<void> {
 
   if (command === "profile") {
     await handleProfile();
+    return;
+  }
+
+  if (command === "compatibility") {
+    await handleCompatibility();
     return;
   }
 

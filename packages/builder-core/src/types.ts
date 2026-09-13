@@ -1,3 +1,5 @@
+import type { VNextBuildPayload } from "./vnext.js";
+
 export type PackageKind = "wordpress" | "theme" | "plugin";
 
 export type SnapshotRequirementStatus = "available" | "missing";
@@ -351,6 +353,7 @@ export interface BuildProfile {
   configExport: string | null;
   fontSystem?: ResolvedFontSystem | null;
   languageArchives?: LanguageArchiveRef[];
+  vnext?: VNextBuildPayload | null;
 }
 
 export interface BuildInputHash {
@@ -375,6 +378,7 @@ export interface StarterBuildManifest {
     faces: Array<Omit<FontFaceRecord, "file"> & { file: string }>;
   } | null;
   languageArchives: Array<LanguageArchiveRef & { sha256: string }>;
+  vnext?: { path: string; sha256: string } | null;
 }
 
 export interface BuildProgress {

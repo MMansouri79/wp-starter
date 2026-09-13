@@ -27,6 +27,7 @@ await copy("apps/gui/package.json", "apps/gui/package.json");
 await copy("packages/builder-core/dist", "packages/builder-core/dist");
 await copy("packages/builder-core/package.json", "packages/builder-core/package.json");
 await copy("profiles", "profiles");
+await copy("compatibility", "compatibility");
 await copy("wordpress/bootstrap", "wordpress/bootstrap");
 await copy("scripts/build.cmd", "scripts/build.cmd");
 await copy("scripts/build.ps1", "scripts/build.ps1");
@@ -38,6 +39,8 @@ await copy("README.md", "README.md");
 await copy("docs/PHASE-1.md", "PHASE-1.md");
 await copy("docs/PHASE-2.md", "PHASE-2.md");
 await copy("docs/PACKAGE-FORMAT.md", "PACKAGE-FORMAT.md");
+await copy("docs/COMPATIBILITY.md", "COMPATIBILITY.md");
+await copy("package-lock.json", "package-lock.json");
 
 await writeFile(path.join(stage, "VERSION.txt"), `${version}\n`, "utf8");
 await mkdir(artifacts, { recursive: true });

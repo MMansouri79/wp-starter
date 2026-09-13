@@ -1,15 +1,23 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
-import { buildStarter, ConfigSnapshotRegistry, createProfileFromPackages, FontSystemRegistry, loadProfile, PackageRegistry, validateZipArchive } from "../dist/index.js";
-
-const execFileAsync = promisify(execFile);
+import { buildStarter, ConfigSnapshotRegistry, createProfileFromPackages, createZip, FontSystemRegistry, loadProfile, PackageRegistry, validateZipArchive } from "../dist/index.js";
 const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
-async function zipDir(source, destination) { await execFileAsync("zip", ["-qr", destination, "."], { cwd: source }); }
+async function zipDir(source, destination) { await createZip(source, destination); }
+async function traversalZip(destination) {
+  const name = Buffer.from("../escape.php");
+  const data = Buffer.from("bad");
+  const local = Buffer.alloc(30 + name.length + data.length);
+  local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6); local.writeUInt16LE(0, 8);
+  local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(name.length, 26); name.copy(local, 30); data.copy(local, 30 + name.length);
+  const central = Buffer.alloc(46 + name.length);
+  central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(0, 8); central.writeUInt16LE(0, 10);
+  central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24); central.writeUInt16LE(name.length, 28); name.copy(central, 46);
+  const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10); end.writeUInt32LE(central.length, 12); end.writeUInt32LE(local.length, 16);
+  await writeFile(destination, Buffer.concat([local, central, end]));
+}
 async function makePlugin(root, slug, name, version) {
   const dir = path.join(root, slug, slug); await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, `${slug}.php`), `<?php\n/*\nPlugin Name: ${name}\nVersion: ${version}\n*/\n`);
@@ -20,7 +28,7 @@ test("ZIP validator rejects traversal entries before extraction", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "wp-starter-zip-security-"));
   try {
     const zip = path.join(temp, "evil.zip");
-    await execFileAsync("python3", ["-c", "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.writestr('../escape.php','bad'); z.close()", zip]);
+    await traversalZip(zip);
     await assert.rejects(() => validateZipArchive(zip), (error) => error?.code === "unsafe_archive");
   } finally { await rm(temp, { recursive: true, force: true }); }
 });

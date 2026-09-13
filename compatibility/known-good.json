@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-13T00:00:00Z",
+  "entries": [
+    {
+      "id": "elementor-en-wp71",
+      "status": "known-good",
+      "wordpress": { "version": "7.1", "variant": "en_US" },
+      "php": "8.2",
+      "theme": { "slug": "hello-elementor", "version": "3.4.9" },
+      "plugins": { "classic-editor": "1.7.0", "elementor": "4.0.8", "elementor-pro": "4.0.4" },
+      "notes": "Reference Elementor baseline."
+    },
+    {
+      "id": "ecommerce-fa-wp71",
+      "status": "known-good",
+      "wordpress": { "version": "7.1", "variant": "fa_IR" },
+      "php": "8.2",
+      "theme": { "slug": "hello-elementor", "version": "3.4.9" },
+      "plugins": {
+        "classic-editor": "1.7.0",
+        "elementor": "4.0.8",
+        "elementor-pro": "4.0.4",
+        "woocommerce": "10.9.4",
+        "persian-woocommerce": "10.0.4",
+        "filterx": "0.6.1"
+      },
+      "notes": "Reference Persian commerce baseline."
+    }
+  ]
+}

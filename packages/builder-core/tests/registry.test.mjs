@@ -1,17 +1,13 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
-import { buildStarter, inspectPackage, loadProfile, PackageRegistry } from "../dist/index.js";
-
-const execFileAsync = promisify(execFile);
+import { buildStarter, createZip, extractZip, inspectPackage, loadProfile, PackageRegistry } from "../dist/index.js";
 const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
 
 async function zipDir(source, destination) {
-  await execFileAsync("zip", ["-qr", destination, "."], { cwd: source });
+  await createZip(source, destination);
 }
 
 test("registers arbitrary packages and builds schema v2 profiles from exact package coordinates", async () => {
@@ -100,7 +96,7 @@ test("registers arbitrary packages and builds schema v2 profiles from exact pack
 
     const unpack = path.join(temp, "unpacked");
     await mkdir(unpack, { recursive: true });
-    await execFileAsync("unzip", ["-q", output, "-d", unpack]);
+    await extractZip(output, unpack);
     assert.equal(result.manifest.schemaVersion, 4);
     assert.equal(result.manifest.plugins[0].zip, "packages/plugins/arbitrary-plugin-2.4.1.zip");
     const payloadName = (await readdir(path.join(unpack, "wp-content"))).find((name) => name.startsWith(".wp-starter-"));

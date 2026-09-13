@@ -15,7 +15,7 @@ final class MMS_WP_Starter_Bootstrap {
     const ERROR_OPTION    = 'mms_wp_starter_bootstrap_error';
     const REPORT_OPTION   = 'mms_wp_starter_bootstrap_report';
     const REVISION_OPTION = 'mms_wp_starter_bootstrap_revision';
-    const CONFIG_REVISION = 5;
+    const CONFIG_REVISION = 6;
 
     public static function init() {
         add_action( 'admin_init', array( __CLASS__, 'maybe_run' ), 1 );
@@ -71,6 +71,19 @@ final class MMS_WP_Starter_Bootstrap {
             $validation = self::validate_configuration_schema( $config );
             if ( is_wp_error( $validation ) ) {
                 self::fail( $validation->get_error_message() );
+                return;
+            }
+        }
+
+        $vnext = array();
+        if ( ! empty( $build['vnext']['path'] ) ) {
+            $vnext = self::read_json( $root . '/' . ltrim( (string) $build['vnext']['path'], '/\\' ) );
+            if ( is_wp_error( $vnext ) ) {
+                self::fail( $vnext->get_error_message() );
+                return;
+            }
+            if ( ! empty( $build['vnext']['sha256'] ) && hash_file( 'sha256', $root . '/' . ltrim( (string) $build['vnext']['path'], '/\\' ) ) !== (string) $build['vnext']['sha256'] ) {
+                self::fail( 'The vNext design-system manifest checksum does not match the build manifest.' );
                 return;
             }
         }
@@ -136,6 +149,13 @@ final class MMS_WP_Starter_Bootstrap {
 
         if ( 'fonts' === $phase ) {
             $result = self::install_font_system( isset( $build['fontSystem'] ) && is_array( $build['fontSystem'] ) ? $build['fontSystem'] : array() );
+            if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
+            self::save_state( array( 'phase' => empty( $vnext ) ? 'languages' : 'design_system', 'language_index' => 0 ) );
+            self::continue_setup();
+        }
+
+        if ( 'design_system' === $phase ) {
+            $result = self::apply_vnext_design_system( $vnext );
             if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
             self::save_state( array( 'phase' => 'languages', 'language_index' => 0 ) );
             self::continue_setup();
@@ -1094,6 +1114,108 @@ final class MMS_WP_Starter_Bootstrap {
         update_option( self::REPORT_OPTION, $report, false );
 
         return true;
+    }
+
+    private static function apply_vnext_design_system( array $payload ) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        if ( empty( $payload['designSystem'] ) || ! is_array( $payload['designSystem'] ) ) {
+            return new WP_Error( 'starter_vnext_invalid_design_system', 'The vNext design-system manifest has no valid designSystem object.' );
+        }
+        if ( ! class_exists( '\\Elementor\\Plugin' ) || ! is_plugin_active( 'elementor/elementor.php' ) ) {
+            return new WP_Error( 'starter_vnext_elementor_required', 'A vNext design system requires Elementor to be active.' );
+        }
+
+        $system      = (array) $payload['designSystem'];
+        $colors      = (array) ( $system['colors'] ?? array() );
+        $typography  = (array) ( $system['typography'] ?? array() );
+        $font_families = (array) ( $system['fontFamilies'] ?? array() );
+        $kit_id      = self::ensure_elementor_kit( array() );
+        if ( is_wp_error( $kit_id ) ) {
+            return $kit_id;
+        }
+
+        $settings = get_post_meta( $kit_id, '_elementor_page_settings', true );
+        $settings = is_array( $settings ) ? $settings : array();
+        $logical  = array();
+        $system_colors = array();
+        foreach ( $colors as $role => $value ) {
+            $id = 'wpstarter_' . substr( hash( 'sha256', 'color:' . (string) $role ), 0, 12 );
+            $system_colors[] = array( '_id' => $id, 'title' => sanitize_text_field( (string) $role ), 'color' => sanitize_hex_color( (string) $value ) );
+            $logical[ 'color:' . (string) $role ] = $id;
+        }
+
+        $system_typography = array();
+        foreach ( $typography as $role => $token ) {
+            if ( ! is_array( $token ) ) {
+                return new WP_Error( 'starter_vnext_invalid_typography', 'Typography token ' . sanitize_key( (string) $role ) . ' is invalid.' );
+            }
+            $id = 'wpstarter_' . substr( hash( 'sha256', 'typography:' . (string) $role ), 0, 12 );
+            $font_role = isset( $token['fontRole'] ) ? (string) $token['fontRole'] : '';
+            $family = isset( $font_families[ $font_role ] ) ? (string) $font_families[ $font_role ] : (string) ( $system['fontBindings'][ $font_role ] ?? '' );
+            $row = array(
+                '_id'          => $id,
+                'title'        => sanitize_text_field( (string) $role ),
+                'typography'   => 'yes',
+                'font_family'  => sanitize_text_field( $family ),
+                'font_weight'  => absint( $token['weight'] ?? 400 ),
+                'font_style'   => sanitize_key( (string) ( $token['style'] ?? 'normal' ) ),
+            );
+            foreach ( array( 'size', 'lineHeight', 'letterSpacing', 'wordSpacing', 'textTransform', 'textDecoration' ) as $key ) {
+                if ( array_key_exists( $key, $token ) ) {
+                    $row[ $key ] = $token[ $key ];
+                }
+            }
+            $system_typography[] = $row;
+            $logical[ 'typography:' . (string) $role ] = $id;
+        }
+
+        $settings['system_colors']     = $system_colors;
+        $settings['system_typography'] = $system_typography;
+        update_post_meta( $kit_id, '_elementor_page_settings', $settings );
+
+        $template_count = 0;
+        foreach ( (array) ( $payload['templates'] ?? array() ) as $template ) {
+            if ( ! is_array( $template ) || empty( $template['id'] ) ) {
+                return new WP_Error( 'starter_vnext_invalid_template', 'A portable template is missing its id.' );
+            }
+            $missing = array();
+            $document = self::remap_vnext_value( $template['document'] ?? array(), $logical, $missing, 'document' );
+            if ( ! empty( $missing ) ) {
+                return new WP_Error( 'starter_vnext_unresolved_reference', 'Portable template ' . sanitize_key( (string) $template['id'] ) . ' contains unresolved references: ' . implode( ', ', $missing ) );
+            }
+            $existing = get_posts( array( 'post_type' => 'elementor_library', 'post_status' => 'any', 'meta_key' => '_wp_starter_vnext_id', 'meta_value' => sanitize_key( (string) $template['id'] ), 'posts_per_page' => 1 ) );
+            $post_id = ! empty( $existing ) ? absint( $existing[0]->ID ) : 0;
+            $post = array( 'post_title' => sanitize_text_field( (string) ( $template['name'] ?? $template['id'] ) ), 'post_type' => 'elementor_library', 'post_status' => 'publish' );
+            if ( $post_id > 0 ) $post['ID'] = $post_id;
+            $post_id = wp_insert_post( $post, true );
+            if ( is_wp_error( $post_id ) ) return $post_id;
+            update_post_meta( $post_id, '_wp_starter_vnext_id', sanitize_key( (string) $template['id'] ) );
+            update_post_meta( $post_id, '_elementor_template_type', sanitize_key( (string) ( $template['type'] ?? 'section' ) ) );
+            update_post_meta( $post_id, '_elementor_data', wp_slash( wp_json_encode( $document ) ) );
+            $template_count++;
+        }
+
+        if ( isset( \Elementor\Plugin::$instance->files_manager ) && method_exists( \Elementor\Plugin::$instance->files_manager, 'clear_cache' ) ) {
+            \Elementor\Plugin::$instance->files_manager->clear_cache();
+        }
+        update_option( self::REPORT_OPTION, array( 'vnext_design_system' => sanitize_key( (string) ( $system['id'] ?? 'design-system' ) ), 'vnext_colors' => count( $system_colors ), 'vnext_typography' => count( $system_typography ), 'vnext_templates' => $template_count ), false );
+        return true;
+    }
+
+    private static function remap_vnext_value( $value, array $logical, array &$missing, $path ) {
+        if ( is_array( $value ) ) {
+            if ( isset( $value['$wpStarterRef'] ) && is_string( $value['$wpStarterRef'] ) ) {
+                if ( ! array_key_exists( $value['$wpStarterRef'], $logical ) ) {
+                    $missing[] = $path . ': ' . $value['$wpStarterRef'];
+                    return $value;
+                }
+                return $logical[ $value['$wpStarterRef'] ];
+            }
+            $result = array();
+            foreach ( $value as $key => $child ) $result[ $key ] = self::remap_vnext_value( $child, $logical, $missing, $path . '.' . $key );
+            return $result;
+        }
+        return $value;
     }
 
     private static function ensure_elementor_kit( array $kit_settings ) {

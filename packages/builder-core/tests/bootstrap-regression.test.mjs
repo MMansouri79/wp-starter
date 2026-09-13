@@ -38,7 +38,7 @@ test("bootstrap registers Elementor font files as WordPress attachments with id 
   assert.equal(bootstrap.includes("'post_mime_type' => 'font/woff2'"), true);
   assert.equal(bootstrap.includes("'id'  => absint( $attachment_id )"), true);
   assert.equal(bootstrap.includes("'url' => esc_url_raw( $url )"), true);
-  assert.equal(bootstrap.includes("const CONFIG_REVISION = 5;"), true);
+  assert.equal(bootstrap.includes("const CONFIG_REVISION = 6;"), true);
   assert.match(bootstrap, /\$completed && \$revision < self::CONFIG_REVISION[\s\S]{0,180}'phase' => 'fonts'/);
 });
 
@@ -56,4 +56,11 @@ test("bootstrap runs real activation hooks and serializes WooCommerce first boot
   assert.equal(bootstrap.includes("woocommerce_attribute_taxonomies"), true);
   assert.equal(bootstrap.includes("woocommerce_sessions"), true);
   assert.equal(bootstrap.includes("wc_order_stats"), true);
+});
+
+test("bootstrap applies vNext design-system globals and fails unresolved template references", async () => {
+  const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
+  for (const marker of ["starter-design-system.json", "apply_vnext_design_system", "system_colors", "system_typography", "starter_vnext_unresolved_reference", "remap_vnext_value", "_wp_starter_vnext_id"]) {
+    assert.equal(bootstrap.includes(marker), true, `${marker} should be present in the vNext provisioning path`);
+  }
 });

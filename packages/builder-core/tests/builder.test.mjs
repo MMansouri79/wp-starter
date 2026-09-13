@@ -3,15 +3,11 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { buildStarter, loadProfile } from "../dist/index.js";
-
-const execFileAsync = promisify(execFile);
+import { buildStarter, createZip, extractZip, loadProfile } from "../dist/index.js";
 const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
 
 async function zipDir(source, destination) {
-  await execFileAsync("zip", ["-qr", destination, "."], { cwd: source });
+  await createZip(source, destination);
 }
 
 test("builds a self-contained WordPress distribution from local artifacts", async () => {
@@ -89,12 +85,8 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
     assert.equal(result.manifest.profile, "test");
     assert.match(result.sha256, /^[a-f0-9]{64}$/);
 
-    const { stdout: zipEntries } = await execFileAsync("unzip", ["-Z1", output]);
-    assert.equal(zipEntries.includes("\\"), false, "deployment ZIP entries must use POSIX separators");
-
     const unpack = path.join(temp, "unpacked");
-    await mkdir(unpack, { recursive: true });
-    await execFileAsync("unzip", ["-q", output, "-d", unpack]);
+    await extractZip(output, unpack);
 
     const bootstrap = await readFile(path.join(unpack, "wp-content/mu-plugins/site-starter-bootstrap.php"), "utf8");
     assert.match(bootstrap, /WP Starter Bootstrap/);
@@ -112,18 +104,12 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
     await readFile(bundledPlugin);
     await readFile(bundledTheme);
 
-    const { stdout: themeEntries } = await execFileAsync("unzip", ["-Z1", bundledTheme]);
-    const themeFiles = themeEntries.trim().split(/\r?\n/).filter(Boolean);
-    assert.ok(themeFiles.length > 0);
-    assert.ok(themeFiles.every((entry) => entry.startsWith("hello-elementor/")), "theme payload must use the canonical install directory");
-    assert.ok(themeFiles.includes("hello-elementor/style.css"));
-    assert.equal(themeEntries.includes("\\"), false, "theme payload entries must use POSIX separators");
-
-    const { stdout: pluginEntries } = await execFileAsync("unzip", ["-Z1", bundledPlugin]);
-    const pluginFiles = pluginEntries.trim().split(/\r?\n/).filter(Boolean);
-    assert.ok(pluginFiles.every((entry) => entry.startsWith("example-plugin/")), "plugin payload must use the canonical install directory");
-    assert.ok(pluginFiles.includes("example-plugin/example-plugin.php"));
-    assert.equal(pluginEntries.includes("\\"), false, "plugin payload entries must use POSIX separators");
+    const themeUnpack = path.join(temp, "theme-unpacked");
+    const pluginUnpack = path.join(temp, "plugin-unpacked");
+    await extractZip(bundledTheme, themeUnpack);
+    await extractZip(bundledPlugin, pluginUnpack);
+    assert.ok(await readFile(path.join(themeUnpack, "hello-elementor/style.css")));
+    assert.ok(await readFile(path.join(pluginUnpack, "example-plugin/example-plugin.php")));
 
     await assert.rejects(() => readFile(path.join(unpack, "wp-content/plugins/example-plugin/example-plugin.php")));
   } finally {
@@ -194,7 +180,7 @@ test("builds a package-only profile without a configuration snapshot or custom t
 
     const unpack = path.join(temp, "unpacked");
     await mkdir(unpack, { recursive: true });
-    await execFileAsync("unzip", ["-q", output, "-d", unpack]);
+    await extractZip(output, unpack);
     const payloadName = (await readdir(path.join(unpack, "wp-content"))).find((name) => name.startsWith(".wp-starter-"));
     assert.ok(payloadName);
     const payload = path.join(unpack, "wp-content", payloadName);

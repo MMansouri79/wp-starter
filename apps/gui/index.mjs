@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,13 @@ import {
   defaultLibraryDir,
   FontSystemRegistry,
   loadProfile,
-  PackageRegistry
+  PackageRegistry,
+  assertKnownGoodProfile,
+  writeJson,
+  VNextResourceRegistry,
+  assertValidReport,
+  validateTypographyProfile,
+  validateColorProfile
 } from "../../packages/builder-core/dist/index.js";
 
 const VERSION = "0.1.0-alpha.22";
@@ -30,6 +36,7 @@ const bootstrapFile = path.join(repoRoot, "wordpress/bootstrap/site-starter-boot
 const libraryRoot = path.resolve(process.env.WP_STARTER_HOME?.trim() || defaultLibraryDir());
 const profilesDir = path.join(libraryRoot, "profiles");
 const buildsDir = path.join(libraryRoot, "builds");
+const vnextDir = path.join(libraryRoot, "vnext");
 const buildJobs = new Map();
 
 function securityHeaders() {
@@ -189,9 +196,21 @@ async function state() {
     packages,
     configs,
     fonts: await new FontSystemRegistry(libraryRoot).list(),
+    vnext: {
+      typography: await new VNextResourceRegistry(vnextDir, "typography.json").list(),
+      colors: await new VNextResourceRegistry(vnextDir, "colors.json").list(),
+      designSystems: await new VNextResourceRegistry(vnextDir, "design-systems.json").list(),
+      templates: await new VNextResourceRegistry(vnextDir, "templates.json").list()
+    },
     profiles: await listProfiles(),
     builds: await listBuilds()
   };
+}
+
+function vnextResource(kind) {
+  const files = { typography: "typography.json", colors: "colors.json", designSystems: "design-systems.json", templates: "templates.json" };
+  if (!files[kind]) throw new BuilderError("invalid_vnext_resource", `Unsupported vNext resource type: ${kind}`);
+  return new VNextResourceRegistry(vnextDir, files[kind]);
 }
 
 async function serveFile(res, target, contentType) {
@@ -250,12 +269,13 @@ async function performBuild(profileFile, onProgress) {
   }
   const profilePath = path.join(profilesDir, safeProfile);
   const profile = await loadProfile(profilePath, { libraryDir: libraryRoot });
+  assertKnownGoodProfile(profile);
   await mkdir(buildsDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
   const outputName = `${safeName(profile.name, "starter")}-${timestamp}.zip`;
   const outputZip = path.join(buildsDir, outputName);
   const result = await buildStarter({ profile, outputZip, bootstrapFile, builderVersion: VERSION, onProgress });
-  await writeFile(`${outputZip}.json`, JSON.stringify({
+  await writeJson(`${outputZip}.json`, {
     schemaVersion: 1,
     file: outputName,
     profile: profile.name,
@@ -264,7 +284,7 @@ async function performBuild(profileFile, onProgress) {
     sha256: result.sha256,
     configurationEnabled: result.manifest.configurationEnabled === true,
     createdAt: new Date().toISOString()
-  }, null, 2) + "\n", "utf8");
+  });
   return {
     file: outputName,
     sha256: result.sha256,
@@ -325,6 +345,26 @@ async function api(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/state") {
     json(res, 200, await state());
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/vnext") {
+    json(res, 200, {
+      typography: await vnextResource("typography").list(),
+      colors: await vnextResource("colors").list(),
+      designSystems: await vnextResource("designSystems").list(),
+      templates: await vnextResource("templates").list()
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/api/vnext/")) {
+    const kind = url.pathname.slice("/api/vnext/".length);
+    const body = await readJsonBody(req);
+    if (kind === "typography") assertValidReport(validateTypographyProfile(body));
+    if (kind === "colors") assertValidReport(validateColorProfile(body));
+    if (!body || typeof body.id !== "string" || !body.id.trim()) throw new BuilderError("invalid_vnext_resource", "A vNext resource requires an id.");
+    json(res, 200, await vnextResource(kind).save(body));
     return true;
   }
 
@@ -417,7 +457,7 @@ async function api(req, res, url) {
     await mkdir(profilesDir, { recursive: true });
     const filename = `${safeName(name, "profile")}.json`;
     const target = path.join(profilesDir, filename);
-    await writeFile(target, JSON.stringify(profile, null, 2) + "\n", "utf8");
+    await writeJson(target, profile);
     const sourceFile = path.basename(String(body.sourceFile || ""));
     if (sourceFile && sourceFile.endsWith(".json") && sourceFile !== filename) {
       await rm(path.join(profilesDir, sourceFile), { force: true });

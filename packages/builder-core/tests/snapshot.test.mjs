@@ -1,16 +1,12 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
-import { ConfigSnapshotRegistry, PackageRegistry, createProfileFromSnapshot, loadProfile } from "../dist/index.js";
-
-const execFileAsync = promisify(execFile);
+import { ConfigSnapshotRegistry, PackageRegistry, createProfileFromSnapshot, createZip, loadProfile } from "../dist/index.js";
 
 async function zipDir(source, destination) {
-  await execFileAsync("zip", ["-qr", destination, "."], { cwd: source });
+  await createZip(source, destination);
 }
 
 test("imports a configuration snapshot, ignores exporter infrastructure, and reports exact package requirements", async () => {
