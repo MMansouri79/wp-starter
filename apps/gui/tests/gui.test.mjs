@@ -46,6 +46,11 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(html, /Typography Profiles/);
     assert.match(html, /Color Profiles/);
     assert.match(html, /Design Systems/);
+    assert.match(html, /id="type-rows"/);
+    assert.match(html, /id="type-devices"/);
+    assert.match(html, /Clear current breakpoint/);
+    assert.match(html, /\+ Custom color/);
+    assert.match(html, /id="build-design-system"/);
     assert.match(html, /Elementor Templates/);
     assert.match(html, /id="elementor-templates-body"/);
     assert.match(html, /id="build-elementor-templates"/);
@@ -62,8 +67,13 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(appJs, /Exported settings will be preserved/);
     assert.match(appJs, /populateProfileEditor/);
     assert.match(appJs, /Unknown — legacy export/);
-    assert.match(appJs, /Required dependency · locked/);
-    assert.match(appJs, /elementorTemplates/);
+    assert.match(appJs, /Included automatically · required dependency/);
+    assert.match(appJs, /This is a template, not a plugin or setting/);
+    assert.match(appJs, /Cannot save profile: Elementor template/);
+    assert.doesNotMatch(appJs, /locked\?"disabled"/);
+    assert.match(appJs, /elementorTemplateIds/);
+    assert.match(appJs, /sessionStorage/);
+    assert.match(appJs, /saveResource/);
     assert.match(appJs, /profile-select"\)\.onchange/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
@@ -88,6 +98,38 @@ test("GUI server supports a dynamic port and clean shutdown", async () => {
     if (previous === undefined) delete process.env.WP_STARTER_HOME;
     else process.env.WP_STARTER_HOME = previous;
     await rm(library, { recursive: true, force: true });
+  }
+});
+
+test("GUI validates and composes design-system resources", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wp-starter-gui-design-"));
+  const previous = process.env.WP_STARTER_HOME;
+  process.env.WP_STARTER_HOME = root;
+  await mkdir(path.join(root, "fonts", "inter"), { recursive: true });
+  await writeFile(path.join(root, "fonts", "inter", "regular.woff2"), "font");
+  const { createHash } = await import("node:crypto");
+  const sha256 = createHash("sha256").update("font").digest("hex");
+  await writeFile(path.join(root, "fonts.json"), JSON.stringify({ schemaVersion: 1, systems: [{ id: "inter", name: "Inter", sourceFilename: "inter.zip", addedAt: new Date(0).toISOString(), skipped: [], faces: [{ family: "Inter", weight: 400, style: "normal", format: "woff2", filename: "regular.woff2", file: "fonts/inter/regular.woff2", sha256 }] }] }));
+  const { createGuiServer } = await import(`../index.mjs?design-test=${Date.now()}`);
+  const server = createGuiServer();
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const authFetch = await localSession(base);
+    const post = (kind, body) => authFetch(`${base}/api/vnext/${kind}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal((await post("typography", { schemaVersion: 1, id: "base-type", name: "Base Type", roles: { body: { fontRole: "primary", weight: 400, size: { desktop: "16px" } } } })).status, 200);
+    assert.equal((await post("colors", { schemaVersion: 1, id: "base-colors", name: "Base Colors", elementor: { primary: "#112233", secondary: "#445566", text: "#222222", accent: "#abcdef" } })).status, 200);
+    assert.equal((await post("designSystems", { schemaVersion: 1, id: "base", name: "Base", typographyProfileId: "base-type", colorProfileId: "base-colors", fontBindings: { primary: "inter" } })).status, 200);
+    const state = await (await authFetch(`${base}/api/state`)).json();
+    assert.deepEqual(state.vnext.typography[0].roles.body.size.desktop, { value: 16, unit: "px" });
+    assert.equal(state.vnext.designSystems[0].id, "base");
+    const blocked = await authFetch(`${base}/api/vnext/typography/base-type`, { method: "DELETE" });
+    assert.equal(blocked.status, 400);
+    assert.equal((await blocked.json()).error, "vnext_resource_in_use");
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -164,6 +206,10 @@ test("GUI profile API can pin package versions and localized WordPress variants"
     const renamedState = await (await authFetch(`${baseUrl}/api/state`)).json();
     assert.equal(renamedState.profiles.length, 1);
     assert.equal(renamedState.profiles[0].file, "renamed-profile.json");
+    const deleteConfigRes = await authFetch(`${baseUrl}/api/configs/snapshot-20260824050124`, { method: "DELETE" });
+    assert.equal(deleteConfigRes.status, 200);
+    const afterDeleteState = await (await authFetch(`${baseUrl}/api/state`)).json();
+    assert.equal(afterDeleteState.configs.length, 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME; else process.env.WP_STARTER_HOME = previous;

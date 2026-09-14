@@ -318,6 +318,17 @@ export class FontSystemRegistry {
   }
 
   async remove(id: string): Promise<FontSystemRecord> {
+    const designSystemsFile = path.join(this.root, "vnext", "design-systems.json");
+    if (await exists(designSystemsFile)) {
+      try {
+        const systems = JSON.parse(await readFile(designSystemsFile, "utf8"));
+        const references = Array.isArray(systems) ? systems.filter((system) => system && Object.values(system.fontBindings || {}).includes(id)) : [];
+        if (references.length) throw new BuilderError("font_system_in_use", `Font profile ${id} is referenced by design system(s): ${references.map((system) => system.id).join(", ")}.`);
+      } catch (error) {
+        if (error instanceof BuilderError) throw error;
+        throw new BuilderError("invalid_vnext_registry", `Could not inspect design-system references before deleting font profile ${id}.`);
+      }
+    }
     const registry = await this.load();
     const index = registry.systems.findIndex((entry) => entry.id === id);
     if (index < 0) throw new BuilderError("font_system_not_found", `Font profile ${id} is not present.`);

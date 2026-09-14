@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.22
+ * Version: 0.1.0-alpha.26
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -15,8 +15,9 @@ final class MMS_WP_Starter_Bootstrap {
     const ERROR_OPTION    = 'mms_wp_starter_bootstrap_error';
     const REPORT_OPTION   = 'mms_wp_starter_bootstrap_report';
     const REVISION_OPTION = 'mms_wp_starter_bootstrap_revision';
-    const CONFIG_REVISION = 6;
+    const CONFIG_REVISION = 9;
     const VNEXT_MANIFEST_FILENAME = 'starter-design-system.json';
+    const ELEMENTOR_TEMPLATES_FILENAME = 'starter-elementor-templates.json';
 
     public static function init() {
         add_action( 'admin_init', array( __CLASS__, 'maybe_run' ), 1 );
@@ -92,6 +93,15 @@ final class MMS_WP_Starter_Bootstrap {
             }
         }
 
+        $template_payload = array();
+        if ( ! empty( $build['elementorTemplatePayload'] ) ) {
+            $template_relative_path = ! empty( $build['elementorTemplatePayload']['path'] ) ? (string) $build['elementorTemplatePayload']['path'] : self::ELEMENTOR_TEMPLATES_FILENAME;
+            $template_path = $root . '/' . ltrim( $template_relative_path, '/\\' );
+            $template_payload = self::read_json( $template_path );
+            if ( is_wp_error( $template_payload ) ) { self::fail( $template_payload->get_error_message() ); return; }
+            if ( ! empty( $build['elementorTemplatePayload']['sha256'] ) && hash_file( 'sha256', $template_path ) !== (string) $build['elementorTemplatePayload']['sha256'] ) { self::fail( 'The Elementor template payload checksum does not match the build manifest.' ); return; }
+        }
+
         $state = self::get_state();
         $phase = isset( $state['phase'] ) ? (string) $state['phase'] : 'theme';
 
@@ -154,13 +164,29 @@ final class MMS_WP_Starter_Bootstrap {
         if ( 'fonts' === $phase ) {
             $result = self::install_font_system( isset( $build['fontSystem'] ) && is_array( $build['fontSystem'] ) ? $build['fontSystem'] : array() );
             if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
-            self::save_state( array( 'phase' => empty( $vnext ) ? 'languages' : 'design_system', 'language_index' => 0 ) );
+            foreach ( (array) ( $build['designSystem']['fontProfiles'] ?? array() ) as $font_profile ) {
+                $result = self::install_font_system( is_array( $font_profile ) ? $font_profile : array() );
+                if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
+            }
+            self::save_state( array( 'phase' => empty( $vnext ) ? ( empty( $template_payload ) ? 'languages' : 'elementor_templates' ) : 'design_system', 'language_index' => 0 ) );
             self::continue_setup();
         }
 
         if ( 'design_system' === $phase ) {
-            $result = self::apply_vnext_design_system( $vnext );
+            $result = self::apply_vnext_design_system( $vnext, $template_payload );
             if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
+            self::save_state( array( 'phase' => empty( $template_payload ) ? 'languages' : 'elementor_templates', 'language_index' => 0 ) );
+            self::continue_setup();
+        }
+
+        if ( 'elementor_templates' === $phase ) {
+            $kit_id = self::ensure_elementor_kit( array() );
+            if ( is_wp_error( $kit_id ) ) { self::fail( $kit_id->get_error_message() ); return; }
+            $result = self::apply_elementor_templates_adapter( (array) ( $template_payload['templates'] ?? array() ), $kit_id, (array) ( $template_payload['mappings'] ?? array() ), $vnext );
+            if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
+            $report = (array) get_option( self::REPORT_OPTION, array() );
+            $report['elementor_templates'] = absint( $result ); $report['elementor_template_payload'] = true;
+            update_option( self::REPORT_OPTION, $report, false );
             self::save_state( array( 'phase' => 'languages', 'language_index' => 0 ) );
             self::continue_setup();
         }
@@ -183,7 +209,7 @@ final class MMS_WP_Starter_Bootstrap {
                 $result = self::apply_configuration( $config, $build );
                 if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
             } else {
-                update_option( self::REPORT_OPTION, array( 'verification' => array( 'checked' => 0, 'mismatches' => 0 ), 'woocommerce_duplicates_removed' => 0, 'configuration_skipped' => true ), false );
+                update_option( self::REPORT_OPTION, array_merge( (array) get_option( self::REPORT_OPTION, array() ), array( 'verification' => array( 'checked' => 0, 'mismatches' => 0 ), 'woocommerce_duplicates_removed' => 0, 'configuration_skipped' => true ) ), false );
             }
 
             self::save_state( array( 'phase' => 'complete' ) );
@@ -1041,17 +1067,16 @@ final class MMS_WP_Starter_Bootstrap {
     }
 
     private static function apply_configuration( array $config, array $build ) {
-        $report = array(
+        $report = array_merge( (array) get_option( self::REPORT_OPTION, array() ), array(
             'wordpress_options'  => 0,
             'elementor_options'  => 0,
             'woocommerce_options'=> 0,
             'persian_options'    => 0,
             'code_snippets_saved' => 0,
-            'elementor_templates' => 0,
             'woocommerce_duplicates_removed' => 0,
             'elementor_kit_id'   => 0,
             'verified_at'        => gmdate( 'c' ),
-        );
+        ) );
 
         if ( isset( $build['locale'] ) ) {
             $locale = sanitize_text_field( $build['locale'] );
@@ -1117,6 +1142,9 @@ final class MMS_WP_Starter_Bootstrap {
         }
 
         $kit_settings = (array) ( $config['adapters']['elementor']['kit_settings'] ?? array() );
+        if ( ! empty( $build['designSystem'] ) ) {
+            unset( $kit_settings['system_colors'], $kit_settings['system_typography'] );
+        }
         if ( is_plugin_active( 'elementor/elementor.php' ) ) {
             $kit_result = self::ensure_elementor_kit( $kit_settings );
             if ( is_wp_error( $kit_result ) ) {
@@ -1127,7 +1155,7 @@ final class MMS_WP_Starter_Bootstrap {
             if ( is_wp_error( $template_result ) ) {
                 return $template_result;
             }
-            $report['elementor_templates'] = absint( $template_result );
+            if ( ! empty( $elementor_templates ) || empty( $build['elementorTemplatePayload'] ) ) $report['elementor_templates'] = absint( $template_result );
         }
 
         flush_rewrite_rules( false );
@@ -1143,7 +1171,7 @@ final class MMS_WP_Starter_Bootstrap {
         return true;
     }
 
-    private static function apply_elementor_templates_adapter( array $templates, $kit_id ) {
+    private static function apply_elementor_templates_adapter( array $templates, $kit_id, array $profile_mappings = array(), array $design_payload = array() ) {
         if ( empty( $templates ) ) {
             return 0;
         }
@@ -1154,12 +1182,36 @@ final class MMS_WP_Starter_Bootstrap {
         $settings = get_post_meta( absint( $kit_id ), '_elementor_page_settings', true );
         $settings = is_array( $settings ) ? $settings : array();
         $logical  = array();
+        $typography_alias_ids = array();
         foreach ( array( 'system_colors' => 'color', 'system_typography' => 'typography' ) as $setting_key => $prefix ) {
             foreach ( (array) ( $settings[ $setting_key ] ?? array() ) as $row ) {
                 if ( is_array( $row ) && ! empty( $row['_id'] ) ) {
                     $logical[ 'elementor:' . $prefix . ':' . (string) $row['_id'] ] = (string) $row['_id'];
+                    if ( ! empty( $row['title'] ) ) {
+                        $logical[ 'elementor:' . $prefix . ':' . sanitize_key( (string) $row['title'] ) ] = (string) $row['_id'];
+                        $logical[ $prefix . ':' . sanitize_key( (string) $row['title'] ) ] = (string) $row['_id'];
+                        if ( 'typography' === $prefix && in_array( sanitize_key( (string) $row['title'] ), array( 'primary', 'secondary', 'text', 'accent' ), true ) ) $typography_alias_ids[ sanitize_key( (string) $row['title'] ) ] = (string) $row['_id'];
+                    }
                 }
             }
+        }
+        $design = (array) ( $design_payload['designSystem'] ?? array() );
+        foreach ( array_keys( (array) ( $design['colors'] ?? array() ) ) as $role ) {
+            $logical[ 'color:' . (string) $role ] = 'wpstarter_' . substr( hash( 'sha256', 'color:' . (string) $role ), 0, 12 );
+            $logical[ 'elementor:color:' . (string) $role ] = $logical[ 'color:' . (string) $role ];
+            $logical[ 'elementor:color:' . $logical[ 'color:' . (string) $role ] ] = $logical[ 'color:' . (string) $role ];
+        }
+        foreach ( array_keys( (array) ( $design['typography'] ?? array() ) ) as $role ) {
+            $alias = self::elementor_design_typography_alias_for_role( (string) $role );
+            if ( isset( $typography_alias_ids[ $alias ] ) ) {
+                $logical[ 'typography:' . (string) $role ] = $typography_alias_ids[ $alias ];
+                $logical[ 'elementor:typography:' . (string) $role ] = $typography_alias_ids[ $alias ];
+                $logical[ 'elementor:typography:' . $typography_alias_ids[ $alias ] ] = $typography_alias_ids[ $alias ];
+            }
+        }
+        foreach ( $profile_mappings as $source_reference => $target_reference ) {
+            if ( isset( $logical[ $target_reference ] ) ) $logical[ (string) $source_reference ] = $logical[ $target_reference ];
+            elseif ( preg_match( '/^elementor:(color|typography):([A-Za-z0-9_-]+)$/', (string) $target_reference, $matches ) ) $logical[ (string) $source_reference ] = (string) $matches[2];
         }
 
         $template_ids = array();
@@ -1216,18 +1268,20 @@ final class MMS_WP_Starter_Bootstrap {
         return $saved;
     }
 
-    private static function apply_vnext_design_system( array $payload ) {
+    private static function apply_vnext_design_system( array $payload, array $template_payload = array() ) {
         require_once ABSPATH . 'wp-admin/includes/plugin.php';
         if ( empty( $payload['designSystem'] ) || ! is_array( $payload['designSystem'] ) ) {
             return new WP_Error( 'starter_vnext_invalid_design_system', 'The vNext design-system manifest has no valid designSystem object.' );
         }
-        if ( ! class_exists( '\\Elementor\\Plugin' ) || ! is_plugin_active( 'elementor/elementor.php' ) ) {
-            return new WP_Error( 'starter_vnext_elementor_required', 'A vNext design system requires Elementor to be active.' );
+        if ( ! class_exists( '\\Elementor\\Plugin' ) || ! is_plugin_active( 'elementor/elementor.php' ) || ! is_plugin_active( 'elementor-pro/elementor-pro.php' ) ) {
+            return new WP_Error( 'starter_vnext_elementor_required', 'A vNext design system requires Elementor and Elementor Pro to be active.' );
         }
 
         $system      = (array) $payload['designSystem'];
         $colors      = (array) ( $system['colors'] ?? array() );
+        $color_names = (array) ( $system['colorNames'] ?? array() );
         $typography  = (array) ( $system['typography'] ?? array() );
+        $typography_names = (array) ( $system['typographyNames'] ?? array() );
         $font_families = (array) ( $system['fontFamilies'] ?? array() );
         $kit_id      = self::ensure_elementor_kit( array() );
         if ( is_wp_error( $kit_id ) ) {
@@ -1238,38 +1292,107 @@ final class MMS_WP_Starter_Bootstrap {
         $settings = is_array( $settings ) ? $settings : array();
         $logical  = array();
         $system_colors = array();
+        $custom_colors = array();
+        $system_color_roles = array( 'primary', 'secondary', 'text', 'accent' );
+        $existing_custom_colors = (array) ( $settings['custom_colors'] ?? array() );
+        foreach ( $existing_custom_colors as $existing_color ) {
+            // Keep colors owned by the site, but replace colors previously
+            // generated by WP Starter when this design system is updated.
+            if ( is_array( $existing_color ) && ! empty( $existing_color['_id'] ) && 0 !== strpos( (string) $existing_color['_id'], 'wpstarter_' ) ) {
+                $custom_colors[] = $existing_color;
+            }
+        }
         foreach ( $colors as $role => $value ) {
             $id = 'wpstarter_' . substr( hash( 'sha256', 'color:' . (string) $role ), 0, 12 );
-            $system_colors[] = array( '_id' => $id, 'title' => sanitize_text_field( (string) $role ), 'color' => sanitize_hex_color( (string) $value ) );
+            $color = sanitize_hex_color( (string) $value );
+            if ( ! $color ) return new WP_Error( 'starter_vnext_invalid_color', 'Color token ' . sanitize_key( (string) $role ) . ' is not a valid hexadecimal color.' );
+            $row = array( '_id' => $id, 'title' => sanitize_text_field( (string) ( $color_names[ $role ] ?? $role ) ), 'color' => $color );
+            if ( in_array( (string) $role, $system_color_roles, true ) ) $system_colors[] = $row;
+            else $custom_colors[] = $row;
             $logical[ 'color:' . (string) $role ] = $id;
+            $logical[ 'elementor:color:' . (string) $role ] = $id;
+            $logical[ 'elementor:color:' . $id ] = $id;
         }
 
+        // Elementor's Global Fonts collection is separate from Site Settings
+        // > Theme Style > Typography. Keep four compact aliases for portable
+        // template references, while putting the actual role values into the
+        // matching Theme Style controls below.
         $system_typography = array();
-        foreach ( $typography as $role => $token ) {
-            if ( ! is_array( $token ) ) {
-                return new WP_Error( 'starter_vnext_invalid_typography', 'Typography token ' . sanitize_key( (string) $role ) . ' is invalid.' );
-            }
-            $id = 'wpstarter_' . substr( hash( 'sha256', 'typography:' . (string) $role ), 0, 12 );
-            $font_role = isset( $token['fontRole'] ) ? (string) $token['fontRole'] : '';
+        $fallback_typography = reset( $typography );
+        $global_typography_aliases = array(
+            'primary'   => isset( $typography['h1'] ) ? $typography['h1'] : ( $typography['body'] ?? $fallback_typography ),
+            'secondary' => isset( $typography['h2'] ) ? $typography['h2'] : ( $typography['body'] ?? $fallback_typography ),
+            'text'      => isset( $typography['body'] ) ? $typography['body'] : $fallback_typography,
+            'accent'    => isset( $typography['links'] ) ? $typography['links'] : ( $typography['body'] ?? $fallback_typography ),
+        );
+        $required_aliases = self::elementor_required_typography_aliases( $payload, $template_payload );
+        $global_typography_ids = array();
+        foreach ( $global_typography_aliases as $alias => $alias_token ) {
+            if ( ! in_array( $alias, $required_aliases, true ) || ! is_array( $alias_token ) ) continue;
+            $id = 'wpstarter_' . substr( hash( 'sha256', 'typography:global:' . $alias ), 0, 12 );
+            $font_role = isset( $alias_token['fontRole'] ) ? (string) $alias_token['fontRole'] : '';
             $family = isset( $font_families[ $font_role ] ) ? (string) $font_families[ $font_role ] : (string) ( $system['fontBindings'][ $font_role ] ?? '' );
             $row = array(
                 '_id'          => $id,
-                'title'        => sanitize_text_field( (string) $role ),
+                'title'        => ucfirst( $alias ),
                 'typography'   => 'yes',
                 'font_family'  => sanitize_text_field( $family ),
-                'font_weight'  => absint( $token['weight'] ?? 400 ),
-                'font_style'   => sanitize_key( (string) ( $token['style'] ?? 'normal' ) ),
+                'font_weight'  => (string) absint( $alias_token['weight'] ?? 400 ),
+                'font_style'   => sanitize_key( (string) ( $alias_token['style'] ?? 'normal' ) ),
             );
-            foreach ( array( 'size', 'lineHeight', 'letterSpacing', 'wordSpacing', 'textTransform', 'textDecoration' ) as $key ) {
-                if ( array_key_exists( $key, $token ) ) {
-                    $row[ $key ] = $token[ $key ];
-                }
-            }
+            self::apply_elementor_responsive_dimension( $row, $alias_token, 'size', 'font_size' );
+            self::apply_elementor_responsive_dimension( $row, $alias_token, 'lineHeight', 'line_height' );
+            self::apply_elementor_responsive_dimension( $row, $alias_token, 'letterSpacing', 'letter_spacing' );
+            self::apply_elementor_responsive_dimension( $row, $alias_token, 'wordSpacing', 'word_spacing' );
+            if ( isset( $alias_token['textTransform'] ) ) $row['text_transform'] = sanitize_key( (string) $alias_token['textTransform'] );
+            if ( isset( $alias_token['textDecoration'] ) ) $row['text_decoration'] = sanitize_key( (string) $alias_token['textDecoration'] );
             $system_typography[] = $row;
-            $logical[ 'typography:' . (string) $role ] = $id;
+            $global_typography_ids[ $alias ] = $id;
+        }
+
+        $theme_typography_prefixes = array( 'body_typography', 'link_normal_typography', 'link_hover_typography', 'h1_typography', 'h2_typography', 'h3_typography', 'h4_typography', 'h5_typography', 'h6_typography', 'button_typography', 'form_label_typography', 'form_field_typography' );
+        foreach ( $theme_typography_prefixes as $prefix ) {
+            foreach ( array( 'typography', 'font_family', 'font_weight', 'font_style', 'font_size', 'font_size_tablet', 'font_size_mobile', 'line_height', 'line_height_tablet', 'line_height_mobile', 'letter_spacing', 'letter_spacing_tablet', 'letter_spacing_mobile', 'word_spacing', 'word_spacing_tablet', 'word_spacing_mobile', 'text_transform', 'text_decoration' ) as $suffix ) unset( $settings[ $prefix . '_' . $suffix ] );
+        }
+        $theme_role_prefixes = array(
+            'body'       => array( 'body_typography' ),
+            'links'      => array( 'link_normal_typography', 'link_hover_typography' ),
+            'h1'         => array( 'h1_typography' ),
+            'h2'         => array( 'h2_typography' ),
+            'h3'         => array( 'h3_typography' ),
+            'h4'         => array( 'h4_typography' ),
+            'h5'         => array( 'h5_typography' ),
+            'h6'         => array( 'h6_typography' ),
+            'buttons'    => array( 'button_typography' ),
+            'formFields' => array( 'form_label_typography', 'form_field_typography' ),
+        );
+        foreach ( $theme_role_prefixes as $role => $prefixes ) {
+            if ( ! isset( $typography[ $role ] ) || ! is_array( $typography[ $role ] ) ) continue;
+            $token = $typography[ $role ];
+            $font_role = isset( $token['fontRole'] ) ? (string) $token['fontRole'] : '';
+            $family = isset( $font_families[ $font_role ] ) ? (string) $font_families[ $font_role ] : (string) ( $system['fontBindings'][ $font_role ] ?? '' );
+            foreach ( $prefixes as $prefix ) self::apply_elementor_theme_typography( $settings, $prefix, $token, $family );
+            $alias = in_array( $role, array( 'h1', 'h2', 'h3', 'h4', 'h5', 'h6' ), true ) ? 'primary' : ( 'links' === $role ? 'accent' : 'text' );
+            $target_id = $global_typography_ids[ $alias ] ?? '';
+            if ( '' !== $target_id ) {
+                $logical[ 'typography:' . (string) $role ] = $target_id;
+                $logical[ 'elementor:typography:' . (string) $role ] = $target_id;
+                $logical[ 'elementor:typography:' . $target_id ] = $target_id;
+            }
+        }
+
+        foreach ( array_keys( $typography ) as $role ) {
+            if ( isset( $logical[ 'typography:' . (string) $role ] ) ) continue;
+            $target_id = $global_typography_ids['text'] ?? reset( $global_typography_ids );
+            if ( '' !== (string) $target_id ) {
+                $logical[ 'typography:' . (string) $role ] = (string) $target_id;
+                $logical[ 'elementor:typography:' . (string) $role ] = (string) $target_id;
+            }
         }
 
         $settings['system_colors']     = $system_colors;
+        $settings['custom_colors']     = $custom_colors;
         $settings['system_typography'] = $system_typography;
         update_post_meta( $kit_id, '_elementor_page_settings', $settings );
 
@@ -1298,8 +1421,86 @@ final class MMS_WP_Starter_Bootstrap {
         if ( isset( \Elementor\Plugin::$instance->files_manager ) && method_exists( \Elementor\Plugin::$instance->files_manager, 'clear_cache' ) ) {
             \Elementor\Plugin::$instance->files_manager->clear_cache();
         }
-        update_option( self::REPORT_OPTION, array( 'vnext_design_system' => sanitize_key( (string) ( $system['id'] ?? 'design-system' ) ), 'vnext_colors' => count( $system_colors ), 'vnext_typography' => count( $system_typography ), 'vnext_templates' => $template_count ), false );
+        update_option( self::REPORT_OPTION, array( 'vnext_design_system' => sanitize_key( (string) ( $system['id'] ?? 'design-system' ) ), 'vnext_colors' => count( $system_colors ) + count( $custom_colors ), 'vnext_system_colors' => count( $system_colors ), 'vnext_custom_colors' => count( $custom_colors ), 'vnext_typography' => count( $typography ), 'vnext_global_typography_aliases' => count( $system_typography ), 'vnext_templates' => $template_count ), false );
         return true;
+    }
+
+    private static function elementor_design_typography_alias_for_role( $role ) {
+        if ( in_array( (string) $role, array( 'h1', 'h2', 'h3', 'h4', 'h5', 'h6' ), true ) ) return 'primary';
+        if ( 'links' === (string) $role ) return 'accent';
+        return 'text';
+    }
+
+    private static function elementor_required_typography_aliases( array $payload, array $template_payload ) {
+        $required = array();
+        $design = (array) ( $payload['designSystem'] ?? array() );
+        $typography = (array) ( $design['typography'] ?? array() );
+        foreach ( (array) ( $template_payload['mappings'] ?? array() ) as $target ) {
+            if ( ! is_string( $target ) || 0 !== strpos( $target, 'typography:' ) ) continue;
+            $role = substr( $target, 11 );
+            if ( isset( $typography[ $role ] ) ) $required[ self::elementor_design_typography_alias_for_role( $role ) ] = true;
+        }
+        foreach ( (array) ( $template_payload['templates'] ?? array() ) as $template ) {
+            foreach ( (array) ( $template['globalReferences'] ?? array() ) as $reference ) {
+                $target = (string) ( $template_payload['mappings'][ $reference['reference'] ] ?? '' );
+                if ( 0 === strpos( $target, 'typography:' ) ) {
+                    $role = substr( $target, 11 );
+                    if ( isset( $typography[ $role ] ) ) $required[ self::elementor_design_typography_alias_for_role( $role ) ] = true;
+                }
+            }
+        }
+        foreach ( (array) ( $payload['templates'] ?? array() ) as $template ) {
+            foreach ( (array) ( $template['globalReferences'] ?? array() ) as $reference ) {
+                $role = (string) ( $reference['sourceId'] ?? '' );
+                if ( isset( $typography[ $role ] ) ) $required[ self::elementor_design_typography_alias_for_role( $role ) ] = true;
+            }
+        }
+        return array_keys( $required );
+    }
+
+    private static function apply_elementor_theme_typography( array &$settings, $prefix, array $token, $family ) {
+        // Elementor Theme Style stores these controls as body_typography_font_family,
+        // link_normal_typography_font_family, h1_typography_font_family,
+        // button_typography_font_family, and form_field_typography_font_family.
+        $settings[ $prefix . '_typography' ]  = 'yes';
+        $settings[ $prefix . '_font_family' ] = sanitize_text_field( (string) $family );
+        $settings[ $prefix . '_font_weight' ] = (string) absint( $token['weight'] ?? 400 );
+        $settings[ $prefix . '_font_style' ]  = sanitize_key( (string) ( $token['style'] ?? 'normal' ) );
+        self::apply_elementor_responsive_dimension( $settings, $token, 'size', $prefix . '_font_size' );
+        self::apply_elementor_responsive_dimension( $settings, $token, 'lineHeight', $prefix . '_line_height' );
+        self::apply_elementor_responsive_dimension( $settings, $token, 'letterSpacing', $prefix . '_letter_spacing' );
+        self::apply_elementor_responsive_dimension( $settings, $token, 'wordSpacing', $prefix . '_word_spacing' );
+        if ( isset( $token['textTransform'] ) ) $settings[ $prefix . '_text_transform' ] = sanitize_key( (string) $token['textTransform'] );
+        if ( isset( $token['textDecoration'] ) ) $settings[ $prefix . '_text_decoration' ] = sanitize_key( (string) $token['textDecoration'] );
+    }
+
+    private static function elementor_theme_typography_matches( array $settings, $prefix, array $token, $family ) {
+        if ( 'yes' !== (string) ( $settings[ $prefix . '_typography' ] ?? '' ) ) return false;
+        if ( (string) ( $settings[ $prefix . '_font_family' ] ?? '' ) !== (string) $family ) return false;
+        if ( absint( $settings[ $prefix . '_font_weight' ] ?? 0 ) !== absint( $token['weight'] ?? 0 ) ) return false;
+        if ( sanitize_key( (string) ( $settings[ $prefix . '_font_style' ] ?? '' ) ) !== sanitize_key( (string) ( $token['style'] ?? 'normal' ) ) ) return false;
+        foreach ( array( 'size' => 'font_size', 'lineHeight' => 'line_height', 'letterSpacing' => 'letter_spacing', 'wordSpacing' => 'word_spacing' ) as $source_key => $target_key ) {
+            foreach ( array( 'desktop' => '', 'tablet' => '_tablet', 'mobile' => '_mobile' ) as $breakpoint => $suffix ) {
+                $dimension = $token[ $source_key ][ $breakpoint ] ?? null;
+                if ( ! is_array( $dimension ) || ! isset( $dimension['value'], $dimension['unit'] ) ) continue;
+                $actual = $settings[ $prefix . '_' . $target_key . $suffix ] ?? null;
+                if ( ! is_array( $actual ) || (string) ( $actual['unit'] ?? '' ) !== (string) $dimension['unit'] || ! is_numeric( $actual['size'] ?? null ) || abs( (float) $actual['size'] - (float) $dimension['value'] ) > 0.0001 ) return false;
+            }
+        }
+        if ( isset( $token['textTransform'] ) && sanitize_key( (string) ( $settings[ $prefix . '_text_transform' ] ?? '' ) ) !== sanitize_key( (string) $token['textTransform'] ) ) return false;
+        if ( isset( $token['textDecoration'] ) && sanitize_key( (string) ( $settings[ $prefix . '_text_decoration' ] ?? '' ) ) !== sanitize_key( (string) $token['textDecoration'] ) ) return false;
+        return true;
+    }
+
+    private static function apply_elementor_responsive_dimension( array &$row, array $token, $source_key, $target_key ) {
+        if ( empty( $token[ $source_key ] ) || ! is_array( $token[ $source_key ] ) ) return;
+        foreach ( array( 'desktop' => '', 'tablet' => '_tablet', 'mobile' => '_mobile' ) as $breakpoint => $suffix ) {
+            $dimension = $token[ $source_key ][ $breakpoint ] ?? null;
+            if ( ! is_array( $dimension ) || ! isset( $dimension['value'], $dimension['unit'] ) || ! is_numeric( $dimension['value'] ) ) continue;
+            $unit = (string) $dimension['unit'];
+            if ( ! in_array( $unit, array( 'px', 'rem', 'em', '%', 'vw', 'vh', 'lh', 'rlh', '' ), true ) ) continue;
+            $row[ $target_key . $suffix ] = array( 'unit' => $unit, 'size' => 0 + $dimension['value'], 'sizes' => array() );
+        }
     }
 
     private static function remap_vnext_value( $value, array $logical, array &$missing, $path ) {
@@ -1487,6 +1688,56 @@ final class MMS_WP_Starter_Bootstrap {
                 $found = $template_id ? get_posts( array( 'post_type' => 'elementor_library', 'post_status' => 'any', 'meta_key' => '_wp_starter_template_id', 'meta_value' => $template_id, 'posts_per_page' => 1, 'fields' => 'ids' ) ) : array();
                 if ( empty( $found ) ) {
                     $mismatches[] = 'elementor_template:' . $template_id;
+                }
+            }
+
+            if ( ! empty( $build['designSystem'] ) && $kit_id > 0 ) {
+                $root = self::package_root();
+                $payload = is_wp_error( $root ) ? $root : self::read_json( $root . '/' . self::VNEXT_MANIFEST_FILENAME );
+                if ( is_wp_error( $payload ) ) {
+                    $mismatches[] = 'starter_design_system_manifest';
+                } else {
+                    $design = (array) ( $payload['designSystem'] ?? array() );
+                    $settings = get_post_meta( $kit_id, '_elementor_page_settings', true );
+                    $settings = is_array( $settings ) ? $settings : array();
+                    $colors_by_id = array();
+                    foreach ( array( 'system_colors', 'custom_colors' ) as $color_collection ) {
+                        foreach ( (array) ( $settings[ $color_collection ] ?? array() ) as $row ) if ( is_array( $row ) && ! empty( $row['_id'] ) ) $colors_by_id[ $row['_id'] ] = $row;
+                    }
+                    foreach ( (array) ( $design['colors'] ?? array() ) as $role => $value ) {
+                        $checked++;
+                        $id = 'wpstarter_' . substr( hash( 'sha256', 'color:' . (string) $role ), 0, 12 );
+                        if ( empty( $colors_by_id[ $id ] ) || strtolower( (string) $colors_by_id[ $id ]['color'] ) !== strtolower( (string) $value ) ) $mismatches[] = 'elementor_color:' . sanitize_key( (string) $role );
+                    }
+                    $theme_role_prefixes = array(
+                        'body'       => array( 'body_typography' ),
+                        'links'      => array( 'link_normal_typography', 'link_hover_typography' ),
+                        'h1'         => array( 'h1_typography' ),
+                        'h2'         => array( 'h2_typography' ),
+                        'h3'         => array( 'h3_typography' ),
+                        'h4'         => array( 'h4_typography' ),
+                        'h5'         => array( 'h5_typography' ),
+                        'h6'         => array( 'h6_typography' ),
+                        'buttons'    => array( 'button_typography' ),
+                        'formFields' => array( 'form_label_typography', 'form_field_typography' ),
+                    );
+                    foreach ( (array) ( $design['typography'] ?? array() ) as $role => $token ) {
+                        if ( ! is_array( $token ) || empty( $theme_role_prefixes[ $role ] ) ) continue;
+                        $font_role = (string) ( $token['fontRole'] ?? '' );
+                        $family = (string) ( $design['fontFamilies'][ $font_role ] ?? '' );
+                        foreach ( $theme_role_prefixes[ $role ] as $prefix ) {
+                            $checked++;
+                            if ( ! self::elementor_theme_typography_matches( $settings, $prefix, $token, $family ) ) $mismatches[] = 'elementor_typography:' . sanitize_key( (string) $role ) . ':' . sanitize_key( $prefix );
+                        }
+                    }
+                }
+                foreach ( (array) ( $build['designSystem']['fontProfiles'] ?? array() ) as $font_profile ) {
+                    foreach ( array_unique( array_map( function ( $face ) { return is_array( $face ) ? (string) ( $face['family'] ?? '' ) : ''; }, (array) ( $font_profile['faces'] ?? array() ) ) ) as $family ) {
+                        if ( '' === $family ) continue;
+                        $checked++;
+                        $fonts = get_posts( array( 'post_type' => 'elementor_font', 'post_status' => 'any', 'posts_per_page' => 1, 'title' => $family, 'fields' => 'ids' ) );
+                        if ( empty( $fonts ) || empty( get_post_meta( absint( $fonts[0] ), 'elementor_font_files', true ) ) ) $mismatches[] = 'elementor_font:' . sanitize_key( $family );
+                    }
                 }
             }
         }

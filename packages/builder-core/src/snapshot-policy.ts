@@ -91,10 +91,19 @@ export function validatePortableSnapshot(raw: any): void {
   if (!Array.isArray(elementor.templates || [])) throw new BuilderError("invalid_config_export", "adapters.elementor.templates must be an array.");
   (elementor.templates || []).forEach((template: any, index: number) => {
     const row = object(template);
-    rejectUnknown(row, new Set(["id", "name", "type", "document"]), `adapters.elementor.templates[${index}]`);
+    rejectUnknown(row, new Set(["id", "sourceId", "name", "type", "document", "globalReferences"]), `adapters.elementor.templates[${index}]`);
     if (typeof row.id !== "string" || typeof row.name !== "string" || !Array.isArray(row.document)) {
       throw new BuilderError("invalid_config_export", `Elementor template ${index + 1} must contain id, name, and document.`);
     }
+    if (row.sourceId !== undefined && (typeof row.sourceId !== "string" || !/^\d+$/.test(row.sourceId) || Number(row.sourceId) <= 0)) {
+      throw new BuilderError("invalid_config_export", `Elementor template ${index + 1} sourceId must be a positive source post ID.`);
+    }
+    if (row.globalReferences !== undefined && !Array.isArray(row.globalReferences)) throw new BuilderError("invalid_config_export", `Elementor template ${index + 1} globalReferences must be an array.`);
+    (row.globalReferences || []).forEach((reference: any, referenceIndex: number) => {
+      const item = object(reference);
+      rejectUnknown(item, new Set(["reference", "kind", "sourceId", "name"]), `adapters.elementor.templates[${index}].globalReferences[${referenceIndex}]`);
+      if (typeof item.reference !== "string" || !["color", "typography"].includes(item.kind) || typeof item.sourceId !== "string" || typeof item.name !== "string") throw new BuilderError("invalid_config_export", `Elementor global reference ${referenceIndex + 1} is invalid.`);
+    });
   });
 
   const woo = object(adapters.woocommerce);

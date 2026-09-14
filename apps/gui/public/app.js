@@ -3,6 +3,12 @@ let state = null;
 let currentReport = null;
 let currentEditingProfileFile = "";
 let currentElementorSelection = null;
+let currentElementorRoots = null;
+let typographyDraft = null;
+let activeTypeDevice = "desktop";
+let colorDraft = null;
+let bindingDraft = {};
+let templateMappingDraft = {};
 const titles = {
   overview: ["Overview", "Your local WordPress starter workspace."],
   packages: ["Packages", "Manage versioned WordPress, theme, and plugin ZIPs."],
@@ -106,27 +112,76 @@ function renderFontSystemOptions(previous = "") {
   if (systems.some(system => system.id === previous)) $("#build-font-system").value = previous;
 }
 
-function renderVNext() {
-  const resources = state.vnext || { typography: [], colors: [], designSystems: [], templates: [] };
-  const renderCards = (items, empty) => items.length ? items.map(item => `<div class="card"><div><strong>${esc(item.name || item.id)}</strong><small><code>${esc(item.id)}</code></small></div><span class="badge">vNext</span></div>`).join("") : `<div class="empty">${empty}</div>`;
-  $("#typography-list").innerHTML = renderCards(resources.typography, "No typography profiles yet. vNext resource editing will be enabled after the model is validated.");
-  $("#colors-list").innerHTML = renderCards(resources.colors, "No color profiles yet. vNext resource editing will be enabled after the model is validated.");
-  $("#design-systems-list").innerHTML = renderCards(resources.designSystems, "No design systems yet.");
-  $("#templates-list").innerHTML = renderCards(resources.templates, "No portable templates yet.");
+function renderDesignSystemOptions(previous = "") {
+  const systems = state.vnext?.designSystems || [];
+  $("#build-design-system").innerHTML = [`<option value="">No design system</option>`, ...systems.map(system => `<option value="${escAttr(system.id)}">${esc(system.name)}</option>`)].join("");
+  if (systems.some(system => system.id === previous)) $("#build-design-system").value = previous;
+  syncFontSelectors();
+}
+function syncFontSelectors() {
+  const hasDesignSystem = Boolean($("#build-design-system").value);
+  $("#build-font-system").disabled = hasDesignSystem;
+  if (hasDesignSystem) $("#build-font-system").value = "";
+  $("#build-design-system").disabled = Boolean($("#build-font-system").value);
 }
 
-function templateKey(template) { return `${template.snapshotId}\u0000${template.templateId}`; }
-function templateSelectionFromDom() {
+function legacyRenderVNext() {
+  const resources = state.vnext || { typography: [], colors: [], designSystems: [], templates: [] };
+  const renderCards = (items, kind, empty) => items.length ? items.map(item => `<div class="card"><div><strong>${esc(item.name || item.id)}</strong><small><code>${esc(item.id)}</code></small></div><div class="action-list"><button class="tiny edit-resource" data-kind="${kind}" data-id="${escAttr(item.id)}">Edit</button><button class="tiny duplicate-resource" data-kind="${kind}" data-id="${escAttr(item.id)}">Duplicate</button><button class="tiny danger delete-resource" data-kind="${kind}" data-id="${escAttr(item.id)}">Delete</button></div></div>`).join("") : `<div class="empty">${empty}</div>`;
+  $("#typography-list").innerHTML = renderCards(resources.typography, "typography", "No typography profiles yet.");
+  $("#colors-list").innerHTML = renderCards(resources.colors, "colors", "No color profiles yet.");
+  $("#design-systems-list").innerHTML = renderCards(resources.designSystems, "designSystems", "No design systems yet.");
+  $("#ds-typography").innerHTML = resources.typography.map(item => `<option value="${escAttr(item.id)}">${esc(item.name)}</option>`).join("");
+  $("#ds-colors").innerHTML = resources.colors.map(item => `<option value="${escAttr(item.id)}">${esc(item.name)}</option>`).join("");
+  $("#ds-font-profile").innerHTML = (state.fonts || []).map(item => `<option value="${escAttr(item.id)}">${esc(item.name)}</option>`).join("");
+  renderTypographyDraft(); renderSemanticDraft(); renderBindingDraft();
+  document.querySelectorAll(".edit-resource").forEach(button => button.onclick = () => editResource(button.dataset.kind, button.dataset.id, false));
+  document.querySelectorAll(".duplicate-resource").forEach(button => button.onclick = () => editResource(button.dataset.kind, button.dataset.id, true));
+  document.querySelectorAll(".delete-resource").forEach(button => button.onclick = () => deleteResource(button.dataset.kind, button.dataset.id));
+}
+
+function responsiveInput(property, breakpoint) { return document.querySelector(`[data-type-property="${property}"][data-type-breakpoint="${breakpoint}"]`); }
+function responsiveValue(property) {
+  const result = {}; for (const bp of ["desktop", "tablet", "mobile"]) { const value = responsiveInput(property, bp).value.trim(); if (value) result[bp] = value; }
+  return result.desktop ? result : undefined;
+}
+function legacyRenderTypographyDraft() {
+  const rows = [...Object.entries(typographyDraft.roles), ...Object.entries(typographyDraft.custom).map(([key, value]) => [`custom:${key}`, value])];
+  $("#type-token-list").innerHTML = rows.map(([key, token]) => `<div class="card"><div><strong>${esc(key)}</strong><small>${esc(token.fontRole)} · ${token.weight} ${esc(token.style || "normal")}</small></div><button class="tiny danger remove-type-token" data-key="${escAttr(key)}">Remove</button></div>`).join("") || `<div class="empty">Add at least one typography role.</div>`;
+  document.querySelectorAll(".remove-type-token").forEach(button => button.onclick = () => { const [prefix, name] = button.dataset.key.split(":"); if (prefix === "custom") delete typographyDraft.custom[name]; else delete typographyDraft.roles[prefix]; renderTypographyDraft(); });
+}
+function renderSemanticDraft() {
+  $("#color-semantic-list").innerHTML = Object.entries(semanticDraft).map(([name, value]) => `<div class="card"><div><strong>${esc(name)}</strong><small>${esc(value)}</small></div><button class="tiny danger remove-semantic" data-name="${escAttr(name)}">Remove</button></div>`).join("") || `<div class="empty">Semantic colors are optional.</div>`;
+  document.querySelectorAll(".remove-semantic").forEach(button => button.onclick = () => { delete semanticDraft[button.dataset.name]; renderSemanticDraft(); });
+}
+function legacyRenderBindingDraft() {
+  $("#ds-binding-list").innerHTML = Object.entries(bindingDraft).map(([role, id]) => `<div class="card"><div><strong>${esc(role)}</strong><small>Font Profile: ${esc(id)}</small></div><button class="tiny danger remove-binding" data-role="${escAttr(role)}">Remove</button></div>`).join("") || `<div class="empty">Bind every font role used by the selected typography profile.</div>`;
+  document.querySelectorAll(".remove-binding").forEach(button => button.onclick = () => { delete bindingDraft[button.dataset.role]; renderBindingDraft(); });
+}
+function legacyResetTypographyEditor() { typographyDraft = { roles: {}, custom: {} }; $("#type-id").value = ""; $("#type-name").value = ""; renderTypographyDraft(); }
+function legacyResetColorEditor() { semanticDraft = {}; $("#color-id").value = ""; $("#color-name").value = ""; renderSemanticDraft(); }
+function legacyResetDesignEditor() { bindingDraft = {}; $("#ds-id").value = ""; $("#ds-name").value = ""; renderBindingDraft(); }
+function legacyEditResource(kind, id, duplicate) {
+  const item = (state.vnext?.[kind] || []).find(entry => entry.id === id); if (!item) return;
+  if (kind === "typography") { typographyDraft = structuredClone({ roles: item.roles || {}, custom: item.custom || {} }); $("#type-id").value = duplicate ? `${item.id}-copy` : item.id; $("#type-name").value = duplicate ? `${item.name} Copy` : item.name; goView("typography"); renderTypographyDraft(); }
+  if (kind === "colors") { semanticDraft = structuredClone(item.semantic || {}); $("#color-id").value = duplicate ? `${item.id}-copy` : item.id; $("#color-name").value = duplicate ? `${item.name} Copy` : item.name; for (const role of ["primary", "secondary", "text", "accent"]) $(`#color-${role}`).value = item.elementor[role]; goView("colors"); renderSemanticDraft(); }
+  if (kind === "designSystems") { bindingDraft = structuredClone(item.fontBindings || {}); $("#ds-id").value = duplicate ? `${item.id}-copy` : item.id; $("#ds-name").value = duplicate ? `${item.name} Copy` : item.name; $("#ds-typography").value = item.typographyProfileId; $("#ds-colors").value = item.colorProfileId; goView("design-systems"); renderBindingDraft(); }
+}
+async function saveResource(kind, value) { try { const saved=await request(`/api/vnext/${kind}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) }); flash(`Saved ${value.name}.`); await refresh(); return saved; } catch (error) { flash(error.message, true); return null; } }
+async function deleteResource(kind, id) { if (!confirm(`Delete resource ${id}?`)) return; try { await request(`/api/vnext/${kind}/${encodeURIComponent(id)}`, { method: "DELETE" }); flash(`Deleted ${id}.`); await refresh(); } catch (error) { flash(error.message, true); } }
+
+function legacyTemplateKey(template) { return `${template.snapshotId}\u0000${template.templateId}`; }
+function legacyTemplateSelectionFromDom() {
   return [...document.querySelectorAll("#build-elementor-templates input.elementor-template")]
     .filter(input => input.checked)
     .map(input => ({ snapshotId: input.dataset.snapshotId, templateId: input.dataset.templateId }));
 }
 
-function elementorTemplatesForBuild() {
+function legacyElementorTemplatesForBuild() {
   return Array.isArray(state.elementorTemplates) ? state.elementorTemplates : [];
 }
 
-function renderElementorChecklist() {
+function legacyRenderElementorChecklist() {
   const container = $("#build-elementor-templates");
   const help = $("#build-elementor-help");
   const baseId = $("#build-config").value;
@@ -187,7 +242,7 @@ function renderElementorChecklist() {
   });
 }
 
-function syncElementorRequirement() {
+function legacySyncElementorRequirement() {
   const required = templateSelectionFromDom().length > 0;
   document.querySelectorAll("#build-plugins input.plugin-selection").forEach(input => {
     if (input.dataset.slug !== "elementor") return;
@@ -196,15 +251,68 @@ function syncElementorRequirement() {
   });
 }
 
-function renderElementorLibrary() {
+function legacyRenderElementorLibrary() {
   const rows = elementorTemplatesForBuild();
   $("#elementor-templates-body").innerHTML = rows.map(template => `<tr><td><strong>${esc(template.name)}</strong><br><code>${esc(template.templateId)}</code></td><td>${esc(template.type)}</td><td>${esc(template.sourceDomain || "Unknown — legacy export")}</td><td>${esc(template.snapshotName)}<br><code>${esc(template.snapshotId)}</code></td><td>${esc(template.exportDate ? new Date(template.exportDate).toLocaleString() : "—")}</td></tr>`).join("") || `<tr><td colspan="5" class="empty">No Elementor templates in imported configuration snapshots.</td></tr>`;
 }
+
+const TYPE_ROLES = [["body","Body"],["links","Links"],["h1","H1"],["h2","H2"],["h3","H3"],["h4","H4"],["h5","H5"],["h6","H6"],["buttons","Buttons"],["formFields","Form Fields"]];
+const TYPE_DIMENSIONS = [["size","Font size",["px","em","rem","vw"]],["lineHeight","Line height",["","px","em","rem","lh","rlh"]],["letterSpacing","Letter spacing",["px","em","rem"]],["wordSpacing","Word spacing",["px","em","rem"]]];
+const defaultSize = { body:16,links:16,h1:48,h2:40,h3:34,h4:28,h5:22,h6:18,buttons:16,formFields:16 };
+function freshTypographyDraft() {
+  const roles = {};
+  for (const [id] of TYPE_ROLES) roles[id] = { fontRole: id.startsWith("h") ? "heading" : "body", weight: id.startsWith("h") ? 700 : 400, style:"normal", textTransform:"none", textDecoration:"none", size:{desktop:{value:defaultSize[id],unit:"px"}}, lineHeight:{desktop:{value:id.startsWith("h") ? 1.2 : 1.5,unit:""}} };
+  return { roles, custom:{}, fontSlots:{ body:{name:"Body font"}, heading:{name:"Heading font"}, accent:{name:"Accent font"} }, customRoleNames:{} };
+}
+function restoreTypeDraft() { if (typographyDraft) return; try { typographyDraft = JSON.parse(sessionStorage.getItem("wpstarter.typographyDraft")) || freshTypographyDraft(); } catch { typographyDraft = freshTypographyDraft(); } if(!typographyDraft.fontSlots) typographyDraft.fontSlots={body:{name:"Body font"},heading:{name:"Heading font"},accent:{name:"Accent font"}}; typographyDraft.custom ||= {}; typographyDraft.customRoleNames ||= {}; for(const [id] of TYPE_ROLES) if(!typographyDraft.roles?.[id]) typographyDraft.roles[id]=freshTypographyDraft().roles[id]; }
+function saveTypeDraft() { sessionStorage.setItem("wpstarter.typographyDraft", JSON.stringify(typographyDraft)); }
+function dimensionControl(roleId, property, units, token) {
+  const current = token[property]?.[activeTypeDevice]; const unit = current?.unit ?? (property === "lineHeight" ? "" : "px");
+  return `<div class="dimension-control"><input type="number" step="any" data-role="${escAttr(roleId)}" data-dimension="${property}" value="${current?.value ?? ""}" placeholder="—"><select data-role="${escAttr(roleId)}" data-unit="${property}">${units.map(value => `<option value="${escAttr(value)}" ${value===unit?"selected":""}>${value || "unitless"}</option>`).join("")}</select></div>`;
+}
+function renderTypographyDraft() {
+  restoreTypeDraft(); const slotOptions = Object.entries(typographyDraft.fontSlots || {}).map(([id,slot]) => `<option value="${escAttr(id)}">${esc(slot.name)}</option>`).join("");
+  const rows = [...TYPE_ROLES.map(([id,label]) => [id,label,typographyDraft.roles[id],false]), ...Object.entries(typographyDraft.custom || {}).map(([id,token]) => [id,typographyDraft.customRoleNames?.[id] || id,token,true])];
+  $("#type-rows").innerHTML = rows.map(([id,label,token,custom]) => `<tr data-type-row="${escAttr(id)}"><td>${custom?`<input class="role-name" data-role-name="${escAttr(id)}" value="${escAttr(label)}">`:`<strong>${esc(label)}</strong>`}</td><td><select data-role="${escAttr(id)}" data-shared="fontRole">${slotOptions}<option value="__add">+ Add slot…</option></select></td><td><select data-role="${escAttr(id)}" data-shared="weight">${[100,200,300,400,500,600,700,800,900].map(w=>`<option ${Number(token.weight)===w?"selected":""}>${w}</option>`).join("")}</select></td><td><select data-role="${escAttr(id)}" data-shared="style">${["normal","italic","oblique"].map(v=>`<option ${token.style===v?"selected":""}>${v}</option>`).join("")}</select></td>${TYPE_DIMENSIONS.map(([property,,units])=>`<td>${dimensionControl(id,property,units,token)}</td>`).join("")}<td><select data-role="${escAttr(id)}" data-shared="textTransform">${["none","uppercase","lowercase","capitalize"].map(v=>`<option ${token.textTransform===v?"selected":""}>${v}</option>`).join("")}</select></td><td><select data-role="${escAttr(id)}" data-shared="textDecoration">${["none","underline","overline","line-through"].map(v=>`<option ${token.textDecoration===v?"selected":""}>${v}</option>`).join("")}</select></td><td>${custom?`<button class="tiny danger remove-custom-type" data-role="${escAttr(id)}">Remove</button>`:""}</td></tr>`).join("");
+  for (const [id,,token] of rows) { const slot = document.querySelector(`[data-role="${CSS.escape(id)}"][data-shared="fontRole"]`); if (slot) slot.value = token.fontRole; }
+  document.querySelectorAll("#type-rows input,#type-rows select").forEach(input => input.oninput = () => {
+    const id=input.dataset.role; if (!id) return; const token=typographyDraft.roles[id]||typographyDraft.custom[id];
+    if (input.dataset.shared) { if (input.dataset.shared==="fontRole" && input.value==="__add") { const label=prompt("Name this font slot (for example, Display font):"); if (!label) return renderTypographyDraft(); const slotId=`slot-${Date.now().toString(36)}`; typographyDraft.fontSlots[slotId]={name:label.trim()}; token.fontRole=slotId; renderTypographyDraft(); } else token[input.dataset.shared]=input.dataset.shared==="weight"?Number(input.value):input.value; }
+    if (input.dataset.dimension) { token[input.dataset.dimension] ||= {}; const unit=document.querySelector(`[data-role="${CSS.escape(id)}"][data-unit="${input.dataset.dimension}"]`).value; if(input.value==="") delete token[input.dataset.dimension][activeTypeDevice]; else token[input.dataset.dimension][activeTypeDevice]={value:Number(input.value),unit}; }
+    if (input.dataset.unit) { const number=document.querySelector(`[data-role="${CSS.escape(id)}"][data-dimension="${input.dataset.unit}"]`); if(number.value!==""){token[input.dataset.unit] ||= {}; token[input.dataset.unit][activeTypeDevice]={value:Number(number.value),unit:input.value};} }
+    if(input.dataset.roleName) typographyDraft.customRoleNames[id]=input.value; saveTypeDraft();
+  });
+  document.querySelectorAll(".remove-custom-type").forEach(button=>button.onclick=()=>{delete typographyDraft.custom[button.dataset.role];delete typographyDraft.customRoleNames[button.dataset.role];saveTypeDraft();renderTypographyDraft();});
+}
+function freshColorDraft(){return {elementor:{primary:"#4054b2",secondary:"#54595f",text:"#7a7a7a",accent:"#61ce70"},custom:[]};}
+function renderColorDraft(){ colorDraft ||= freshColorDraft(); const rows=[...["primary","secondary","text","accent"].map(id=>({id,name:id[0].toUpperCase()+id.slice(1),value:colorDraft.elementor[id],fixed:true})),...(colorDraft.custom||[])]; $("#color-rows").innerHTML=rows.map(row=>`<div class="color-row" data-color-row="${escAttr(row.id)}">${row.fixed?`<strong>${esc(row.name)}</strong>`:`<input data-color-name="${escAttr(row.id)}" value="${escAttr(row.name)}" aria-label="Custom color name">`}<input type="color" data-color-picker="${escAttr(row.id)}" value="${/^#[0-9a-f]{6}$/i.test(row.value)?row.value:"#000000"}"><input class="hex-input" data-color-hex="${escAttr(row.id)}" value="${escAttr(row.value)}" pattern="#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?" aria-label="Hexadecimal color">${row.fixed?"":`<button class="tiny danger remove-custom-color" data-id="${escAttr(row.id)}">Remove</button>`}</div>`).join("");
+  const find=(id)=>colorDraft.elementor[id]!==undefined?{get:()=>colorDraft.elementor[id],set:v=>colorDraft.elementor[id]=v}:{get:()=>colorDraft.custom.find(x=>x.id===id)?.value,set:v=>colorDraft.custom.find(x=>x.id===id).value=v};
+  document.querySelectorAll("[data-color-picker]").forEach(input=>input.oninput=()=>{const id=input.dataset.colorPicker;find(id).set(input.value);document.querySelector(`[data-color-hex="${CSS.escape(id)}"]`).value=input.value;});
+  document.querySelectorAll("[data-color-hex]").forEach(input=>input.oninput=()=>{const valid=/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(input.value);input.classList.toggle("invalid",!valid);if(valid){find(input.dataset.colorHex).set(input.value.toLowerCase());if(input.value.length===7)document.querySelector(`[data-color-picker="${CSS.escape(input.dataset.colorHex)}"]`).value=input.value;}});
+  document.querySelectorAll("[data-color-name]").forEach(input=>input.oninput=()=>{colorDraft.custom.find(x=>x.id===input.dataset.colorName).name=input.value;});
+  document.querySelectorAll(".remove-custom-color").forEach(button=>button.onclick=()=>{colorDraft.custom=colorDraft.custom.filter(x=>x.id!==button.dataset.id);renderColorDraft();});
+}
+function renderBindingDraft(){ const type=(state.vnext?.typography||[]).find(item=>item.id===$("#ds-typography").value); const entries=[...Object.entries(type?.roles||{}),...Object.entries(type?.custom||{})]; const tokens=entries.map(([,token])=>token); const slots=[...new Set(tokens.map(token=>token.fontRole).filter(Boolean))]; let hasFaceErrors=false; $("#ds-binding-list").innerHTML=slots.map(slot=>{const label=type?.fontSlots?.[slot]?.name||slot.replace(/[-_]/g," "),current=bindingDraft[slot]||"",font=(state.fonts||[]).find(item=>item.id===current),faces=new Set((font?.faces||[]).map(face=>`${face.weight}:${face.style}`)),missing=entries.filter(([,token])=>token.fontRole===slot&&!faces.has(`${token.weight}:${token.style||"normal"}`)).map(([role,token])=>`${TYPE_ROLES.find(x=>x[0]===role)?.[1]||type?.customRoleNames?.[role]||role} needs ${token.weight} ${token.style||"normal"}`);if(current&&missing.length)hasFaceErrors=true;return `<div class="font-assignment"><label><strong>${esc(label)}</strong><select data-slot="${escAttr(slot)}"><option value="">Choose a Font Profile…</option>${(state.fonts||[]).map(fontOption=>`<option value="${escAttr(fontOption.id)}" ${fontOption.id===current?"selected":""}>${esc(fontOption.name)}</option>`).join("")}</select></label><small class="${missing.length&&current?"status-missing":""}">${!current?"Required":missing.length?esc(missing.join(" · ")):esc((font.faces||[]).map(face=>`${face.weight} ${face.style}`).join(" · "))}</small></div>`;}).join("")||`<div class="empty">Select a Typography Profile first.</div>`;
+  document.querySelectorAll("#ds-binding-list select").forEach(select=>select.onchange=()=>{if(select.value)bindingDraft[select.dataset.slot]=select.value;else delete bindingDraft[select.dataset.slot];renderBindingDraft();}); const ready=slots.length>0&&slots.every(slot=>bindingDraft[slot])&&!hasFaceErrors; $("#ds-readiness").className=`readiness ${ready?"ready":""}`;$("#ds-readiness").textContent=ready?"Ready to save. Every requested weight and style is available offline.":hasFaceErrors?"Some typography rows request font faces that the selected Font Profile does not contain.":`${slots.filter(slot=>!bindingDraft[slot]).length} font assignment(s) still required.`; }
+function renderVNext(){const resources=state.vnext||{typography:[],colors:[],designSystems:[]};const cards=(items,kind,empty)=>items.length?items.map(item=>`<div class="card"><div><strong>${esc(item.name)}</strong><details class="resource-details"><summary>Details</summary><code>${esc(item.id)}</code></details></div><div class="action-list"><button class="tiny edit-resource" data-kind="${kind}" data-id="${escAttr(item.id)}">Edit</button><button class="tiny duplicate-resource" data-kind="${kind}" data-id="${escAttr(item.id)}">Duplicate</button><button class="tiny danger delete-resource" data-kind="${kind}" data-id="${escAttr(item.id)}">Delete</button></div></div>`).join(""):`<div class="empty">${empty}</div>`;$("#typography-list").innerHTML=cards(resources.typography,"typography","No typography profiles yet.");$("#colors-list").innerHTML=cards(resources.colors,"colors","No color profiles yet.");$("#design-systems-list").innerHTML=cards(resources.designSystems,"designSystems","No design systems yet.");const oldType=$("#ds-typography").value,oldColor=$("#ds-colors").value;$("#ds-typography").innerHTML=`<option value="">Choose typography…</option>`+resources.typography.map(x=>`<option value="${escAttr(x.id)}">${esc(x.name)}</option>`).join("");$("#ds-colors").innerHTML=`<option value="">Choose colors…</option>`+resources.colors.map(x=>`<option value="${escAttr(x.id)}">${esc(x.name)}</option>`).join("");if(resources.typography.some(x=>x.id===oldType))$("#ds-typography").value=oldType;if(resources.colors.some(x=>x.id===oldColor))$("#ds-colors").value=oldColor;renderTypographyDraft();renderColorDraft();renderBindingDraft();document.querySelectorAll(".edit-resource").forEach(b=>b.onclick=()=>editResource(b.dataset.kind,b.dataset.id,false));document.querySelectorAll(".duplicate-resource").forEach(b=>b.onclick=()=>editResource(b.dataset.kind,b.dataset.id,true));document.querySelectorAll(".delete-resource").forEach(b=>b.onclick=()=>deleteResource(b.dataset.kind,b.dataset.id));}
+function resetTypographyEditor(force=false){if(!force&&!confirm("Reset the entire typography draft?"))return;typographyDraft=freshTypographyDraft();$("#type-id").value="";$("#type-name").value="";sessionStorage.removeItem("wpstarter.typographyDraft");renderTypographyDraft();}
+function resetColorEditor(){if(!confirm("Reset this color profile?"))return;colorDraft=freshColorDraft();$("#color-id").value="";$("#color-name").value="";renderColorDraft();}
+function resetDesignEditor(){bindingDraft={};$("#ds-id").value="";$("#ds-name").value="";$("#ds-typography").value="";$("#ds-colors").value="";renderBindingDraft();}
+function editResource(kind,id,duplicate){const item=(state.vnext?.[kind]||[]).find(x=>x.id===id);if(!item)return;if(kind==="typography"){typographyDraft=structuredClone({roles:item.roles||{},custom:item.custom||{},fontSlots:item.fontSlots||{},customRoleNames:item.customRoleNames||{}});$("#type-id").value=duplicate?"":item.id;$("#type-name").value=duplicate?`${item.name} Copy`:item.name;saveTypeDraft();goView("typography");renderTypographyDraft();}if(kind==="colors"){colorDraft=structuredClone({elementor:item.elementor,custom:item.custom||Object.entries(item.semantic||{}).map(([id,value])=>({id,name:id.replace(/[-_]/g," "),value}))});$("#color-id").value=duplicate?"":item.id;$("#color-name").value=duplicate?`${item.name} Copy`:item.name;goView("colors");renderColorDraft();}if(kind==="designSystems"){bindingDraft=structuredClone(item.fontBindings||{});$("#ds-id").value=duplicate?"":item.id;$("#ds-name").value=duplicate?`${item.name} Copy`:item.name;$("#ds-typography").value=item.typographyProfileId;$("#ds-colors").value=item.colorProfileId;goView("design-systems");renderBindingDraft();}}
+function templateKey(template){return template.id;} function templateSelectionFromDom(){return [...document.querySelectorAll("#build-elementor-templates input.elementor-template")].filter(x=>x.checked).map(x=>x.dataset.id);} function elementorTemplatesForBuild(){return Array.isArray(state.elementorTemplates)?state.elementorTemplates:[];}
+function filteredTemplates(){const q=$("#template-search").value.trim().toLowerCase(),source=$("#template-source").value,type=$("#template-type").value;return elementorTemplatesForBuild().filter(t=>(!q||`${t.name} ${t.sourceDomain} ${t.type}`.toLowerCase().includes(q))&&(!source||t.sourceDomain===source)&&(!type||t.type===type));}
+function renderElementorChecklist(){const all=elementorTemplatesForBuild(),byId=new Map(all.map(t=>[t.id,t])),roots=new Set(currentElementorRoots||[]),selected=new Set(roots),locked=new Set(),missing=[],queue=[...roots];for(let i=0;i<queue.length;i++){const t=byId.get(queue[i]);for(const dependency of t?.dependencies||[]){if(!byId.has(dependency)){missing.push({template:t,dependency});continue;}if(!selected.has(dependency)){selected.add(dependency);queue.push(dependency);}locked.add(dependency);}}currentElementorSelection=[...selected];const grouped=new Map();for(const t of filteredTemplates()){if(!grouped.has(t.sourceDomain))grouped.set(t.sourceDomain,[]);grouped.get(t.sourceDomain).push(t);}$("#build-elementor-templates").innerHTML=all.length?[...grouped].map(([domain,rows])=>`<fieldset class="template-source-group"><legend>${esc(domain)}</legend>${rows.map(t=>{const isDependency=locked.has(t.id)&&!roots.has(t.id);return `<label class="check template-choice"><input class="elementor-template" type="checkbox" data-id="${escAttr(t.id)}" ${selected.has(t.id)?"checked":""}><span class="plugin-name"><strong>${esc(t.name)}</strong><small>${esc(t.type)} · imported from ${esc(t.snapshotName)}</small></span><span class="meta">${isDependency?"Included automatically · required dependency":""}</span></label>`}).join("")}</fieldset>`).join(""):`<span class="muted">No templates yet. Import an exporter configuration to add them.</span>`;const help=$("#build-elementor-help"),save=$("#create-profile");if(missing.length){const first=missing[0],reference=first.dependency.startsWith("missing-")?first.dependency.slice("missing-".length):first.dependency;help.textContent=`Missing Elementor template dependency: "${first.template.name}" references a template omitted from snapshot "${first.template.snapshotName}" (export reference ${reference}). This is a template, not a plugin or setting. Remove "${first.template.name}" from the selection or re-import the snapshot with that template included. Save Profile will explain this if clicked.`;help.classList.add("status-missing");save.disabled=false;save.title="Click to see why this profile cannot be saved yet.";}else{help.textContent="Templates are durable library assets and can be used in package-only builds. Required dependencies are included automatically; you can still select them directly.";help.classList.remove("status-missing");save.disabled=false;save.removeAttribute("title");}document.querySelectorAll("input.elementor-template").forEach(input=>input.onchange=()=>{const next=new Set(currentElementorRoots||[]);if(input.checked)next.add(input.dataset.id);else if(!locked.has(input.dataset.id))next.delete(input.dataset.id);currentElementorRoots=[...next];renderElementorChecklist();syncElementorRequirement();renderTemplateMappings();});renderTemplateMappings();}
+function normalizedName(value){return String(value).toLowerCase().replace(/[^a-z0-9]+/g,"");}
+function mappingTargets(){const system=(state.vnext?.designSystems||[]).find(x=>x.id===$("#build-design-system").value),type=(state.vnext?.typography||[]).find(x=>x.id===system?.typographyProfileId),colors=(state.vnext?.colors||[]).find(x=>x.id===system?.colorProfileId);const targets=[];for(const id of Object.keys(colors?.elementor||{}))targets.push({value:`color:${id}`,label:`${id[0].toUpperCase()+id.slice(1)} — selected Design System`});for(const token of colors?.custom||[])targets.push({value:`color:${token.id}`,label:`${token.name} — selected Design System`});for(const [id] of Object.entries(colors?.semantic||{}))targets.push({value:`color:${id}`,label:`${id.replace(/[-_]/g," ")} — selected Design System`});for(const [id] of Object.entries(type?.roles||{}))targets.push({value:`typography:${id}`,label:`${TYPE_ROLES.find(x=>x[0]===id)?.[1]||id} — selected Design System`});for(const [id] of Object.entries(type?.custom||{}))targets.push({value:`typography:${id}`,label:`${type.customRoleNames?.[id]||id} — selected Design System`});for(const id of ["primary","secondary","text","accent"]){targets.push({value:`elementor:color:${id}`,label:`Elementor default color ${id}`});targets.push({value:`elementor:typography:${id}`,label:`Elementor default typography ${id}`});}return targets;}
+function renderTemplateMappings(){const selected=new Set(currentElementorSelection||[]),templates=elementorTemplatesForBuild().filter(t=>selected.has(t.id)),targets=mappingTargets(),targetByName=new Map(targets.map(t=>[normalizedName(t.label.split(" — ")[0]),t.value]));const refs=new Map();for(const t of templates)for(const ref of t.globalReferences||[]){if(!refs.has(ref.reference))refs.set(ref.reference,{...ref,templates:[]});refs.get(ref.reference).templates.push(t.name);}const unresolved=[...refs.values()].filter(ref=>{const suffix=ref.reference.split(":").pop();const dsTarget=`${ref.kind}:${suffix}`,defaultTarget=`elementor:${ref.kind}:${suffix}`,automatic=(["primary","secondary","text","accent"].includes(suffix)?(targets.some(t=>t.value===dsTarget)?dsTarget:defaultTarget):targetByName.get(normalizedName(ref.name)));if(automatic&&!templateMappingDraft[ref.reference])templateMappingDraft[ref.reference]=automatic;return !templateMappingDraft[ref.reference];});$("#template-mappings").classList.toggle("hidden",unresolved.length===0);$("#template-mapping-rows").innerHTML=unresolved.map(ref=>`<label class="mapping-row"><span><strong>${esc(ref.name)}</strong><small>${esc(ref.kind)} · used by ${esc(ref.templates.join(", "))}</small></span><select data-reference="${escAttr(ref.reference)}"><option value="">Choose a destination…</option>${targets.filter(t=>t.value.startsWith(ref.kind+":")||t.value.startsWith(`elementor:${ref.kind}:`)).map(t=>`<option value="${escAttr(t.value)}">${esc(t.label)}</option>`).join("")}</select></label>`).join("");document.querySelectorAll("[data-reference]").forEach(select=>select.onchange=()=>{if(select.value)templateMappingDraft[select.dataset.reference]=select.value;else delete templateMappingDraft[select.dataset.reference];renderTemplateMappings();});}
+function syncElementorRequirement(){const required=(currentElementorSelection||[]).length>0;document.querySelectorAll("#build-plugins input.plugin-selection").forEach(input=>{if(input.dataset.slug!=="elementor")return;input.disabled=required||input.dataset.available!=="1";if(required)input.checked=true;});}
+function renderElementorLibrary(){const rows=elementorTemplatesForBuild();$("#elementor-templates-body").innerHTML=rows.map(t=>`<tr><td><strong>${esc(t.name)}</strong><br><details class="resource-details"><summary>Details</summary><code>${esc(t.id)}</code></details></td><td>${esc(t.type)}</td><td>${esc(t.sourceDomain)}</td><td>${esc(t.snapshotName)}</td><td>${esc(new Date(t.importedAt).toLocaleString())}</td><td><button class="tiny danger delete-template" data-id="${escAttr(t.id)}">Delete</button></td></tr>`).join("")||`<tr><td colspan="6" class="empty">No templates in the independent library.</td></tr>`;document.querySelectorAll(".delete-template").forEach(b=>b.onclick=async()=>{if(!confirm("Delete this template from the library?"))return;try{await request(`/api/elementor-templates/${encodeURIComponent(b.dataset.id)}`,{method:"DELETE"});await refresh();}catch(e){flash(e.message,true);}});const sources=[...new Set(rows.map(t=>t.sourceDomain))],types=[...new Set(rows.map(t=>t.type))];$("#template-source").innerHTML=`<option value="">All source sites</option>`+sources.map(x=>`<option>${esc(x)}</option>`).join("");$("#template-type").innerHTML=`<option value="">All types</option>`+types.map(x=>`<option>${esc(x)}</option>`).join("");}
 
 function render() {
   const previousConfig = $("#build-config")?.value ?? "";
   const previousProfile = $("#profile-select")?.value ?? "";
   const previousFontSystem = $("#build-font-system")?.value ?? "";
+  const previousDesignSystem = $("#build-design-system")?.value ?? "";
   const previousCompareLeft = $("#compare-left")?.value ?? "";
   const previousCompareRight = $("#compare-right")?.value ?? "";
   $("#version").textContent = `GUI ${state.version}`;
@@ -218,8 +326,9 @@ function render() {
   renderVNext();
   renderElementorLibrary();
   renderFontSystemOptions(previousFontSystem);
+  renderDesignSystemOptions(previousDesignSystem);
 
-  $("#configs-list").innerHTML = state.configs.map(c => `<div class="card"><div><strong>${esc(c.name)}</strong><small>${esc(c.id)} · WP ${esc(c.wordpressVersion)} · ${esc(c.locale)} · ${esc(c.theme.slug)}@${esc(c.theme.version)} · ${c.plugins.length} plugins</small></div><div class="action-list"><button class="secondary inspect-config" data-id="${escAttr(c.id)}">Inspect</button><button class="secondary check-config" data-id="${escAttr(c.id)}">Check packages</button></div></div>`).join("") || `<div class="empty">No configuration snapshots yet. You can still create package-only builds.</div>`;
+  $("#configs-list").innerHTML = state.configs.map(c => `<div class="card"><div><strong>${esc(c.name)}</strong><small>${esc(c.id)} · WP ${esc(c.wordpressVersion)} · ${esc(c.locale)} · ${esc(c.theme.slug)}@${esc(c.theme.version)} · ${c.plugins.length} plugins</small></div><div class="action-list"><button class="secondary inspect-config" data-id="${escAttr(c.id)}">Inspect</button><button class="secondary check-config" data-id="${escAttr(c.id)}">Check packages</button><button class="tiny danger delete-config" data-id="${escAttr(c.id)}">Delete snapshot</button></div></div>`).join("") || `<div class="empty">No configuration snapshots yet. You can still create package-only builds.</div>`;
 
   const compareOpts = state.configs.map(c => `<option value="${escAttr(c.id)}">${esc(c.name)} · ${esc(c.generatedAt ? new Date(c.generatedAt).toLocaleString() : c.id)}</option>`).join("");
   $("#compare-left").innerHTML = compareOpts || `<option value="">No snapshots</option>`;
@@ -241,7 +350,7 @@ function render() {
   $("#profile-select").innerHTML = profileOpts || `<option value="">No profiles created</option>`;
   if (state.profiles.some(p => p.file === previousProfile)) $("#profile-select").value = previousProfile;
 
-  $("#profiles-manager").innerHTML = state.profiles.map(p => `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.elementorTemplates ? ` · ${p.elementorTemplates} Elementor templates` : ""}${p.fontSystem ? ` · Font: ${esc(p.fontSystem)}` : ""}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`).join("") || `<div class="empty">No profiles yet. Create one from the Build page.</div>`;
+  $("#profiles-manager").innerHTML = state.profiles.map(p => `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.elementorTemplates ? ` · ${p.elementorTemplates} Elementor templates` : ""}${p.fontSystem ? ` · Font: ${esc(p.fontSystem)}` : ""}${p.designSystem ? ` · Design: ${esc(p.designSystem)}` : ""}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`).join("") || `<div class="empty">No profiles yet. Create one from the Build page.</div>`;
 
   const buildCard = (b, compact = false) => `<div class="build-card"><div><strong>${esc(b.file)}</strong><small>${b.profile ? `Profile: ${esc(b.profile)} · ` : ""}${b.locale ? `${esc(b.locale)} · ` : ""}${b.configurationEnabled ? "Snapshot" : "Packages only"} · ${fmtBytes(b.size)} · ${new Date(b.modifiedAt).toLocaleString()}</small>${b.compatibility?.status === "upgrade-warning" ? `<small class="compatibility-inline">Upgrade warning: ${esc(b.compatibility.warnings.map(w => `${w.slug} ${w.exportedVersion} → ${w.selectedVersion}`).join(", "))}</small>` : ""}${!compact && b.sha256 ? `<code class="hash">${esc(b.sha256)}</code>` : ""}</div><div class="build-card-actions"><a class="tiny primary-ish" href="/download/${encodeURIComponent(b.file)}">Download</a>${b.profileFile ? `<button class="tiny rebuild" data-profile="${escAttr(b.profileFile)}">Build again</button>` : ""}${compact ? "" : `<button class="tiny danger delete-build" data-file="${escAttr(b.file)}">Delete</button>`}</div></div>`;
   $("#recent-builds").innerHTML = state.builds.slice(0, 5).map(b => buildCard(b, true)).join("") || `<div class="empty">No builds yet.</div>`;
@@ -249,6 +358,7 @@ function render() {
 
   document.querySelectorAll(".inspect-config").forEach(btn => btn.onclick = () => inspectConfig(btn.dataset.id));
   document.querySelectorAll(".check-config").forEach(btn => btn.onclick = () => checkConfig(btn.dataset.id));
+  document.querySelectorAll(".delete-config").forEach(btn => btn.onclick = () => deleteConfig(btn.dataset.id));
   document.querySelectorAll(".edit-profile").forEach(btn => btn.onclick = () => loadProfileIntoEditor(btn.dataset.file, false));
   document.querySelectorAll(".duplicate-profile").forEach(btn => btn.onclick = () => loadProfileIntoEditor(btn.dataset.file, true));
   document.querySelectorAll(".delete-profile").forEach(btn => btn.onclick = () => deleteProfile(btn.dataset.file));
@@ -619,6 +729,17 @@ function renderCompatibilityPreview() {
   box.innerHTML = `<strong>Upgrade warning</strong><span>Exported settings will be preserved. The selected package versions are newer than the reference site and should be tested.</span><ul>${upgrades.map(item => `<li>${esc(item.slug)} ${esc(item.exportedVersion)} → ${esc(item.selectedVersion)}</li>`).join("")}</ul>`;
 }
 
+function selectedMissingElementorDependencies() {
+  const selected = new Set(currentElementorSelection || []);
+  const available = new Set(elementorTemplatesForBuild().map(template => template.id));
+  const missing = [];
+  for (const template of elementorTemplatesForBuild()) {
+    if (!selected.has(template.id)) continue;
+    for (const dependency of template.dependencies || []) if (!available.has(dependency)) missing.push({ template, dependency });
+  }
+  return missing;
+}
+
 async function loadBuildSelection(id) {
   try {
     const config = id ? state.configs.find(c => c.id === id) : null;
@@ -675,9 +796,18 @@ async function createProfile() {
     themeVersion: theme.version,
     pluginVersions,
     fontSystemId: $("#build-font-system").value,
-    elementorTemplates: templateSelectionFromDom(),
+    designSystemId: $("#build-design-system").value,
+    elementorTemplateIds: currentElementorSelection || [],
+    elementorTemplateMappings: templateMappingDraft,
     sourceFile: currentEditingProfileFile
   };
+  const missingTemplates = selectedMissingElementorDependencies();
+  if (missingTemplates.length) {
+    const first = missingTemplates[0];
+    const reference = first.dependency.startsWith("missing-") ? first.dependency.slice("missing-".length) : first.dependency;
+    flash(`Cannot save profile: Elementor template "${first.template.name}" is missing dependency ${reference}. This is a template, not a plugin or setting. Remove "${first.template.name}" or re-import the snapshot with that template included.`, true);
+    return;
+  }
   try {
     setBusy(true);
     const data = await request("/api/profiles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -709,11 +839,17 @@ async function populateProfileEditor(profile) {
   $("#build-name").value = profile.name;
   $("#build-locale").value = profile.locale || "en_US";
   const baseId = profile.config?.id || "";
-  currentElementorSelection = profile.schemaVersion >= 7
-    ? (profile.elementorTemplates || [])
-    : elementorTemplatesForBuild().filter(template => template.snapshotId === baseId).map(template => ({ snapshotId: template.snapshotId, templateId: template.templateId }));
+  currentElementorSelection = profile.schemaVersion === 8
+    ? (profile.elementorTemplateIds || [])
+    : profile.schemaVersion >= 7
+    ? (profile.elementorTemplates || []).map(old => elementorTemplatesForBuild().find(template => template.snapshotId === old.snapshotId && template.sourceTemplateId === old.templateId)?.id).filter(Boolean)
+    : elementorTemplatesForBuild().filter(template => template.snapshotId === baseId).map(template => template.id);
+  { const selected=new Set(currentElementorSelection), depended=new Set(elementorTemplatesForBuild().filter(t=>selected.has(t.id)).flatMap(t=>t.dependencies||[])); currentElementorRoots=[...selected].filter(id=>!depended.has(id)); }
+  templateMappingDraft = structuredClone(profile.elementorTemplateMappings || {});
   await loadBuildSelection(baseId);
   $("#build-font-system").value = profile.fontSystem?.id || "";
+  $("#build-design-system").value = profile.designSystem?.id || "";
+  syncFontSelectors();
 
   const wpValue = JSON.stringify({ version: profile.wordpress.version, variant: profile.wordpress.variant || "en_US" });
   if ([...$("#build-wordpress").options].some(o => o.value === wpValue)) $("#build-wordpress").value = wpValue;
@@ -748,10 +884,14 @@ async function loadProfileIntoEditor(file, duplicate = false, { notify = true } 
 function resetProfileEditor() {
   currentEditingProfileFile = "";
   currentElementorSelection = null;
+  currentElementorRoots = null;
+  templateMappingDraft = {};
   $("#build-name").dataset.changed = "";
   $("#build-locale").dataset.changed = "";
   $("#build-config").value = "";
   $("#build-font-system").value = "";
+  $("#build-design-system").value = "";
+  syncFontSelectors();
   $("#cancel-profile-edit").classList.add("hidden");
   $("#create-profile").textContent = "Save Profile";
   loadBuildSelection("");
@@ -764,6 +904,16 @@ async function deleteProfile(file) {
     await request(`/api/profiles/${encodeURIComponent(file)}`, { method: "DELETE" });
     if (currentEditingProfileFile === file) resetProfileEditor();
     flash(`Deleted ${profile?.name || file}.`);
+    await refresh();
+  } catch (e) { flash(e.message, true); }
+}
+
+async function deleteConfig(id) {
+  const config = state.configs.find(item => item.id === id);
+  if (!confirm(`Delete configuration snapshot ${config?.name || id}? Imported Elementor templates will remain in the template library.`)) return;
+  try {
+    await request(`/api/configs/${encodeURIComponent(id)}`, { method: "DELETE" });
+    flash(`Deleted configuration snapshot ${config?.name || id}.`);
     await refresh();
   } catch (e) { flash(e.message, true); }
 }
@@ -843,6 +993,22 @@ async function build() {
 }
 function setBusy(on) { document.body.classList.toggle("busy", on); }
 
+$("#type-devices").onclick = event => { const button=event.target.closest("[data-device]");if(!button)return;activeTypeDevice=button.dataset.device;document.querySelectorAll("#type-devices .device").forEach(item=>item.classList.toggle("active",item===button));renderTypographyDraft(); };
+$("#type-add-custom").onclick = () => {restoreTypeDraft();const name=prompt("Custom typography name (for example, Eyebrow):");if(!name?.trim())return;const id=`custom-${Date.now().toString(36)}`;typographyDraft.custom[id]={fontRole:"accent",weight:600,style:"normal",textTransform:"none",textDecoration:"none",size:{desktop:{value:14,unit:"px"}},lineHeight:{desktop:{value:1.3,unit:""}}};typographyDraft.customRoleNames[id]=name.trim();saveTypeDraft();renderTypographyDraft();};
+$("#type-clear-device").onclick = () => {restoreTypeDraft();for(const token of [...Object.values(typographyDraft.roles),...Object.values(typographyDraft.custom)])for(const [property] of TYPE_DIMENSIONS)if(token[property])delete token[property][activeTypeDevice];saveTypeDraft();renderTypographyDraft();};
+$("#type-save").onclick = async () => {const saved=await saveResource("typography", { schemaVersion: 1, id: $("#type-id").value.trim(), name: $("#type-name").value.trim(), roles: typographyDraft.roles, custom: typographyDraft.custom, fontSlots: typographyDraft.fontSlots, customRoleNames: typographyDraft.customRoleNames });if(saved){$("#type-id").value=saved.id;sessionStorage.removeItem("wpstarter.typographyDraft");}};
+$("#type-reset").onclick = resetTypographyEditor;
+$("#color-add-custom").onclick = () => {colorDraft ||= freshColorDraft();colorDraft.custom.push({id:`color-${Date.now().toString(36)}`,name:"Custom color",value:"#000000"});renderColorDraft();};
+$("#color-save").onclick = async () => {const saved=await saveResource("colors", { schemaVersion: 1, id: $("#color-id").value.trim(), name: $("#color-name").value.trim(), elementor: colorDraft.elementor, custom: colorDraft.custom });if(saved)$("#color-id").value=saved.id;};
+$("#color-reset").onclick = resetColorEditor;
+$("#ds-save").onclick = async () => {const saved=await saveResource("designSystems", { schemaVersion: 1, id: $("#ds-id").value.trim(), name: $("#ds-name").value.trim(), typographyProfileId: $("#ds-typography").value, colorProfileId: $("#ds-colors").value, fontBindings: bindingDraft });if(saved)$("#ds-id").value=saved.id;};
+$("#ds-reset").onclick = resetDesignEditor;
+$("#ds-typography").onchange = () => {bindingDraft={};renderBindingDraft();};
+$("#ds-colors").onchange = renderBindingDraft;
+$("#template-search").oninput = renderElementorChecklist;
+$("#template-source").onchange = renderElementorChecklist;
+$("#template-type").onchange = renderElementorChecklist;
+
 document.querySelectorAll(".nav").forEach(btn => btn.onclick = () => goView(btn.dataset.view));
 $("#refresh").onclick = () => refresh().catch(e => flash(e.message, true));
 $("#package-file").onchange = e => uploadFiles([...e.target.files], "packages").catch(e => flash(e.message, true));
@@ -852,7 +1018,9 @@ const dz = $("#package-drop");
 ["dragenter", "dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("drag"); }));
 ["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("drag"); }));
 dz.addEventListener("drop", e => uploadFiles([...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith(".zip")), "packages").catch(e => flash(e.message, true)));
-$("#build-config").onchange = e => { currentElementorSelection = null; loadBuildSelection(e.target.value); };
+$("#build-config").onchange = e => { loadBuildSelection(e.target.value); };
+$("#build-font-system").onchange = syncFontSelectors;
+$("#build-design-system").onchange = () => { syncFontSelectors(); renderTemplateMappings(); };
 $("#profile-select").onchange = e => loadProfileIntoEditor(e.target.value, false, { notify: false });
 $("#build-name").oninput = e => e.target.dataset.changed = "1";
 $("#build-locale").onchange = e => { e.target.dataset.changed = "1"; selectWordPressForLocale(); };

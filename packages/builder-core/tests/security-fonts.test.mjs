@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { buildStarter, ConfigSnapshotRegistry, createProfileFromPackages, createZip, FontSystemRegistry, loadProfile, PackageRegistry, validateZipArchive } from "../dist/index.js";
+import { buildStarter, ConfigSnapshotRegistry, createProfileFromPackages, createZip, DesignSystemResourceService, extractZip, FontSystemRegistry, loadProfile, PackageRegistry, validateZipArchive } from "../dist/index.js";
 const repoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 async function zipDir(source, destination) { await createZip(source, destination); }
 async function traversalZip(destination) {
@@ -102,6 +102,26 @@ test("font-enabled profiles require Elementor Pro and bundle detected faces", as
     assert.equal(result.manifest.fontSystem.id, system.id);
     assert.equal(result.manifest.fontSystem.faces[0].weight, 700);
     assert.equal(result.manifest.fontSystem.faces[0].format, "woff2");
+
+    const resources = new DesignSystemResourceService(library);
+    await resources.saveTypography({ schemaVersion: 1, id: "brand-type", name: "Brand Type", roles: { body: { fontRole: "primary", weight: 700, size: { desktop: "16px", tablet: "15px", mobile: "14px" } } } });
+    await resources.saveColors({ schemaVersion: 1, id: "brand-colors", name: "Brand Colors", elementor: { primary: "#112233", secondary: "#445566", text: "#222222", accent: "#abcdef" } });
+    await resources.saveDesignSystem({ schemaVersion: 1, id: "brand", name: "Brand", typographyProfileId: "brand-type", colorProfileId: "brand-colors", fontBindings: { primary: system.id } });
+    await assert.rejects(() => createProfileFromPackages({ libraryDir: library, name: "conflict", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", plugins: { elementor: "4.2.1", "elementor-pro": "4.2.1" }, fontSystemId: system.id, designSystemId: "brand" }), error => error?.code === "profile_font_selection_conflict");
+    const v8doc = await createProfileFromPackages({ libraryDir: library, name: "design-build", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", plugins: { elementor: "4.2.1", "elementor-pro": "4.2.1" }, designSystemId: "brand" });
+    assert.equal(v8doc.schemaVersion, 8);
+    assert.equal("fontSystem" in v8doc, false);
+    const v8path = path.join(temp, "profile-v8.json"); await writeFile(v8path, JSON.stringify(v8doc));
+    const v8profile = await loadProfile(v8path, { libraryDir: library });
+    const v8result = await buildStarter({ profile: v8profile, outputZip: path.join(temp, "starter-v8.zip"), bootstrapFile: path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), builderVersion: "test" });
+    assert.equal(v8result.manifest.designSystem.id, "brand");
+    assert.equal(v8result.manifest.designSystem.fontProfiles[0].faces[0].file.startsWith("fonts/"), true);
+    assert.equal(v8result.manifest.vnext.sha256.length, 64);
+    const extracted = path.join(temp, "v8-extracted"); await extractZip(path.join(temp, "starter-v8.zip"), extracted);
+    const designRelative = (await readdir(extracted, { recursive: true })).map(String).find(entry => entry.endsWith("starter-design-system.json"));
+    const compiled = JSON.parse(await readFile(path.join(extracted, designRelative), "utf8"));
+    assert.equal(compiled.designSystem.resources.colors.id, "brand-colors");
+    assert.equal(compiled.designSystem.fontProfiles[0].faces[0].file, v8result.manifest.designSystem.fontProfiles[0].faces[0].file);
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
 

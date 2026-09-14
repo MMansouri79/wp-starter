@@ -181,9 +181,9 @@ Schema v5 makes the configuration snapshot and custom theme optional:
 
 When `config` is `null`, Builder does not embed `starter-config.json` and Bootstrap performs only local package installation/activation. It does not apply exported WordPress, Elementor, WooCommerce, or other adapter settings. When `theme` is `null`, Bootstrap keeps the theme provided by the WordPress distribution.
 
-## Generated distribution layout (manifest schema v3)
+## Generated distribution layout (manifest schema v4)
 
-Manifest schema v3 adds `configurationEnabled` and allows `theme` and `configExport` to be `null`. This lets package-only distributions use the same Bootstrap runtime without pretending that a configuration snapshot exists. Current manifests also include an `elementorTemplates` array containing the selected template IDs and their source snapshot IDs; it is empty for package-only builds.
+Manifest schema v3 added `configurationEnabled` and nullable `theme`/`configExport`. Schema v4 adds optional design-system provenance and checksum entries for `starter-design-system.json` and `starter-elementor-templates.json`. The `elementorTemplates` inventory can now be populated in package-only builds and records a library ID plus source provenance for v8 assets.
 
 ## Build profile schema v7
 
@@ -219,3 +219,29 @@ snapshots without embedding full documents in profile or GUI state.
 
 Profiles using schemas v1–v6 remain readable and continue to import every
 Elementor template in their base configuration snapshot.
+
+## Build profile schema v8
+
+Schema v8 selects a reusable Elementor design system by ID. The design system owns font selection, so a v8 document has no standalone `fontSystem` field.
+
+```json
+{
+  "schemaVersion": 8,
+  "name": "brand-store",
+  "locale": "en_US",
+  "wordpress": { "version": "7.1", "variant": "en_US" },
+  "theme": { "slug": "hello-elementor", "version": "3.4.9" },
+  "plugins": [
+    { "slug": "elementor", "version": "4.2.1", "required": true },
+    { "slug": "elementor-pro", "version": "4.2.1", "required": true }
+  ],
+  "config": null,
+  "designSystem": { "id": "brand-system" },
+  "elementorTemplateIds": ["tpl-3d4570baaf4ec0c53e18"],
+  "elementorTemplateMappings": {
+    "elementor:color:source_primary": "color:primary"
+  }
+}
+```
+
+The design system requires Elementor and Elementor Pro; templates require Elementor. A snapshot is optional. Template IDs resolve against the independent library, dependency selections are closed before persistence, and every source global reference must auto-map or have an explicit mapping. Interim v8 documents using `elementorTemplates: [{snapshotId, templateId}]` remain readable while their snapshots exist. Generated manifests retain schema v4 and add optional `designSystem` provenance with resource hashes and deduplicated staged font faces. Both generated payloads are independently checksum-protected.

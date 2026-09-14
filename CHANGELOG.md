@@ -1,6 +1,38 @@
 # Changelog
 
+## 0.1.0-alpha.26
+
+- Applied design-system custom colors to Elementor Custom Colors and applied typography roles to the matching Elementor Theme Style controls for body, links, headings, buttons, and form fields.
+- Kept only the global typography aliases needed by portable template references and bumped the bootstrap configuration revision so updated builds rerun the design-system phase.
+
+## 0.1.0-alpha.25
+
+- Added source-post-aware Elementor template replacement across re-imported snapshots, automatic migration of legacy library entries, stronger Kit filtering, and GUI deletion for configuration snapshots.
+- Bumped the paired Exporter release to `0.2.0-alpha.9` so the installed exporter can be matched unambiguously to Builder alpha.25.
+
+## 0.1.0-alpha.24
+
+- Fixed the Exporter treating empty Elementor `template_id` fields as missing templates, automatically includes real template dependencies, excludes the structural Default Kit, and bumped the paired Exporter release to `0.2.0-alpha.8`.
+
 ## Unreleased
+
+### Elementor design systems
+
+- Added backward-compatible build profile schema v8 with a reusable `designSystem` reference and source-aware Elementor template selections.
+- Added canonical responsive typography dimensions with explicit units, strict color/font-role/face validation, resource CRUD, dependency-aware deletion protection, and legacy value normalization.
+- Added structured GUI resource editors, a mutually exclusive Build-page design-system selector, CLI JSON resource commands, and `--design-system` / repeatable `--elementor-template` profile options.
+- Builds now compile checksum-addressed design-system payloads, record resource provenance, and bundle multiple WOFF2 Font Profiles once per unique file hash.
+- Redesigned Typography as persistent Body/Links/H1–H6/Buttons/Form Fields rows with a Desktop/Tablet/Mobile switch, canonical numeric/unit controls, draft memory, breakpoint clearing, custom rows, and friendly font slots.
+- Redesigned Colors and Design Systems around user-facing names, generated hidden IDs, stable custom-color tokens, automatic slot discovery, visible face availability, and guided readiness errors.
+- Bootstrap installs all bound fonts, writes deterministic Elementor global colors and typography, supports logical and exporter reference forms, preserves structural Kit settings, and reruns from the font phase at configuration revision 9.
+
+### Independent Elementor template library
+
+- Configuration imports now copy Elementor template documents into durable checksum-protected library storage with stable source-based IDs, provenance, dependencies, and safe global-reference labels.
+- New v8 profiles select template library IDs independently of snapshots, support package-only template builds, lock Elementor, close dependencies, and block unresolved global mappings.
+- Added Build-page search/source/type filters, dependency locking, friendly unresolved-reference mapping, and empty-by-default selection.
+- Dependency rows remain selectable after automatic closure, and omitted Elementor-template references now identify the source snapshot/reference, explicitly distinguish templates from plugins/settings, explain the re-import fix, and block profile saving until resolved.
+- Builds emit a separate `starter-elementor-templates.json`; Bootstrap imports it after Design Systems in a two-pass, idempotent flow and applies structural snapshots afterward. Legacy v7 and interim v8 selections remain readable.
 
 ### Stabilization and vNext foundation
 

@@ -1,6 +1,6 @@
 # Phase 2 — Portable Configuration Engine
 
-**Status: IN PROGRESS as of v0.1.0-alpha.22.**
+**Status: IN PROGRESS as of v0.1.0-alpha.26.**
 
 Phase 2 moves WP Starter from a reliable offline package installer to a portable configuration system. The rule is strict: configuration is transported only when an adapter can define what is reusable, what must be remapped, and what must be excluded.
 

@@ -35,6 +35,23 @@ test("exporter records only the reference hostname as optional provenance", asyn
   assert.equal(bootstrap.includes("site_domain"), false);
 });
 
+test("exporter emits labels-only Elementor global reference metadata", async () => {
+  const exporter = await readFile(path.join(repoRoot, "wordpress/exporter/includes/class-exporter.php"), "utf8");
+  assert.equal(exporter.includes("elementor_global_reference_catalog"), true);
+  assert.equal(exporter.includes("'globalReferences'"), true);
+  assert.match(exporter, /'sourceId'\s*=>/);
+  assert.match(exporter, /'name'\s*=>/);
+});
+
+test("exporter excludes Elementor Kits and ignores empty template references", async () => {
+  const exporter = await readFile(path.join(repoRoot, "wordpress/exporter/includes/class-exporter.php"), "utf8");
+  assert.match(exporter, /'kit'\s*===\s*\$type/);
+  assert.match(exporter, /''\s*===\s*\$source_id\s*\|\|\s*'0'\s*===\s*\$source_id/);
+  assert.match(exporter, /elementor_template_dependencies/);
+  assert.match(exporter, /'sourceId'\s*=>/);
+  assert.match(exporter, /\$post->ID\s*===\s*\$active_kit_id/);
+});
+
 test("bootstrap restores snippets/fonts and removes one-time payload", async () => {
   const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
   for (const marker of ["apply_code_snippets_adapter", "\\Code_Snippets\\save_snippet", "elementor_font_files", "elementor_font_face", "cleanup_payload_and_self", ".wp-starter-"]) {
@@ -50,7 +67,8 @@ test("bootstrap registers Elementor font files as WordPress attachments with id 
   assert.equal(bootstrap.includes("'post_mime_type' => 'font/woff2'"), true);
   assert.equal(bootstrap.includes("'id'  => absint( $attachment_id )"), true);
   assert.equal(bootstrap.includes("'url' => esc_url_raw( $url )"), true);
-  assert.equal(bootstrap.includes("const CONFIG_REVISION = 6;"), true);
+  assert.equal(bootstrap.includes("const CONFIG_REVISION = 9;"), true);
+  assert.equal(bootstrap.includes("starter-elementor-templates.json"), true);
   assert.match(bootstrap, /\$completed && \$revision < self::CONFIG_REVISION[\s\S]{0,180}'phase' => 'fonts'/);
 });
 
@@ -72,7 +90,14 @@ test("bootstrap runs real activation hooks and serializes WooCommerce first boot
 
 test("bootstrap applies vNext design-system globals and fails unresolved template references", async () => {
   const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
-  for (const marker of ["starter-design-system.json", "apply_vnext_design_system", "system_colors", "system_typography", "starter_vnext_unresolved_reference", "remap_vnext_value", "_wp_starter_vnext_id"]) {
+  for (const marker of ["starter-design-system.json", "apply_vnext_design_system", "system_colors", "custom_colors", "system_typography", "body_typography_font_family", "link_normal_typography", "h1_typography", "button_typography", "form_field_typography", "apply_elementor_theme_typography", "starter_vnext_unresolved_reference", "remap_vnext_value", "_wp_starter_vnext_id"]) {
     assert.equal(bootstrap.includes(marker), true, `${marker} should be present in the vNext provisioning path`);
   }
+});
+
+test("bootstrap imports the independent template payload between design and configuration", async () => {
+  const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
+  assert.match(bootstrap, /'design_system' === \$phase[\s\S]+?'phase' => empty\( \$template_payload \) \? 'languages' : 'elementor_templates'/);
+  assert.match(bootstrap, /'elementor_templates' === \$phase[\s\S]+?apply_elementor_templates_adapter/);
+  assert.equal(bootstrap.includes("elementorTemplatePayload"), true);
 });

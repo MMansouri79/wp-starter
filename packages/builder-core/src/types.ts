@@ -1,4 +1,4 @@
-import type { VNextBuildPayload } from "./vnext.js";
+import type { ResolvedDesignSystem, VNextBuildPayload } from "./vnext.js";
 
 export type PackageKind = "wordpress" | "theme" | "plugin";
 
@@ -127,6 +127,34 @@ export interface ElementorTemplateSummary {
 export interface ResolvedElementorTemplate extends ElementorTemplateSummary {
   /** Internal build-time source path; never serialized into GUI/profile state. */
   sourceZip: string;
+}
+
+export interface ElementorGlobalReference {
+  reference: string;
+  kind: "color" | "typography";
+  sourceId: string;
+  name: string;
+}
+
+export interface ElementorTemplateLibraryRecord {
+  id: string;
+  sourceTemplateId: string;
+  name: string;
+  type: string;
+  sourceDomain: string;
+  snapshotId: string;
+  snapshotName: string;
+  exportDate: string;
+  importedAt: string;
+  updatedAt: string;
+  documentFile: string;
+  sha256: string;
+  dependencies: string[];
+  globalReferences: ElementorGlobalReference[];
+}
+
+export interface ResolvedElementorLibraryTemplate extends ElementorTemplateLibraryRecord {
+  document: unknown[];
 }
 
 export interface SnapshotRequirement {
@@ -394,8 +422,25 @@ export interface ProfileDocumentV7 {
   languageArchives?: LanguageArchiveRef[];
 }
 
+export interface ProfileDocumentV8 {
+  schemaVersion: 8;
+  name: string;
+  locale: string;
+  wordpress: { version: string; variant: string };
+  theme: { slug: string; version: string } | null;
+  plugins: Array<{ slug: string; version: string; required?: boolean; locales?: string[] }>;
+  config: { id: string } | null;
+  designSystem: { id: string } | null;
+  /** Canonical snapshot-independent selections. */
+  elementorTemplateIds?: string[];
+  elementorTemplateMappings?: Record<string, string>;
+  /** Interim v8 compatibility; new profiles do not write this field. */
+  elementorTemplates?: ElementorTemplateSelection[];
+  languageArchives?: LanguageArchiveRef[];
+}
+
 export interface BuildProfile {
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   name: string;
   locale: string;
   wordpress: ArtifactRef;
@@ -403,10 +448,13 @@ export interface BuildProfile {
   plugins: PluginRef[];
   configExport: string | null;
   fontSystem?: ResolvedFontSystem | null;
+  designSystem?: ResolvedDesignSystem | null;
   languageArchives?: LanguageArchiveRef[];
   vnext?: VNextBuildPayload | null;
   /** Resolved v7 selections, including source ZIPs for composition. */
   elementorTemplates?: ResolvedElementorTemplate[];
+  elementorLibraryTemplates?: ResolvedElementorLibraryTemplate[];
+  elementorTemplateMappings?: Record<string, string>;
   configurationSnapshotId?: string;
   /** Export metadata resolved from a configuration snapshot at load time. */
   configurationSource?: {
@@ -457,11 +505,25 @@ export interface StarterBuildManifest {
   } | null;
   languageArchives: Array<LanguageArchiveRef & { sha256: string }>;
   vnext?: { path: string; sha256: string } | null;
+  elementorTemplatePayload?: { path: string; sha256: string } | null;
+  designSystem?: {
+    id: string;
+    sha256: string;
+    typography: { id: string; sha256: string };
+    colors: { id: string; sha256: string };
+    fontProfiles: Array<{
+      id: string;
+      name: string;
+      faces: Array<Omit<FontFaceRecord, "file"> & { file: string }>;
+    }>;
+  } | null;
   elementorTemplates: Array<{
     snapshotId: string;
     templateId: string;
     name: string;
     type: string;
+    libraryId?: string;
+    sourceDomain?: string;
   }>;
   compatibility?: CompatibilityReport;
 }

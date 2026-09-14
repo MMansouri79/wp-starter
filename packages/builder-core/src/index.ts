@@ -10,4 +10,5 @@ export * from "./snapshot-policy.js";
 export * from "./archive.js";
 export * from "./compatibility.js";
 export * from "./vnext.js";
+export * from "./template-library.js";
 export * from "./fs-utils.js";

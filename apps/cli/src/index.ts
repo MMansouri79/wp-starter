@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   buildStarter,
@@ -14,11 +14,13 @@ import {
   createProfileFromSnapshot,
   assertKnownGoodProfile,
   compatibilityReport,
-  writeJson
+  writeJson,
+  DesignSystemResourceService,
+  ElementorTemplateLibrary
 } from "../../../packages/builder-core/dist/index.js";
 import type { PackageKind } from "../../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.22";
+const VERSION = "0.1.0-alpha.26";
 
 function usage(exitCode = 2): never {
   const stream = exitCode === 0 ? console.log : console.error;
@@ -38,7 +40,10 @@ Usage:
   wp-starter font add <fonts.zip> [--name <name>] [--library <dir>] [--replace]
   wp-starter font list [--library <dir>]
   wp-starter font remove <id> [--library <dir>]
-  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--wordpress-version <version>] [--wordpress-variant <locale>] [--theme-version <version>] [--plugin-version <slug=version>]... [--exclude-plugin <slug>]... [--font-system <id>] [--library <dir>] [--replace]
+  wp-starter resource <typography|colors|design-systems> <add|list|remove> [file-or-id] [--library <dir>]
+  wp-starter template list [--library <dir>]
+  wp-starter template remove <library-id> [--library <dir>]
+  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--wordpress-version <version>] [--wordpress-variant <locale>] [--theme-version <version>] [--plugin-version <slug=version>]... [--exclude-plugin <slug>]... [--font-system <id> | --design-system <id>] [--template <library-id>]... [--template-mapping <source=target>]... [--library <dir>] [--replace]
   wp-starter profile check <profile.json> [--library <dir>]
   wp-starter library path [--library <dir>]
   wp-starter build --profile <profile.json> --output <starter.zip> [--library <dir>]
@@ -313,10 +318,47 @@ async function handleFont(): Promise<void> {
   }
   if (action === "remove") {
     if (!input || input.startsWith("--")) usage();
+    await new DesignSystemResourceService(libraryDir()).assertFontNotReferenced(input);
     const removed = await registry.remove(input);
     console.log(`Removed font profile: ${removed.name} (${removed.id})`);
     return;
   }
+  usage();
+}
+
+async function handleResource(): Promise<void> {
+  const kind = process.argv[3];
+  const action = process.argv[4];
+  const input = process.argv[5];
+  const service = new DesignSystemResourceService(libraryDir());
+  const normalizedKind = kind === "design-systems" ? "designSystems" : kind;
+  if (!(["typography", "colors", "designSystems"] as string[]).includes(String(normalizedKind))) usage();
+  const registry = service[normalizedKind as "typography" | "colors" | "designSystems"];
+  if (action === "list") {
+    console.log(JSON.stringify(await registry.list(), null, 2));
+    return;
+  }
+  if (!input || input.startsWith("--")) usage();
+  if (action === "add") {
+    let value: any;
+    try { value = JSON.parse(await readFile(path.resolve(input), "utf8")); }
+    catch (error) { throw new BuilderError("invalid_vnext_resource", `Could not read resource JSON: ${error instanceof Error ? error.message : String(error)}`); }
+    const saved = normalizedKind === "typography" ? await service.saveTypography(value) : normalizedKind === "colors" ? await service.saveColors(value) : await service.saveDesignSystem(value);
+    console.log(`Saved ${kind} resource: ${saved.id}`);
+    return;
+  }
+  if (action === "remove") {
+    const removed = await service.remove(normalizedKind as "typography" | "colors" | "designSystems", input);
+    console.log(`Removed ${kind} resource: ${removed.id}`);
+    return;
+  }
+  usage();
+}
+
+async function handleTemplate(): Promise<void> {
+  const action = process.argv[3]; const input = process.argv[4]; const library = new ElementorTemplateLibrary(libraryDir());
+  if (action === "list") { console.log(JSON.stringify(await library.list(), null, 2)); return; }
+  if (action === "remove" && input && !input.startsWith("--")) { const removed = await library.remove(input); console.log(`Removed template: ${removed.id}`); return; }
   usage();
 }
 
@@ -360,7 +402,15 @@ async function handleProfile(): Promise<void> {
       themeVersion: getArg("--theme-version") ?? undefined,
       pluginVersions,
       excludePlugins: getArgs("--exclude-plugin"),
-      fontSystemId: getArg("--font-system")
+      fontSystemId: getArg("--font-system"),
+      designSystemId: getArg("--design-system"),
+      elementorTemplates: hasFlag("--elementor-template") ? getArgs("--elementor-template").map((entry) => {
+        const split = entry.indexOf("=");
+        if (split <= 0 || split === entry.length - 1) throw new BuilderError("invalid_profile", `--elementor-template must use snapshot-id=template-id: ${entry}`);
+        return { snapshotId: entry.slice(0, split), templateId: entry.slice(split + 1) };
+      }) : undefined,
+      elementorTemplateIds: getArgs("--template"),
+      elementorTemplateMappings: Object.fromEntries(getArgs("--template-mapping").map((entry) => { const split=entry.indexOf("="); if(split<=0||split===entry.length-1) throw new BuilderError("invalid_profile", `--template-mapping must use source=target: ${entry}`); return [entry.slice(0,split),entry.slice(split+1)]; }))
     });
 
     await writeJson(absoluteOutput, profile);
@@ -372,7 +422,8 @@ async function handleProfile(): Promise<void> {
     console.log(`WordPress: ${profile.wordpress.version}${profile.wordpress.variant ? ` (${profile.wordpress.variant})` : ""}`);
     console.log(`Theme: ${profile.theme ? `${profile.theme.slug}@${profile.theme.version}` : "WordPress default"}`);
     console.log(`Plugins: ${profile.plugins.length}`);
-    console.log(`Font system: ${profile.fontSystem?.id || "none"}`);
+    console.log(`Font system: ${"fontSystem" in profile ? profile.fontSystem?.id || "none" : "owned by design system"}`);
+    console.log(`Design system: ${"designSystem" in profile ? profile.designSystem?.id || "none" : "none"}`);
     return;
   }
 
@@ -479,6 +530,13 @@ async function main(): Promise<void> {
     await handleFont();
     return;
   }
+
+  if (command === "resource") {
+    await handleResource();
+    return;
+  }
+
+  if (command === "template") { await handleTemplate(); return; }
 
   if (command === "profile") {
     await handleProfile();

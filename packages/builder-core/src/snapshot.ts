@@ -6,6 +6,7 @@ import { BuilderError } from "./errors.js";
 import { ensureDir, exists, findFileRecursive, sha256File, writeJson } from "./fs-utils.js";
 import { PackageRegistry, defaultLibraryDir } from "./registry.js";
 import { validatePortableSnapshot } from "./snapshot-policy.js";
+import { ElementorTemplateLibrary } from "./template-library.js";
 import type {
   ConfigSnapshotFile,
   ConfigSnapshotInspection,
@@ -307,6 +308,7 @@ export class ConfigSnapshotRegistry {
     if (existingIndex >= 0) {
       const existing = registry.snapshots[existingIndex];
       if (existing.sha256 === hash && await exists(path.join(this.root, existing.zip))) {
+        await new ElementorTemplateLibrary(this.root).importSnapshot(await readConfigExport(absolute), existing);
         return { record: existing, added: false, replaced: false };
       }
       if (!options.replace) {
@@ -317,6 +319,7 @@ export class ConfigSnapshotRegistry {
     await ensureDir(path.dirname(storedZip));
     await copyFile(absolute, storedZip);
 
+    const fullExport = await readConfigExport(absolute);
     const record: ConfigSnapshotRecord = {
       id,
       name,
@@ -331,7 +334,7 @@ export class ConfigSnapshotRegistry {
       sourceFilename: path.basename(absolute),
       addedAt: new Date().toISOString(),
       ...(parsed.sourceDomain !== UNKNOWN_SOURCE_DOMAIN ? { sourceDomain: parsed.sourceDomain } : {}),
-      elementorTemplates: summarizeElementorTemplates(await readConfigExport(absolute), id, name)
+      elementorTemplates: summarizeElementorTemplates(fullExport, id, name)
     };
 
     let replaced = false;
@@ -344,11 +347,38 @@ export class ConfigSnapshotRegistry {
     registry.snapshots.sort((a, b) => a.id.localeCompare(b.id));
     await this.save(registry);
     await writeJson(path.join(path.dirname(storedZip), "snapshot.json"), record);
+    await new ElementorTemplateLibrary(this.root).importSnapshot(fullExport, record);
     return { record, added: true, replaced };
   }
 
   async list(): Promise<ConfigSnapshotRecord[]> {
     return (await this.load()).snapshots;
+  }
+
+  /** Lazily migrates snapshots imported by older Builder releases. */
+  async syncElementorTemplateLibrary(): Promise<void> {
+    const library = new ElementorTemplateLibrary(this.root);
+    let existing = await library.list();
+    for (const record of (await this.load()).snapshots) {
+      const resolved = await this.resolve(record.id);
+      const raw = await readConfigExport(resolved.absoluteZip);
+      const rows = (Array.isArray(raw?.adapters?.elementor?.templates) ? raw.adapters.elementor.templates : []).filter((row: any) => {
+        const type = String(row?.type || "generic").trim().toLowerCase();
+        const name = String(row?.name || "").trim().toLowerCase();
+        return type !== "kit" && type !== "elementor-kit" && name !== "default kit";
+      });
+      const domain = record.sourceDomain || UNKNOWN_SOURCE_DOMAIN;
+      const complete = rows.every((row: any) => {
+        const supplied = row?.sourceId ?? row?.source_id;
+        const normalized = supplied === undefined || supplied === null ? "" : String(supplied).trim();
+        const identity = normalized && normalized !== "0" ? normalized : String(row?.id || "");
+        return existing.some((item) => item.sourceDomain === domain && (item.sourceTemplateId === identity || item.sourceTemplateId === String(row?.id || "")));
+      });
+      if (!complete) {
+        await library.importSnapshot(raw, record);
+        existing = await library.list();
+      }
+    }
   }
 
   /**
@@ -413,12 +443,18 @@ export class ConfigSnapshotRegistry {
       for (const dependencyId of summary.dependencies) {
         const dependency = snapshot.summaries.find((candidate) => candidate.templateId === dependencyId);
         if (!dependency) {
-          throw new BuilderError("elementor_template_dependency_missing", `Elementor template ${entry.templateId} requires template ${dependencyId}, but the required template was not included in source export ${entry.snapshotId}.`);
+          throw new BuilderError(
+            "elementor_template_dependency_missing",
+            `Elementor template "${summary.name}" (${summary.type}) from snapshot "${snapshot.record.name}" requires source template "${dependencyId}", but that template was not included in the export. Re-import the snapshot with the dependency included, or remove "${summary.name}" from the profile.`,
+          );
         }
         const dependencyKey = `${entry.snapshotId}\u0000${dependencyId}`;
         if (!unique.has(dependencyKey)) {
           if (options.requireClosed) {
-            throw new BuilderError("elementor_template_dependency_unselected", `Elementor template ${entry.templateId} requires template ${dependencyId} from the same snapshot. Select the required template before saving.`);
+            throw new BuilderError(
+              "elementor_template_dependency_unselected",
+              `Elementor template "${summary.name}" from snapshot "${snapshot.record.name}" requires "${dependency.name}". Select that template too, or remove "${summary.name}" from the profile.`,
+            );
           }
           unique.add(dependencyKey);
           queue.push({ snapshotId: entry.snapshotId, templateId: dependencyId });

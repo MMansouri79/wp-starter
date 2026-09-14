@@ -21,12 +21,11 @@ import {
   compatibilityReport,
   writeJson,
   VNextResourceRegistry,
-  assertValidReport,
-  validateTypographyProfile,
-  validateColorProfile
+  DesignSystemResourceService,
+  ElementorTemplateLibrary
 } from "../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.22";
+const VERSION = "0.1.0-alpha.26";
 const SESSION_TOKEN = randomBytes(32).toString("hex");
 const SESSION_COOKIE = `wp_starter_session=${SESSION_TOKEN}`;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -150,7 +149,8 @@ async function listProfiles() {
         plugins: Array.isArray(raw.plugins) ? raw.plugins.length : 0,
         config: String(raw.config?.id || ""),
         fontSystem: String(raw.fontSystem?.id || ""),
-        elementorTemplates: Array.isArray(raw.elementorTemplates) ? raw.elementorTemplates.length : 0,
+        designSystem: String(raw.designSystem?.id || ""),
+        elementorTemplates: Array.isArray(raw.elementorTemplateIds) ? raw.elementorTemplateIds.length : Array.isArray(raw.elementorTemplates) ? raw.elementorTemplates.length : 0,
         updatedAt: info.mtime.toISOString()
       });
     } catch {
@@ -191,13 +191,15 @@ async function listBuilds() {
 
 async function state() {
   const packages = (await new PackageRegistry(libraryRoot).list()).filter((record) => !isInfrastructurePackage(record));
-  const configs = await new ConfigSnapshotRegistry(libraryRoot).list();
+  const configRegistry = new ConfigSnapshotRegistry(libraryRoot);
+  const configs = await configRegistry.list();
+  await configRegistry.syncElementorTemplateLibrary();
   return {
     version: VERSION,
     library: libraryRoot,
     packages,
     configs,
-    elementorTemplates: await new ConfigSnapshotRegistry(libraryRoot).listElementorTemplates(),
+    elementorTemplates: await new ElementorTemplateLibrary(libraryRoot).list(),
     fonts: await new FontSystemRegistry(libraryRoot).list(),
     vnext: {
       typography: await new VNextResourceRegistry(vnextDir, "typography.json").list(),
@@ -249,7 +251,10 @@ async function createOrUpdateProfile(body) {
       themeVersion: String(body.themeVersion || "").trim() || undefined,
       pluginVersions,
       fontSystemId: String(body.fontSystemId || "").trim() || null,
-      elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined
+      designSystemId: String(body.designSystemId || "").trim() || null,
+      elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined,
+      elementorTemplateIds: Array.isArray(body.elementorTemplateIds) ? body.elementorTemplateIds : [],
+      elementorTemplateMappings: body.elementorTemplateMappings && typeof body.elementorTemplateMappings === "object" ? body.elementorTemplateMappings : {}
     });
   }
 
@@ -263,7 +268,10 @@ async function createOrUpdateProfile(body) {
     themeVersion: String(body.themeVersion || "").trim() || null,
     plugins: pluginVersions,
     fontSystemId: String(body.fontSystemId || "").trim() || null,
-    elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined
+    designSystemId: String(body.designSystemId || "").trim() || null,
+    elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined,
+    elementorTemplateIds: Array.isArray(body.elementorTemplateIds) ? body.elementorTemplateIds : [],
+    elementorTemplateMappings: body.elementorTemplateMappings && typeof body.elementorTemplateMappings === "object" ? body.elementorTemplateMappings : {}
   });
 }
 
@@ -378,13 +386,33 @@ async function api(req, res, url) {
     return true;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/elementor-templates") {
+    json(res, 200, await new ElementorTemplateLibrary(libraryRoot).list({ search: url.searchParams.get("search") || undefined, sourceDomain: url.searchParams.get("source") || undefined, type: url.searchParams.get("type") || undefined }));
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/elementor-templates/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/elementor-templates/".length));
+    json(res, 200, await new ElementorTemplateLibrary(libraryRoot).remove(id));
+    return true;
+  }
+
   if (req.method === "POST" && url.pathname.startsWith("/api/vnext/")) {
     const kind = url.pathname.slice("/api/vnext/".length);
     const body = await readJsonBody(req);
-    if (kind === "typography") assertValidReport(validateTypographyProfile(body));
-    if (kind === "colors") assertValidReport(validateColorProfile(body));
-    if (!body || typeof body.id !== "string" || !body.id.trim()) throw new BuilderError("invalid_vnext_resource", "A vNext resource requires an id.");
-    json(res, 200, await vnextResource(kind).save(body));
+    if (!body || typeof body.name !== "string" || !body.name.trim()) throw new BuilderError("invalid_vnext_resource", "A resource name is required.");
+    const resources = new DesignSystemResourceService(libraryRoot);
+    const result = kind === "typography" ? await resources.saveTypography(body) : kind === "colors" ? await resources.saveColors(body) : kind === "designSystems" ? await resources.saveDesignSystem(body) : await vnextResource(kind).save(body);
+    json(res, 200, result);
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/vnext/")) {
+    const segments = url.pathname.slice("/api/vnext/".length).split("/");
+    const kind = segments[0];
+    const id = decodeURIComponent(segments[1] || "");
+    if (!id || !["typography", "colors", "designSystems"].includes(kind)) throw new BuilderError("invalid_vnext_resource", "A supported resource kind and id are required.");
+    json(res, 200, await new DesignSystemResourceService(libraryRoot).remove(kind, id));
     return true;
   }
 
@@ -430,6 +458,7 @@ async function api(req, res, url) {
   if (req.method === "DELETE" && url.pathname === "/api/fonts") {
     const id = String(url.searchParams.get("id") || "").trim();
     if (!id) throw new BuilderError("invalid_request", "Font profile id is required.");
+    await new DesignSystemResourceService(libraryRoot).assertFontNotReferenced(id);
     json(res, 200, await new FontSystemRegistry(libraryRoot).remove(id));
     return true;
   }
@@ -446,6 +475,13 @@ async function api(req, res, url) {
     } finally {
       await rm(upload.tempDir, { recursive: true, force: true });
     }
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/configs/") && !url.pathname.endsWith("/check") && !url.pathname.endsWith("/inspect")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/configs/".length));
+    if (!id) throw new BuilderError("invalid_request", "Configuration snapshot id is required.");
+    json(res, 200, await new ConfigSnapshotRegistry(libraryRoot).remove(id));
     return true;
   }
 

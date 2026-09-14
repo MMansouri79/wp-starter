@@ -32,7 +32,7 @@ The Phase 1 build pipeline provides:
 
 ## Phase 2 status
 
-**Phase 2 is in progress as of v0.1.0-alpha.22.** Configuration inspection/comparison, security hardening, explicit starter targeting, Code Snippets restoration, reusable Font Systems, and source-aware Elementor template composition are now implemented.
+**Phase 2 is in progress as of v0.1.0-alpha.26.** Configuration inspection/comparison, security hardening, explicit starter targeting, Code Snippets restoration, reusable Font Systems, source-aware Elementor template composition, and Elementor Theme Style design-system application are now implemented.
 
 In the GUI, open **Configurations → Inspect** to review a snapshot through Overview, Packages, WordPress, Structures, Adapters, and Safety tabs. Use **Configurations → Compare Snapshots** to compare a baseline export against a target export. The diff keeps software/package changes separate from portable setting changes and object/structure changes.
 

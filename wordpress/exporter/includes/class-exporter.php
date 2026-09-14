@@ -181,6 +181,7 @@ final class Exporter {
             )
         );
         $rows = array();
+        $active_kit_id = absint( get_option( 'elementor_active_kit' ) );
         foreach ( $posts as $post ) {
             // Elementor normally stores the document as JSON in _elementor_data.
             // Keep an explicit post-content fallback for older/imported library
@@ -200,6 +201,11 @@ final class Exporter {
                 $type = get_post_meta( $post->ID, 'elementor_library_type', true );
             }
             $type = sanitize_key( $type ? $type : 'generic' );
+            // The active Elementor Kit is structural site configuration, not a
+            // reusable template. It is exported through kit_settings below.
+            if ( $post->ID === $active_kit_id || 'kit' === $type || 'elementor-kit' === $type || 'default kit' === strtolower( trim( (string) $post->post_title ) ) ) {
+                continue;
+            }
             $portable_id = 'elementor-' . substr( hash( 'sha256', $type . '|' . $post->post_name . '|' . $post->post_title ), 0, 16 );
             $rows[] = array(
                 'source_id'   => absint( $post->ID ),
@@ -277,24 +283,65 @@ final class Exporter {
             return array();
         }
 
-        $by_source_id = array();
+        $by_source_id  = array();
+        $by_source_row = array();
         foreach ( $inventory as $row ) {
             $by_source_id[ (string) $row['source_id'] ] = $row['id'];
+            $by_source_row[ (string) $row['source_id'] ] = $row;
+        }
+
+        // Include template dependencies automatically. A user should only
+        // have to choose the template they want; nested Elementor template
+        // references must travel with it when the source export contains them.
+        $included = array();
+        $queue    = $selected;
+        for ( $index = 0; $index < count( $queue ); $index++ ) {
+            $source_id = absint( $queue[ $index ] );
+            if ( $source_id <= 0 || isset( $included[ (string) $source_id ] ) || ! isset( $by_source_row[ (string) $source_id ] ) ) {
+                continue;
+            }
+            $included[ (string) $source_id ] = true;
+            foreach ( $this->elementor_template_dependencies( $by_source_row[ (string) $source_id ]['document'] ) as $dependency_id ) {
+                if ( isset( $by_source_row[ (string) $dependency_id ] ) && ! isset( $included[ (string) $dependency_id ] ) ) {
+                    $queue[] = $dependency_id;
+                }
+            }
         }
 
         $templates = array();
         foreach ( $inventory as $row ) {
-            if ( ! in_array( $row['source_id'], $selected, true ) ) {
+            if ( ! isset( $included[ (string) absint( $row['source_id'] ) ] ) ) {
                 continue;
             }
+            $document = $this->portable_template_value( $row['document'], $by_source_id );
             $templates[] = array(
                 'id'       => $row['id'],
+                'sourceId' => (string) $row['source_id'],
                 'name'     => $row['name'],
                 'type'     => $row['type'],
-                'document' => $this->portable_template_value( $row['document'], $by_source_id ),
+                'document' => $document,
+                'globalReferences' => $this->elementor_global_reference_catalog( $document ),
             );
         }
         return $templates;
+    }
+
+    private function elementor_template_dependencies( $value ) {
+        $dependencies = array();
+        $visit = function ( $node ) use ( &$visit, &$dependencies ) {
+            if ( ! is_array( $node ) ) {
+                return;
+            }
+            foreach ( $node as $key => $child ) {
+                if ( in_array( $key, array( 'template_id', 'templateId' ), true ) && is_scalar( $child ) && absint( $child ) > 0 ) {
+                    $dependencies[ (string) absint( $child ) ] = absint( $child );
+                    continue;
+                }
+                $visit( $child );
+            }
+        };
+        $visit( $value );
+        return array_values( $dependencies );
     }
 
     private function portable_template_value( $value, array $template_map, $key = '' ) {
@@ -303,6 +350,10 @@ final class Exporter {
             foreach ( $value as $child_key => $child ) {
                 if ( in_array( $child_key, array( 'template_id', 'templateId' ), true ) && ( is_scalar( $child ) || is_null( $child ) ) ) {
                     $source_id = (string) $child;
+                    if ( '' === $source_id || '0' === $source_id ) {
+                        $result[ $child_key ] = $child;
+                        continue;
+                    }
                     $portable_id = isset( $template_map[ $source_id ] ) ? $template_map[ $source_id ] : 'missing-' . substr( hash( 'sha256', $source_id ), 0, 16 );
                     $result[ $child_key ] = array( '$wpStarterRef' => 'template:' . $portable_id );
                 } else {
@@ -315,6 +366,31 @@ final class Exporter {
             return array( '$wpStarterRef' => 'elementor:' . ( 'colors' === $matches[1] ? 'color:' : 'typography:' ) . $matches[2] );
         }
         return $value;
+    }
+
+    /** Export labels only; global values and unrelated Kit data stay private. */
+    private function elementor_global_reference_catalog( $document ) {
+        $titles = array();
+        $kit_id = absint( get_option( 'elementor_active_kit' ) );
+        $settings = $kit_id > 0 ? get_post_meta( $kit_id, '_elementor_page_settings', true ) : array();
+        $settings = is_array( $settings ) ? $settings : array();
+        foreach ( array( 'system_colors' => 'color', 'system_typography' => 'typography' ) as $key => $kind ) {
+            foreach ( (array) ( $settings[ $key ] ?? array() ) as $row ) {
+                if ( is_array( $row ) && ! empty( $row['_id'] ) ) $titles[ $kind . ':' . (string) $row['_id'] ] = sanitize_text_field( (string) ( $row['title'] ?? $row['_id'] ) );
+            }
+        }
+        $found = array();
+        $visit = function ( $value ) use ( &$visit, &$found, $titles ) {
+            if ( ! is_array( $value ) ) return;
+            if ( isset( $value['$wpStarterRef'] ) && is_string( $value['$wpStarterRef'] ) && preg_match( '/^elementor:(color|typography):([A-Za-z0-9_-]+)$/', $value['$wpStarterRef'], $matches ) ) {
+                $key = $matches[1] . ':' . $matches[2];
+                $found[ $value['$wpStarterRef'] ] = array( 'reference' => $value['$wpStarterRef'], 'kind' => $matches[1], 'sourceId' => $matches[2], 'name' => isset( $titles[ $key ] ) ? $titles[ $key ] : $matches[2] );
+            }
+            foreach ( $value as $child ) $visit( $child );
+        };
+        $visit( $document );
+        ksort( $found );
+        return array_values( $found );
     }
 
     private function starts_with_any( $value, array $prefixes ) {

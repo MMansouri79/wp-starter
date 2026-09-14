@@ -6,10 +6,12 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   ConfigSnapshotRegistry,
+  ElementorTemplateLibrary,
   PackageRegistry,
   buildStarter,
   composeElementorTemplates,
   createProfileFromSnapshot,
+  createProfileFromPackages,
   createZip,
   extractZip,
   loadProfile,
@@ -113,6 +115,60 @@ test("Elementor inventory validates domains, preserves duplicate names, and lazi
   }
 });
 
+test("v8 template library survives snapshot deletion and builds package-only payloads", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wp-starter-template-library-"));
+  try {
+    const exportZip = await makeExport(root, "library-source", "library.example", [
+      { id: "page", name: "Landing Page", type: "page", document: [{ color: { $wpStarterRef: "elementor:color:primary" }, child: { $wpStarterRef: "template:part" } }], globalReferences: [{ reference: "elementor:color:primary", kind: "color", sourceId: "primary", name: "Primary" }] },
+      { id: "part", name: "Hero Part", type: "section", document: [{ widget: "heading" }] }
+    ]);
+    const library = path.join(root, "library"); const snapshots = new ConfigSnapshotRegistry(library);
+    await snapshots.add(exportZip, { id: "source", name: "Source" });
+    const templateLibrary = new ElementorTemplateLibrary(library); const first = await templateLibrary.list();
+    assert.equal(first.length, 2); const page = first.find(item => item.sourceTemplateId === "page"); const part = first.find(item => item.sourceTemplateId === "part");
+    assert.deepEqual(page.dependencies, [part.id]);
+    await snapshots.add(exportZip, { id: "source", name: "Source", replace: true });
+    assert.equal((await templateLibrary.list()).find(item => item.sourceTemplateId === "page").id, page.id, "re-import keeps immutable ID");
+    await snapshots.remove("source"); assert.equal((await templateLibrary.resolve([page.id])).length, 2, "dependency closure remains after snapshot removal");
+    await makePackages(root, library);
+    const document = await createProfileFromPackages({ libraryDir: library, name: "Package templates", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", plugins: { elementor: "4.0.8" }, elementorTemplateIds: [page.id] });
+    assert.equal(document.schemaVersion, 8); assert.deepEqual(document.elementorTemplateIds.sort(), [page.id, part.id].sort());
+    const profilePath = path.join(root, "package-profile.json"); await writeFile(profilePath, JSON.stringify(document));
+    const loaded = await loadProfile(profilePath, { libraryDir: library }); const output = path.join(root, "package-templates.zip");
+    const build = await buildStarter({ profile: loaded, outputZip: output, bootstrapFile: path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), builderVersion: "test" });
+    assert.equal(build.manifest.configurationEnabled, false); assert.equal(build.manifest.elementorTemplates.length, 2); assert.equal(build.manifest.elementorTemplatePayload.path, "starter-elementor-templates.json");
+    const unpacked = path.join(root, "package-unpacked"); await extractZip(output, unpacked); const payloadName=(await readdir(path.join(unpacked,"wp-content"))).find(name=>name.startsWith(".wp-starter-"));
+    const payload=JSON.parse(await readFile(path.join(unpacked,"wp-content",payloadName,"starter-elementor-templates.json"),"utf8")); assert.equal(payload.templates.length,2); assert.equal(payload.mappings["elementor:color:primary"],"elementor:color:primary");
+    await assert.rejects(() => templateLibrary.remove(part.id), error => error?.code === "resource_in_use");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("source-aware template imports replace renamed templates across snapshots", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wp-starter-template-reimport-"));
+  try {
+    const first = await makeExport(root, "source-first", "stable.example", [
+      { id: "portable-old-title", sourceId: "101", name: "Old title", type: "page", document: [{ widget: "old" }] }
+    ]);
+    const second = await makeExport(root, "source-second", "stable.example", [
+      { id: "portable-new-title", sourceId: "101", name: "New title", type: "page", document: [{ widget: "new" }] }
+    ]);
+    const library = path.join(root, "library");
+    const snapshots = new ConfigSnapshotRegistry(library);
+    await snapshots.add(first, { id: "first", name: "First" });
+    const templates = new ElementorTemplateLibrary(library);
+    const before = (await templates.list())[0];
+    await snapshots.add(second, { id: "second", name: "Second" });
+    const after = await templates.list();
+    assert.equal(after.length, 1);
+    assert.equal(after[0].id, before.id);
+    assert.equal(after[0].name, "New title");
+    assert.equal(after[0].sourceTemplateId, "101");
+    assert.deepEqual(after[0].dependencies, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("schema-v7 selections close dependencies and compose colliding source IDs selectively", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "wp-starter-elementor-profile-"));
   try {
@@ -169,7 +225,7 @@ test("schema-v7 selections close dependencies and compose colliding source IDs s
       { id: "root", name: "Root", type: "section", document: [{ ref: { $wpStarterRef: "template:absent" } }] }
     ]);
     await snapshots.add(missingZip, { id: "missing", name: "Missing" });
-    await assert.rejects(() => createProfileFromSnapshot("missing", { libraryDir: library, elementorTemplates: [{ snapshotId: "missing", templateId: "root" }] }), error => error?.code === "elementor_template_dependency_missing" && /not included in source export/.test(error.message));
+    await assert.rejects(() => createProfileFromSnapshot("missing", { libraryDir: library, elementorTemplates: [{ snapshotId: "missing", templateId: "root" }] }), error => error?.code === "elementor_template_dependency_missing" && /Root.*source template "absent".*not included in the export.*Re-import the snapshot/.test(error.message));
 
     const malformedPath = path.join(root, "malformed.json");
     await writeFile(malformedPath, JSON.stringify({ ...document, elementorTemplates: [{ snapshotId: "base", templateId: "shared" }] }));
