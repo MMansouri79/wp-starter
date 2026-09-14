@@ -26,22 +26,27 @@ final class Exporter {
             ? array_map( 'strval', $selection['starter_plugins'] )
             : $this->default_target_plugin_files( $source_plugins );
         $elementor_templates = $this->elementor_templates_adapter( $selection );
+        $source            = array(
+            'wordpress_version' => get_bloginfo( 'version' ),
+            'php_version'       => PHP_VERSION,
+            'locale'            => get_locale(),
+            'theme'             => array(
+                'slug'    => $theme->get_stylesheet(),
+                'name'    => $theme->get( 'Name' ),
+                'version' => $theme->get( 'Version' ),
+            ),
+            'plugins' => $source_plugins,
+        );
+        $site_domain = $this->source_site_domain();
+        if ( '' !== $site_domain ) {
+            $source['site_domain'] = $site_domain;
+        }
 
         return array(
             'schema_version'   => 2,
             'exporter_version' => MMS_WP_STARTER_EXPORTER_VERSION,
             'generated_at'     => gmdate( 'c' ),
-            'source'           => array(
-                'wordpress_version' => get_bloginfo( 'version' ),
-                'php_version'       => PHP_VERSION,
-                'locale'            => get_locale(),
-                'theme'             => array(
-                    'slug'    => $theme->get_stylesheet(),
-                    'name'    => $theme->get( 'Name' ),
-                    'version' => $theme->get( 'Version' ),
-                ),
-                'plugins' => $source_plugins,
-            ),
+            'source'           => $source,
             'targets' => array(
                 'plugins' => $this->selected_target_plugins( $source_plugins, $target_files ),
             ),
@@ -248,6 +253,19 @@ final class Exporter {
             }
         }
         return $portable;
+    }
+
+    /** Return only the hostname from home_url(); never persist URL components. */
+    private function source_site_domain() {
+        $parsed = function_exists( 'wp_parse_url' ) ? wp_parse_url( home_url() ) : parse_url( home_url() );
+        if ( ! is_array( $parsed ) || empty( $parsed['host'] ) ) {
+            return '';
+        }
+        $host = strtolower( rtrim( (string) $parsed['host'], '.' ) );
+        if ( strlen( $host ) > 1 && '[' === $host[0] && ']' === substr( $host, -1 ) ) {
+            $host = substr( $host, 1, -1 );
+        }
+        return preg_match( '/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $host ) || filter_var( $host, FILTER_VALIDATE_IP ) ? $host : '';
     }
 
     private function elementor_templates_adapter( array $selection ) {

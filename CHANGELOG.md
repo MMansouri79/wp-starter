@@ -11,6 +11,14 @@
 - Added isolated vNext Typography Profile, Color Profile, Design System, Font Asset, and Portable Template APIs with semantic validation and logical-reference remapping.
 - Added optional vNext design-system transport and Elementor bootstrap application with deterministic global IDs, template remapping, verification errors, and revision-based reruns.
 
+### Source-aware Elementor template library
+
+- Added a snapshot-derived Elementor template inventory with source hostname, snapshot metadata, export date, document location, and lightweight dependency summaries; full Elementor documents remain outside GUI state.
+- Added schema-v2 `source.site_domain` provenance from the exporter using only the `home_url()` hostname, with a legacy fallback of `Unknown — legacy export`.
+- Added profile schema v7 selections across imported snapshots, dependency closure and locking, Elementor inclusion requirements, checksum validation, and exact edit/duplicate restoration.
+- Builds now compose selected templates from multiple snapshots with source-namespaced IDs and same-source reference rewriting, and record the selection in the build manifest. Profiles v1–v6 retain base-snapshot template behavior.
+- Added the GUI Elementor Templates library tab and source-grouped Builder checklist, with regression coverage for validation, aggregation, dependencies, collisions, selective composition, and legacy compatibility.
+
 ## 0.1.0-alpha.22
 
 - Fix first-login provisioning races by running real plugin activation hooks instead of silent activation.

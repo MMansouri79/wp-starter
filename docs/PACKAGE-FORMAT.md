@@ -51,6 +51,11 @@ export-manifest.json
 
 `starter-config.json` is portable configuration data.
 
+Schema-v2 exports may include `source.site_domain`. This is only the lowercase
+hostname from the reference site's `home_url()`; it never contains a scheme,
+credentials, port, path, query, or fragment. Older exports without the field
+are shown as `Unknown — legacy export` and remain importable.
+
 `export-manifest.json` describes the source site and exporter version.
 
 ## Build profile schema v2
@@ -178,4 +183,39 @@ When `config` is `null`, Builder does not embed `starter-config.json` and Bootst
 
 ## Generated distribution layout (manifest schema v3)
 
-Manifest schema v3 adds `configurationEnabled` and allows `theme` and `configExport` to be `null`. This lets package-only distributions use the same Bootstrap runtime without pretending that a configuration snapshot exists.
+Manifest schema v3 adds `configurationEnabled` and allows `theme` and `configExport` to be `null`. This lets package-only distributions use the same Bootstrap runtime without pretending that a configuration snapshot exists. Current manifests also include an `elementorTemplates` array containing the selected template IDs and their source snapshot IDs; it is empty for package-only builds.
+
+## Build profile schema v7
+
+Schema v7 adds explicit, source-aware Elementor template selection while
+keeping the base configuration snapshot separate from the template sources:
+
+```json
+{
+  "schemaVersion": 7,
+  "name": "composed-store",
+  "locale": "en_US",
+  "wordpress": { "version": "7.1", "variant": "en_US" },
+  "theme": { "slug": "hello-elementor", "version": "3.4.9" },
+  "plugins": [
+    { "slug": "elementor", "version": "4.2.1", "required": true }
+  ],
+  "config": { "id": "snapshot-base" },
+  "fontSystem": null,
+  "elementorTemplates": [
+    { "snapshotId": "snapshot-base", "templateId": "elementor-header" },
+    { "snapshotId": "snapshot-store", "templateId": "elementor-footer" }
+  ]
+}
+```
+
+Each selected template is verified against its source snapshot and checksum.
+Template dependencies expressed as `$wpStarterRef` `template:` references are
+closed within the same snapshot and added automatically. During a build the
+base snapshot's Elementor collection is replaced by the selected documents;
+IDs are namespaced by source snapshot and same-source template references are
+rewritten. The generated build manifest records selected IDs and source
+snapshots without embedding full documents in profile or GUI state.
+
+Profiles using schemas v1–v6 remain readable and continue to import every
+Elementor template in their base configuration snapshot.

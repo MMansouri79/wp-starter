@@ -18,6 +18,7 @@
         <button class="nav" data-view="colors">Colors</button>
         <button class="nav" data-view="design-systems">Design Systems</button>
         <button class="nav" data-view="configs">Configurations</button>
+        <button class="nav" data-view="elementor-templates">Elementor Templates</button>
         <button class="nav" data-view="profiles">Profiles</button>
         <button class="nav" data-view="build">Build</button>
         <button class="nav" data-view="builds">Build History</button>
@@ -80,6 +81,13 @@
         </div>
       </section>
 
+      <section class="view" id="view-elementor-templates">
+        <div class="panel">
+          <div class="panel-head"><div><h2>Elementor Templates</h2><p>Source-aware inventory across every imported configuration snapshot. Duplicate names remain separate.</p></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Template</th><th>Type</th><th>Source site</th><th>Configuration</th><th>Exported</th></tr></thead><tbody id="elementor-templates-body"></tbody></table></div>
+        </div>
+      </section>
+
       <section class="view" id="view-profiles">
         <div class="panel">
           <div class="panel-head"><div><h2>Saved Profiles</h2><p>Reusable, version-pinned build definitions. Edit one without changing your package library or configuration snapshots.</p></div><button id="new-profile" class="primary">+ New Profile</button></div>
@@ -97,6 +105,7 @@
             <label>WordPress package<select id="build-wordpress"></select><span id="build-wordpress-meta" class="package-upgrade-meta"></span></label>
             <label>Theme package<select id="build-theme"></select><span id="build-theme-meta" class="package-upgrade-meta"></span></label>
             <label>Font profile <span class="optional">optional</span><select id="build-font-system"></select><small class="field-help">Font profiles are independent from snapshots and are registered as Elementor Pro Custom Fonts.</small></label>
+            <div class="field"><span class="label">Elementor Templates</span><div id="build-elementor-templates" class="checklist"></div><small id="build-elementor-help" class="field-help">Choose a base snapshot to select templates from all imported snapshots.</small></div>
             <div class="field"><span class="label">Plugins and versions</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div><div id="build-compatibility" class="compatibility-box hidden" aria-live="polite"></div></div>
             <div class="profile-actions"><button id="create-profile" class="primary">Save Profile</button><button id="cancel-profile-edit" class="secondary hidden">Cancel Edit</button></div>
           </div>

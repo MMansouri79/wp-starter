@@ -153,7 +153,7 @@ test("builds a package-only profile without a configuration snapshot or custom t
       themeVersion: null,
       plugins: { "example-plugin": "2.0.0" }
     });
-    assert.equal(profileDocument.schemaVersion, 6);
+    assert.equal(profileDocument.schemaVersion, 7);
     assert.equal(profileDocument.config, null);
     assert.equal(profileDocument.theme, null);
 

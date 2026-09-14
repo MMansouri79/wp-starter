@@ -45,3 +45,22 @@ jobs:
 
       - name: Lint WordPress PHP
         run: php scripts/lint-php.php
+
+  desktop-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Package Windows desktop app
+        run: npm run package:desktop
+      - name: Upload desktop artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wp-starter-desktop-windows
+          path: artifacts/desktop/*

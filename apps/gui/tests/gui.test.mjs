@@ -34,6 +34,7 @@ test("GUI serves the workspace and local API", async () => {
     const state = await stateResponse.json();
     assert.equal(state.packages.length, 0);
     assert.equal(state.configs.length, 0);
+    assert.deepEqual(state.elementorTemplates, []);
     assert.equal(path.resolve(state.library), path.resolve(library));
 
     const htmlResponse = await authFetch(`${base}/`);
@@ -45,6 +46,9 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(html, /Typography Profiles/);
     assert.match(html, /Color Profiles/);
     assert.match(html, /Design Systems/);
+    assert.match(html, /Elementor Templates/);
+    assert.match(html, /id="elementor-templates-body"/);
+    assert.match(html, /id="build-elementor-templates"/);
     assert.match(html, /Saved Profiles/);
     assert.match(html, /Build History/);
     assert.match(html, /Configuration Inspector/);
@@ -56,8 +60,31 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(appJs, /build-theme-meta/);
     assert.match(appJs, /build-wordpress-meta/);
     assert.match(appJs, /Exported settings will be preserved/);
+    assert.match(appJs, /populateProfileEditor/);
+    assert.match(appJs, /Unknown — legacy export/);
+    assert.match(appJs, /Required dependency · locked/);
+    assert.match(appJs, /elementorTemplates/);
+    assert.match(appJs, /profile-select"\)\.onchange/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    if (previous === undefined) delete process.env.WP_STARTER_HOME;
+    else process.env.WP_STARTER_HOME = previous;
+    await rm(library, { recursive: true, force: true });
+  }
+});
+
+test("GUI server supports a dynamic port and clean shutdown", async () => {
+  const library = await mkdtemp(path.join(os.tmpdir(), "wp-starter-gui-server-"));
+  const previous = process.env.WP_STARTER_HOME;
+  process.env.WP_STARTER_HOME = library;
+  const { startGuiServer } = await import(`../index.mjs?server-test=${Date.now()}`);
+  const gui = await startGuiServer({ port: 0, openBrowser: false, log: false });
+  try {
+    assert.notEqual(gui.port, 0);
+    assert.match(gui.url, /^http:\/\/127\.0\.0\.1:\d+\/$/);
+    assert.equal((await fetch(gui.url)).status, 200);
+  } finally {
+    await new Promise((resolve) => gui.server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME;
     else process.env.WP_STARTER_HOME = previous;
     await rm(library, { recursive: true, force: true });
@@ -123,7 +150,7 @@ test("GUI profile API can pin package versions and localized WordPress variants"
     }) });
     assert.equal(profileRes.status, 200);
     const profileData = await profileRes.json();
-    assert.equal(profileData.profile.schemaVersion, 6);
+    assert.equal(profileData.profile.schemaVersion, 7);
     assert.equal(profileData.profile.wordpress.variant, "en_US");
     assert.equal(profileData.profile.plugins[0].version, "4.2.1");
     assert.equal(profileData.compatibility.status, "unsupported");
@@ -191,7 +218,7 @@ test("GUI can create a package-only profile and expose build progress", async ()
     });
     assert.equal(profileRes.status, 200);
     const profileData = await profileRes.json();
-    assert.equal(profileData.profile.schemaVersion, 6);
+    assert.equal(profileData.profile.schemaVersion, 7);
     assert.equal(profileData.profile.config, null);
     assert.equal(profileData.profile.theme, null);
 

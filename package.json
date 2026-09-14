@@ -3,18 +3,23 @@
   "private": true,
   "version": "0.1.0-alpha.22",
   "description": "Offline WordPress starter build system: exporter, local builder and bootstrap.",
+  "author": "WP Starter",
   "type": "module",
+  "main": "apps/desktop/main.mjs",
   "scripts": {
     "build": "tsc -b packages/builder-core apps/cli",
     "test": "npm run build && node --test packages/builder-core/tests/*.test.mjs apps/gui/tests/*.test.mjs",
     "lint:php": "php scripts/lint-php.php",
     "check": "npm run build && npm run test && npm run lint:php",
     "package:builder": "npm run build && node scripts/package-builder.mjs",
+    "package:desktop": "npm run build && node scripts/package-desktop.mjs",
     "package:exporter": "node scripts/package-exporter.mjs",
     "verify:artifacts": "npm run package:builder && npm run package:exporter && node scripts/verify-artifacts.mjs"
   },
   "devDependencies": {
     "@types/node": "22.15.0",
+    "electron": "^36.9.5",
+    "electron-builder": "^26.15.3",
     "typescript": "5.8.3"
   },
   "engines": {
@@ -23,5 +28,39 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "build": {
+    "appId": "com.wpstarter.builder",
+    "productName": "WP Starter Builder",
+    "asar": true,
+    "directories": {
+      "output": "artifacts/desktop"
+    },
+    "icon": "apps/desktop/assets/icon.ico",
+    "files": [
+      "apps/desktop/**/*",
+      "apps/gui/index.mjs",
+      "apps/gui/package.json",
+      "apps/gui/public/**/*",
+      "packages/builder-core/dist/**/*",
+      "packages/builder-core/package.json",
+      "profiles/**/*",
+      "compatibility/**/*",
+      "wordpress/bootstrap/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "dir"
+      ],
+      "artifactName": "wp-starter-builder-v${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WP Starter Builder"
+    }
+  }
 }

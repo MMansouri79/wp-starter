@@ -23,6 +23,18 @@ test("exporter includes complete reviewed WordPress baseline keys", async () => 
   assert.equal(whitelist.includes("'page_for_posts'"), false, "raw posts-page IDs must not be exported");
 });
 
+test("exporter records only the reference hostname as optional provenance", async () => {
+  const exporter = await readFile(path.join(repoRoot, "wordpress/exporter/includes/class-exporter.php"), "utf8");
+  const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
+  assert.equal(exporter.includes("home_url()"), true);
+  assert.equal(exporter.includes("$source['site_domain']"), true);
+  assert.equal(exporter.includes("$parsed['host']"), true);
+  assert.equal(exporter.includes("$parsed['scheme']"), false);
+  assert.equal(exporter.includes("$parsed['path']"), false);
+  assert.equal(exporter.includes("$parsed['port']"), false);
+  assert.equal(bootstrap.includes("site_domain"), false);
+});
+
 test("bootstrap restores snippets/fonts and removes one-time payload", async () => {
   const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
   for (const marker of ["apply_code_snippets_adapter", "\\Code_Snippets\\save_snippet", "elementor_font_files", "elementor_font_face", "cleanup_payload_and_self", ".wp-starter-"]) {

@@ -11,3 +11,4 @@ private-packages/
 *.local.json
 
 *.tsbuildinfo
+apps/desktop/assets/icon.ico

@@ -1,0 +1,6 @@
+{
+  "name": "@wp-starter/desktop",
+  "private": true,
+  "version": "0.1.0-alpha.22",
+  "type": "module"
+}

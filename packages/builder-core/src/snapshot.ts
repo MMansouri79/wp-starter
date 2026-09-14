@@ -17,7 +17,10 @@ import type {
   ConfigSnapshotRecord,
   SnapshotPluginRequirement,
   SnapshotRequirement,
-  SnapshotRequirementReport
+  SnapshotRequirementReport,
+  ElementorTemplateSummary,
+  ResolvedElementorTemplate,
+  ElementorTemplateSelection
 } from "./types.js";
 
 const INFRASTRUCTURE_PLUGIN_SLUGS = new Set([
@@ -62,6 +65,77 @@ function compactTimestamp(input: string): string {
   return parsed.toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
 }
 
+export const UNKNOWN_SOURCE_DOMAIN = "Unknown — legacy export";
+
+function sourceDomain(value: unknown): string {
+  if (typeof value !== "string" || value.trim() === "") return UNKNOWN_SOURCE_DOMAIN;
+  const domain = value.trim();
+  const hostname = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+  const ipv6 = /^(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}$/;
+  if (domain.length > 253 || /[/?#[\]@]/.test(domain) || (!hostname.test(domain) && !ipv6.test(domain))) {
+    throw new BuilderError("invalid_config_export", "source.site_domain must contain only a valid hostname.");
+  }
+  return domain.toLowerCase();
+}
+
+function collectTemplateDependencies(value: unknown): string[] {
+  const dependencies = new Set<string>();
+  const visit = (current: unknown): void => {
+    if (Array.isArray(current)) {
+      current.forEach(visit);
+      return;
+    }
+    if (!current || typeof current !== "object") return;
+    const object = current as Record<string, unknown>;
+    const reference = object.$wpStarterRef;
+    if (typeof reference === "string" && reference.startsWith("template:") && reference.slice("template:".length)) {
+      dependencies.add(reference.slice("template:".length));
+    }
+    Object.values(object).forEach(visit);
+  };
+  visit(value);
+  return [...dependencies].sort((a, b) => a.localeCompare(b));
+}
+
+function summarizeElementorTemplates(raw: any, snapshotId: string, snapshotName: string): ElementorTemplateSummary[] {
+  const rows = Array.isArray(raw?.adapters?.elementor?.templates) ? raw.adapters.elementor.templates : [];
+  const exportedAt = typeof raw?.generated_at === "string" ? raw.generated_at : "";
+  return rows
+    .filter((template: any) => template && typeof template === "object" && typeof template.id === "string" && typeof template.name === "string")
+    .map((template: any, index: number) => ({
+      templateId: template.id,
+      name: template.name,
+      type: typeof template.type === "string" && template.type ? template.type : "generic",
+      sourceDomain: sourceDomain(raw?.source?.site_domain),
+      snapshotId,
+      snapshotName,
+      exportDate: exportedAt,
+      documentLocation: `starter-config.json:adapters.elementor.templates[${index}].document`,
+      dependencies: collectTemplateDependencies(template.document)
+    }));
+}
+
+function normalizeStoredTemplateSummary(value: any, record: ConfigSnapshotRecord & { absoluteZip?: string }, index: number): ElementorTemplateSummary {
+  const sourceValue = typeof value?.sourceDomain === "string" && value.sourceDomain !== UNKNOWN_SOURCE_DOMAIN
+    ? value.sourceDomain
+    : record.sourceDomain;
+  return {
+    templateId: requireString(value?.templateId, `elementorTemplates[${index}].templateId`),
+    name: requireString(value?.name, `elementorTemplates[${index}].name`),
+    type: typeof value?.type === "string" && value.type ? value.type : "generic",
+    sourceDomain: sourceDomain(sourceValue === UNKNOWN_SOURCE_DOMAIN ? undefined : sourceValue),
+    snapshotId: record.id,
+    snapshotName: record.name,
+    exportDate: typeof value?.exportDate === "string" && value.exportDate ? value.exportDate : record.generatedAt,
+    documentLocation: typeof value?.documentLocation === "string" && value.documentLocation
+      ? value.documentLocation
+      : `starter-config.json:adapters.elementor.templates[${index}].document`,
+    dependencies: Array.isArray(value?.dependencies)
+      ? [...new Set(value.dependencies.filter((dependency: unknown): dependency is string => typeof dependency === "string" && dependency.length > 0))].sort((left, right) => left.localeCompare(right))
+      : []
+  };
+}
+
 async function parseConfigExport(zipPath: string): Promise<{
   generatedAt: string;
   wordpressVersion: string;
@@ -69,6 +143,7 @@ async function parseConfigExport(zipPath: string): Promise<{
   theme: ConfigSnapshotRecord["theme"];
   plugins: SnapshotPluginRequirement[];
   sourcePlugins: SnapshotPluginRequirement[];
+  sourceDomain: string;
 }> {
   const raw = await readFullConfigExport(zipPath);
   const schema = Number(raw.schema_version);
@@ -102,7 +177,7 @@ async function parseConfigExport(zipPath: string): Promise<{
   const targetRows = schema >= 2 ? raw.targets?.plugins : raw.source.plugins;
   if (!Array.isArray(targetRows)) throw new BuilderError("invalid_config_export", schema >= 2 ? "targets.plugins must be an array." : "source.plugins must be an array.");
   const plugins = mapPluginRows(targetRows, schema < 2);
-  return { generatedAt, wordpressVersion, locale, theme, plugins, sourcePlugins };
+  return { generatedAt, wordpressVersion, locale, theme, plugins, sourcePlugins, sourceDomain: schema >= 2 ? sourceDomain(raw.source?.site_domain) : UNKNOWN_SOURCE_DOMAIN };
 }
 
 
@@ -140,6 +215,11 @@ async function readFullConfigExport(zipPath: string): Promise<any> {
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
+}
+
+/** Read and validate only the portable export document. Callers should avoid exposing the returned document. */
+export async function readConfigExport(zipPath: string): Promise<any> {
+  return readFullConfigExport(zipPath);
 }
 
 
@@ -249,7 +329,9 @@ export class ConfigSnapshotRegistry {
       zip: relativeZip.split(path.sep).join("/"),
       sha256: hash,
       sourceFilename: path.basename(absolute),
-      addedAt: new Date().toISOString()
+      addedAt: new Date().toISOString(),
+      ...(parsed.sourceDomain !== UNKNOWN_SOURCE_DOMAIN ? { sourceDomain: parsed.sourceDomain } : {}),
+      elementorTemplates: summarizeElementorTemplates(await readConfigExport(absolute), id, name)
     };
 
     let replaced = false;
@@ -267,6 +349,83 @@ export class ConfigSnapshotRegistry {
 
   async list(): Promise<ConfigSnapshotRecord[]> {
     return (await this.load()).snapshots;
+  }
+
+  /**
+   * Return the source-aware Elementor inventory without returning any full
+   * documents. Old registry records are lazily inspected from their ZIPs.
+   */
+  async listElementorTemplates(): Promise<ElementorTemplateSummary[]> {
+    const records = await this.load();
+    const inventory: ElementorTemplateSummary[] = [];
+    for (const record of records.snapshots) {
+      const resolved = await this.resolve(record.id);
+      const summaries = Array.isArray(record.elementorTemplates)
+        ? record.elementorTemplates.map((summary, index) => normalizeStoredTemplateSummary(summary, record, index))
+        : summarizeElementorTemplates(await readConfigExport(resolved.absoluteZip), record.id, record.name);
+      inventory.push(...summaries);
+    }
+    return inventory.sort((left, right) => left.sourceDomain.localeCompare(right.sourceDomain) || left.name.localeCompare(right.name) || left.snapshotId.localeCompare(right.snapshotId) || left.templateId.localeCompare(right.templateId));
+  }
+
+  async listElementorTemplatesForSnapshot(id: string): Promise<ElementorTemplateSummary[]> {
+    const record = await this.resolve(id);
+    const summaries = Array.isArray(record.elementorTemplates)
+      ? record.elementorTemplates.map((summary, index) => normalizeStoredTemplateSummary(summary, record, index))
+      : summarizeElementorTemplates(await readConfigExport(record.absoluteZip), record.id, record.name);
+    return summaries;
+  }
+
+  async resolveElementorTemplates(selection: ElementorTemplateSelection[], options: { requireClosed?: boolean } = {}): Promise<ResolvedElementorTemplate[]> {
+    if (!Array.isArray(selection)) throw new BuilderError("invalid_profile", "elementorTemplates must be an array.");
+    const requested = selection.map((entry, index) => {
+      if (!entry || typeof entry !== "object") throw new BuilderError("invalid_profile", `elementorTemplates[${index}] must be an object.`);
+      return { snapshotId: requireString(entry.snapshotId, `elementorTemplates[${index}].snapshotId`), templateId: requireString(entry.templateId, `elementorTemplates[${index}].templateId`) };
+    });
+    const unique = new Set<string>();
+    for (const entry of requested) {
+      const key = `${entry.snapshotId}\u0000${entry.templateId}`;
+      if (unique.has(key)) throw new BuilderError("invalid_profile", `elementorTemplates contains duplicate selection ${entry.snapshotId}:${entry.templateId}.`);
+      unique.add(key);
+    }
+
+    const summaryCache = new Map<string, { record: ConfigSnapshotRecord & { absoluteZip: string }; summaries: ElementorTemplateSummary[] }>();
+    const getSnapshot = async (snapshotId: string) => {
+      let cached = summaryCache.get(snapshotId);
+      if (cached) return cached;
+      const record = await this.resolve(snapshotId);
+      const summaries = Array.isArray(record.elementorTemplates)
+        ? record.elementorTemplates.map((summary, index) => normalizeStoredTemplateSummary(summary, record, index))
+        : summarizeElementorTemplates(await readConfigExport(record.absoluteZip), record.id, record.name);
+      cached = { record, summaries };
+      summaryCache.set(snapshotId, cached);
+      return cached;
+    };
+    const resolved: ResolvedElementorTemplate[] = [];
+    const queue = [...requested];
+    for (let index = 0; index < queue.length; index++) {
+      const entry = queue[index];
+      const snapshot = await getSnapshot(entry.snapshotId);
+      const summary = snapshot.summaries.find((candidate) => candidate.templateId === entry.templateId);
+      if (!summary) throw new BuilderError("elementor_template_not_found", `Elementor template ${entry.templateId} is not present in source export ${entry.snapshotId}.`);
+      const resolvedSummary: ResolvedElementorTemplate = { ...summary, sourceZip: snapshot.record.absoluteZip };
+      resolved.push(resolvedSummary);
+      for (const dependencyId of summary.dependencies) {
+        const dependency = snapshot.summaries.find((candidate) => candidate.templateId === dependencyId);
+        if (!dependency) {
+          throw new BuilderError("elementor_template_dependency_missing", `Elementor template ${entry.templateId} requires template ${dependencyId}, but the required template was not included in source export ${entry.snapshotId}.`);
+        }
+        const dependencyKey = `${entry.snapshotId}\u0000${dependencyId}`;
+        if (!unique.has(dependencyKey)) {
+          if (options.requireClosed) {
+            throw new BuilderError("elementor_template_dependency_unselected", `Elementor template ${entry.templateId} requires template ${dependencyId} from the same snapshot. Select the required template before saving.`);
+          }
+          unique.add(dependencyKey);
+          queue.push({ snapshotId: entry.snapshotId, templateId: dependencyId });
+        }
+      }
+    }
+    return resolved;
   }
 
   async resolve(id: string): Promise<ConfigSnapshotRecord & { absoluteZip: string }> {
@@ -318,6 +477,12 @@ export class ConfigSnapshotRegistry {
       const details: Record<string, unknown> = {};
       for (const [sectionKey, sectionValue] of Object.entries(adapter)) {
         if (["status", "reason"].includes(sectionKey)) continue;
+        if (key === "elementor" && sectionKey === "templates") {
+          const summaries = summarizeElementorTemplates(raw, snapshot.id, snapshot.name);
+          details.templates = summaries;
+          details.template_count = summaries.length;
+          continue;
+        }
         if (key === "code_snippets" && sectionKey === "snippets") {
           const list = Array.isArray(sectionValue) ? sectionValue : [];
           details.snippets = list.map((item: any) => ({ name: String(item?.name || ""), scope: String(item?.scope || ""), active: item?.active === true, type: String(item?.type || "") }));
@@ -349,7 +514,7 @@ export class ConfigSnapshotRegistry {
 
     return {
       snapshotId: snapshot.id, name: snapshot.name, schemaVersion: schema, exporterVersion: typeof raw.exporter_version === "string" ? raw.exporter_version : "unknown", generatedAt: typeof raw.generated_at === "string" ? raw.generated_at : snapshot.generatedAt,
-      source: { wordpressVersion: String(source.wordpress_version || snapshot.wordpressVersion), phpVersion: String(source.php_version || "unknown"), locale: String(source.locale || snapshot.locale), theme: { slug: String(sourceTheme.slug || snapshot.theme.slug), name: String(sourceTheme.name || snapshot.theme.name), version: String(sourceTheme.version || snapshot.theme.version) }, plugins: sourcePlugins, targetPlugins },
+      source: { siteDomain: schema >= 2 ? sourceDomain(source.site_domain) : UNKNOWN_SOURCE_DOMAIN, wordpressVersion: String(source.wordpress_version || snapshot.wordpressVersion), phpVersion: String(source.php_version || "unknown"), locale: String(source.locale || snapshot.locale), theme: { slug: String(sourceTheme.slug || snapshot.theme.slug), name: String(sourceTheme.name || snapshot.theme.name), version: String(sourceTheme.version || snapshot.theme.version) }, plugins: sourcePlugins, targetPlugins },
       wordpress: { options: wordpressOptions, optionCount: Object.keys(wordpressOptions).length, permalinkStructure: String(wordpress.permalink_structure || ""), cleanupDefaultContent: wordpress.cleanup_default_content === true, pages },
       adapters, safety,
       totals: { wordpressOptions: Object.keys(wordpressOptions).length, adapterOptions, adapterSettings, pages: pages.length, activePlugins: sourcePlugins.length, targetPlugins: targetPlugins.length, portableAdapters: adapters.filter((adapter) => adapter.status === "portable").length, deferredAdapters: adapters.filter((adapter) => adapter.status === "deferred").length }
@@ -488,4 +653,55 @@ export class ConfigSnapshotRegistry {
       missing: requirements.filter((entry) => entry.status === "missing").length
     };
   }
+}
+
+function identifierPart(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return normalized || "unknown";
+}
+
+/** Stable ID used only inside a composed build configuration. */
+export function namespaceElementorTemplateId(snapshotId: string, templateId: string): string {
+  return `${identifierPart(snapshotId)}--${identifierPart(templateId)}`;
+}
+
+function rewriteSameSnapshotTemplateReferences(value: unknown, snapshotId: string, selectedIds: Set<string>): unknown {
+  if (Array.isArray(value)) return value.map((child) => rewriteSameSnapshotTemplateReferences(child, snapshotId, selectedIds));
+  if (!value || typeof value !== "object") return value;
+  const object = value as Record<string, unknown>;
+  if (typeof object.$wpStarterRef === "string" && object.$wpStarterRef.startsWith("template:")) {
+    const dependencyId = object.$wpStarterRef.slice("template:".length);
+    if (selectedIds.has(dependencyId)) return { ...object, $wpStarterRef: `template:${namespaceElementorTemplateId(snapshotId, dependencyId)}` };
+  }
+  return Object.fromEntries(Object.entries(object).map(([key, child]) => [key, rewriteSameSnapshotTemplateReferences(child, snapshotId, selectedIds)]));
+}
+
+/**
+ * Read selected template documents from their source snapshots and compose a
+ * collision-safe Elementor collection. The result contains no source-only
+ * metadata, so it can be placed directly into starter-config.json.
+ */
+export async function composeElementorTemplates(selected: ResolvedElementorTemplate[]): Promise<Array<{ id: string; name: string; type: string; document: unknown }>> {
+  const documentsBySource = new Map<string, any>();
+  for (const item of selected) {
+    if (!documentsBySource.has(item.sourceZip)) documentsBySource.set(item.sourceZip, await readConfigExport(item.sourceZip));
+  }
+  const selectedBySnapshot = new Map<string, Set<string>>();
+  for (const item of selected) {
+    if (!selectedBySnapshot.has(item.snapshotId)) selectedBySnapshot.set(item.snapshotId, new Set());
+    selectedBySnapshot.get(item.snapshotId)!.add(item.templateId);
+  }
+
+  return selected.map((item) => {
+    const raw = documentsBySource.get(item.sourceZip);
+    const rows = Array.isArray(raw?.adapters?.elementor?.templates) ? raw.adapters.elementor.templates : [];
+    const source = rows.find((candidate: any) => candidate && candidate.id === item.templateId);
+    if (!source) throw new BuilderError("elementor_template_not_found", `Elementor template ${item.templateId} is not present in source export ${item.snapshotId}.`);
+    return {
+      id: namespaceElementorTemplateId(item.snapshotId, item.templateId),
+      name: String(source.name || item.name),
+      type: String(source.type || item.type || "generic"),
+      document: rewriteSameSnapshotTemplateReferences(source.document, item.snapshotId, selectedBySnapshot.get(item.snapshotId) || new Set())
+    };
+  });
 }

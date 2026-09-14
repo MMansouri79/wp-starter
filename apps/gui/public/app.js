@@ -2,6 +2,7 @@ const $ = (s) => document.querySelector(s);
 let state = null;
 let currentReport = null;
 let currentEditingProfileFile = "";
+let currentElementorSelection = null;
 const titles = {
   overview: ["Overview", "Your local WordPress starter workspace."],
   packages: ["Packages", "Manage versioned WordPress, theme, and plugin ZIPs."],
@@ -10,6 +11,7 @@ const titles = {
   colors: ["Colors", "Manage Builder-owned Elementor and semantic color profiles."],
   "design-systems": ["Design Systems", "Compose vNext design-system resources and portable templates."],
   configs: ["Configurations", "Reference-site exports and their package requirements."],
+  "elementor-templates": ["Elementor Templates", "Browse source-aware templates from every imported configuration snapshot."],
   profiles: ["Profiles", "Manage reusable, version-pinned build profiles."],
   build: ["Build", "Choose exact package versions and generate a complete offline WordPress ZIP."],
   builds: ["Build History", "Review, download, rebuild, or remove generated distributions."]
@@ -113,6 +115,92 @@ function renderVNext() {
   $("#templates-list").innerHTML = renderCards(resources.templates, "No portable templates yet.");
 }
 
+function templateKey(template) { return `${template.snapshotId}\u0000${template.templateId}`; }
+function templateSelectionFromDom() {
+  return [...document.querySelectorAll("#build-elementor-templates input.elementor-template")]
+    .filter(input => input.checked)
+    .map(input => ({ snapshotId: input.dataset.snapshotId, templateId: input.dataset.templateId }));
+}
+
+function elementorTemplatesForBuild() {
+  return Array.isArray(state.elementorTemplates) ? state.elementorTemplates : [];
+}
+
+function renderElementorChecklist() {
+  const container = $("#build-elementor-templates");
+  const help = $("#build-elementor-help");
+  const baseId = $("#build-config").value;
+  const templates = elementorTemplatesForBuild();
+  if (!baseId) {
+    container.innerHTML = `<label class="check template-choice"><input type="checkbox" disabled><span class="muted">Elementor template selection is disabled until a base configuration snapshot is selected.</span></label>`;
+    help.textContent = "Choose a base snapshot to select templates from all imported snapshots.";
+    return;
+  }
+  if (!templates.length) {
+    container.innerHTML = `<span class="muted">No Elementor templates were found in the imported snapshots.</span>`;
+    help.textContent = "Import another configuration snapshot to add templates to this library.";
+    return;
+  }
+
+  const selected = new Set((currentElementorSelection || templates.map(templateKey)).map(item => typeof item === "string" ? item : templateKey(item)));
+  const roots = [...selected];
+  const locked = new Set();
+  const missingDependencies = [];
+  const byKey = new Map(templates.map(template => [templateKey(template), template]));
+  const bySnapshotAndId = new Map(templates.map(template => [`${template.snapshotId}\u0000${template.templateId}`, template]));
+  const queue = [...roots];
+  for (let index = 0; index < queue.length; index++) {
+    const template = byKey.get(queue[index]);
+    if (!template) continue;
+    for (const dependencyId of template.dependencies || []) {
+      const dependency = bySnapshotAndId.get(`${template.snapshotId}\u0000${dependencyId}`);
+      if (!dependency) {
+        missingDependencies.push(`${template.name} → ${dependencyId}`);
+        continue;
+      }
+      const dependencyKey = templateKey(dependency);
+      if (!selected.has(dependencyKey)) {
+        selected.add(dependencyKey);
+        queue.push(dependencyKey);
+      }
+      locked.add(dependencyKey);
+    }
+  }
+  currentElementorSelection = [...selected].map(key => { const template = byKey.get(key); return template ? { snapshotId: template.snapshotId, templateId: template.templateId } : null; }).filter(Boolean);
+  const grouped = new Map();
+  for (const template of templates) {
+    const domain = template.sourceDomain || "Unknown — legacy export";
+    if (!grouped.has(domain)) grouped.set(domain, []);
+    grouped.get(domain).push(template);
+  }
+  container.innerHTML = [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([domain, rows]) => `
+    <fieldset class="template-source-group"><legend>${esc(domain)}</legend>${rows.map(template => {
+      const key = templateKey(template);
+      const isLocked = locked.has(key);
+      return `<label class="check template-choice"><input class="elementor-template" type="checkbox" data-snapshot-id="${escAttr(template.snapshotId)}" data-template-id="${escAttr(template.templateId)}" ${selected.has(key) ? "checked" : ""} ${isLocked ? "disabled" : ""}><span class="plugin-name"><strong>${esc(template.name)}</strong><small>${esc(template.type)} · ${esc(template.snapshotName)}</small></span><span class="meta">${isLocked ? "Required dependency · locked" : esc(template.snapshotId)}</span></label>`;
+    }).join("")}</fieldset>`).join("");
+  help.textContent = missingDependencies.length ? `Missing dependencies: ${missingDependencies.join(", ")}` : "Templates are selected by source snapshot. Required same-snapshot dependencies are selected and locked automatically.";
+  container.querySelectorAll("input.elementor-template").forEach(input => input.onchange = () => {
+    currentElementorSelection = templateSelectionFromDom();
+    renderElementorChecklist();
+    syncElementorRequirement();
+  });
+}
+
+function syncElementorRequirement() {
+  const required = templateSelectionFromDom().length > 0;
+  document.querySelectorAll("#build-plugins input.plugin-selection").forEach(input => {
+    if (input.dataset.slug !== "elementor") return;
+    input.disabled = required || input.dataset.available !== "1";
+    if (required) input.checked = true;
+  });
+}
+
+function renderElementorLibrary() {
+  const rows = elementorTemplatesForBuild();
+  $("#elementor-templates-body").innerHTML = rows.map(template => `<tr><td><strong>${esc(template.name)}</strong><br><code>${esc(template.templateId)}</code></td><td>${esc(template.type)}</td><td>${esc(template.sourceDomain || "Unknown — legacy export")}</td><td>${esc(template.snapshotName)}<br><code>${esc(template.snapshotId)}</code></td><td>${esc(template.exportDate ? new Date(template.exportDate).toLocaleString() : "—")}</td></tr>`).join("") || `<tr><td colspan="5" class="empty">No Elementor templates in imported configuration snapshots.</td></tr>`;
+}
+
 function render() {
   const previousConfig = $("#build-config")?.value ?? "";
   const previousProfile = $("#profile-select")?.value ?? "";
@@ -128,6 +216,7 @@ function render() {
   renderPackages();
   renderFonts();
   renderVNext();
+  renderElementorLibrary();
   renderFontSystemOptions(previousFontSystem);
 
   $("#configs-list").innerHTML = state.configs.map(c => `<div class="card"><div><strong>${esc(c.name)}</strong><small>${esc(c.id)} · WP ${esc(c.wordpressVersion)} · ${esc(c.locale)} · ${esc(c.theme.slug)}@${esc(c.theme.version)} · ${c.plugins.length} plugins</small></div><div class="action-list"><button class="secondary inspect-config" data-id="${escAttr(c.id)}">Inspect</button><button class="secondary check-config" data-id="${escAttr(c.id)}">Check packages</button></div></div>`).join("") || `<div class="empty">No configuration snapshots yet. You can still create package-only builds.</div>`;
@@ -152,7 +241,7 @@ function render() {
   $("#profile-select").innerHTML = profileOpts || `<option value="">No profiles created</option>`;
   if (state.profiles.some(p => p.file === previousProfile)) $("#profile-select").value = previousProfile;
 
-  $("#profiles-manager").innerHTML = state.profiles.map(p => `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.fontSystem ? ` · Font: ${esc(p.fontSystem)}` : ""}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`).join("") || `<div class="empty">No profiles yet. Create one from the Build page.</div>`;
+  $("#profiles-manager").innerHTML = state.profiles.map(p => `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.elementorTemplates ? ` · ${p.elementorTemplates} Elementor templates` : ""}${p.fontSystem ? ` · Font: ${esc(p.fontSystem)}` : ""}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`).join("") || `<div class="empty">No profiles yet. Create one from the Build page.</div>`;
 
   const buildCard = (b, compact = false) => `<div class="build-card"><div><strong>${esc(b.file)}</strong><small>${b.profile ? `Profile: ${esc(b.profile)} · ` : ""}${b.locale ? `${esc(b.locale)} · ` : ""}${b.configurationEnabled ? "Snapshot" : "Packages only"} · ${fmtBytes(b.size)} · ${new Date(b.modifiedAt).toLocaleString()}</small>${b.compatibility?.status === "upgrade-warning" ? `<small class="compatibility-inline">Upgrade warning: ${esc(b.compatibility.warnings.map(w => `${w.slug} ${w.exportedVersion} → ${w.selectedVersion}`).join(", "))}</small>` : ""}${!compact && b.sha256 ? `<code class="hash">${esc(b.sha256)}</code>` : ""}</div><div class="build-card-actions"><a class="tiny primary-ish" href="/download/${encodeURIComponent(b.file)}">Download</a>${b.profileFile ? `<button class="tiny rebuild" data-profile="${escAttr(b.profileFile)}">Build again</button>` : ""}${compact ? "" : `<button class="tiny danger delete-build" data-file="${escAttr(b.file)}">Delete</button>`}</div></div>`;
   $("#recent-builds").innerHTML = state.builds.slice(0, 5).map(b => buildCard(b, true)).join("") || `<div class="empty">No builds yet.</div>`;
@@ -490,11 +579,11 @@ function renderPackageUpgradeMeta(config = null) {
   render(themeMeta, config.theme?.version, theme.version);
 }
 
-function pluginChoice(plugin, checked) {
+function pluginChoice(plugin, checked, requiredByTemplates = false) {
   const available = pluginPackages(plugin.slug);
   const preferred = available.find(p => p.version === plugin.version) || available[0];
   const opts = available.map(p => `<option value="${escAttr(p.version)}" ${preferred && p.version === preferred.version ? "selected" : ""}>${esc(p.version)}</option>`).join("");
-  return `<label class="check package-choice"><input type="checkbox" value="${escAttr(plugin.slug)}" ${checked && available.length ? "checked" : ""} ${available.length ? "" : "disabled"}><span class="plugin-name"><strong>${esc(plugin.name)}</strong><small>Exporter: ${esc(plugin.version)}</small></span><select class="plugin-version" data-slug="${escAttr(plugin.slug)}" data-exported-version="${escAttr(plugin.version)}" ${available.length ? "" : "disabled"}>${opts || `<option>Missing</option>`}</select><span class="upgrade-badge hidden">Newer version</span><span class="meta ${available.length ? "status-ok" : "status-missing"}">${available.length ? `${available.length} version${available.length === 1 ? "" : "s"}` : "missing"}</span></label>`;
+  return `<label class="check package-choice"><input class="plugin-selection" data-slug="${escAttr(plugin.slug)}" data-available="${available.length ? "1" : "0"}" type="checkbox" value="${escAttr(plugin.slug)}" ${checked && available.length ? "checked" : ""} ${available.length ? "" : "disabled"} ${requiredByTemplates ? "disabled" : ""}><span class="plugin-name"><strong>${esc(plugin.name)}</strong><small>${requiredByTemplates ? "Required by selected Elementor templates" : `Exporter: ${esc(plugin.version)}`}</small></span><select class="plugin-version" data-slug="${escAttr(plugin.slug)}" data-exported-version="${escAttr(plugin.version)}" ${available.length ? "" : "disabled"}>${opts || `<option>Missing</option>`}</select><span class="upgrade-badge hidden">Newer version</span><span class="meta ${available.length ? "status-ok" : "status-missing"}">${available.length ? `${available.length} version${available.length === 1 ? "" : "s"}` : "missing"}</span></label>`;
 }
 
 function selectedVersionIsNewer(selected, exported) { return compareVersions(exported, selected) > 0; }
@@ -540,11 +629,13 @@ async function loadBuildSelection(id) {
     renderWordPressOptions(config);
     renderThemeOptions(config);
 
+    renderElementorChecklist();
+    const selectedTemplates = templateSelectionFromDom();
     if (config) {
-      $("#build-plugins").innerHTML = config.plugins.map(plugin => pluginChoice(plugin, true)).join("") || `<span class="muted">No plugins in this snapshot.</span>`;
+      $("#build-plugins").innerHTML = config.plugins.map(plugin => pluginChoice(plugin, true, plugin.slug === "elementor" && selectedTemplates.length > 0)).join("") || `<span class="muted">No plugins in this snapshot.</span>`;
     } else {
       const availablePlugins = groups("plugin").map(records => ({ slug: records[0].slug, name: displayName(records), version: records[0].version }));
-      $("#build-plugins").innerHTML = availablePlugins.map(plugin => pluginChoice(plugin, false)).join("") || `<span class="muted">No plugin packages in the library.</span>`;
+      $("#build-plugins").innerHTML = availablePlugins.map(plugin => pluginChoice(plugin, false, false)).join("") || `<span class="muted">No plugin packages in the library.</span>`;
     }
     document.querySelectorAll("#build-plugins .plugin-version").forEach(select => select.addEventListener("change", renderCompatibilityPreview));
     renderCompatibilityPreview();
@@ -584,6 +675,7 @@ async function createProfile() {
     themeVersion: theme.version,
     pluginVersions,
     fontSystemId: $("#build-font-system").value,
+    elementorTemplates: templateSelectionFromDom(),
     sourceFile: currentEditingProfileFile
   };
   try {
@@ -610,44 +702,52 @@ function goView(view) {
   $("#subtitle").textContent = titles[view][1];
 }
 
-async function loadProfileIntoEditor(file, duplicate = false) {
+async function populateProfileEditor(profile) {
+  $("#build-config").value = profile.config?.id || "";
+  $("#build-name").dataset.changed = "1";
+  $("#build-locale").dataset.changed = "1";
+  $("#build-name").value = profile.name;
+  $("#build-locale").value = profile.locale || "en_US";
+  const baseId = profile.config?.id || "";
+  currentElementorSelection = profile.schemaVersion >= 7
+    ? (profile.elementorTemplates || [])
+    : elementorTemplatesForBuild().filter(template => template.snapshotId === baseId).map(template => ({ snapshotId: template.snapshotId, templateId: template.templateId }));
+  await loadBuildSelection(baseId);
+  $("#build-font-system").value = profile.fontSystem?.id || "";
+
+  const wpValue = JSON.stringify({ version: profile.wordpress.version, variant: profile.wordpress.variant || "en_US" });
+  if ([...$("#build-wordpress").options].some(o => o.value === wpValue)) $("#build-wordpress").value = wpValue;
+  const themeValue = profile.theme ? JSON.stringify({ slug: profile.theme.slug, version: profile.theme.version }) : "";
+  if ([...$("#build-theme").options].some(o => o.value === themeValue)) $("#build-theme").value = themeValue;
+
+  const selected = new Map((profile.plugins || []).map(p => [p.slug, p.version]));
+  document.querySelectorAll("#build-plugins .package-choice").forEach(row => {
+    const input = row.querySelector('input[type="checkbox"]');
+    const select = row.querySelector(".plugin-version");
+    const version = selected.get(input.value);
+    input.checked = !!version;
+    if (version && [...select.options].some(o => o.value === version)) select.value = version;
+  });
+  renderCompatibilityPreview();
+}
+
+async function loadProfileIntoEditor(file, duplicate = false, { notify = true } = {}) {
   try {
     const data = await request(`/api/profiles/${encodeURIComponent(file)}`);
     const profile = data.profile;
     currentEditingProfileFile = duplicate ? "" : file;
-    $("#build-config").value = profile.config?.id || "";
-    $("#build-name").dataset.changed = "1";
-    $("#build-locale").dataset.changed = "1";
-    $("#build-name").value = duplicate ? `${profile.name}-copy` : profile.name;
-    $("#build-locale").value = profile.locale || "en_US";
-    await loadBuildSelection(profile.config?.id || "");
-    $("#build-font-system").value = profile.fontSystem?.id || "";
-
-    const wpValue = JSON.stringify({ version: profile.wordpress.version, variant: profile.wordpress.variant || "en_US" });
-    if ([...$("#build-wordpress").options].some(o => o.value === wpValue)) $("#build-wordpress").value = wpValue;
-    const themeValue = profile.theme ? JSON.stringify({ slug: profile.theme.slug, version: profile.theme.version }) : "";
-    if ([...$("#build-theme").options].some(o => o.value === themeValue)) $("#build-theme").value = themeValue;
-
-    const selected = new Map((profile.plugins || []).map(p => [p.slug, p.version]));
-    document.querySelectorAll("#build-plugins .package-choice").forEach(row => {
-      const input = row.querySelector('input[type="checkbox"]');
-      const select = row.querySelector(".plugin-version");
-      const version = selected.get(input.value);
-      input.checked = !!version;
-    if (version && [...select.options].some(o => o.value === version)) select.value = version;
-    });
-
-    renderCompatibilityPreview();
+    await populateProfileEditor(profile);
 
     $("#cancel-profile-edit").classList.toggle("hidden", duplicate);
     $("#create-profile").textContent = duplicate ? "Save Copy" : "Save Changes";
     goView("build");
-    flash(duplicate ? `Duplicating ${profile.name}. Choose a new name and save.` : `Editing ${profile.name}.`);
+    if (notify) flash(duplicate ? `Duplicating ${profile.name}. Choose a new name and save.` : `Editing ${profile.name}.`);
   } catch (e) { flash(e.message, true); }
 }
 
 function resetProfileEditor() {
   currentEditingProfileFile = "";
+  currentElementorSelection = null;
   $("#build-name").dataset.changed = "";
   $("#build-locale").dataset.changed = "";
   $("#build-config").value = "";
@@ -679,8 +779,8 @@ async function deleteBuild(file) {
 
 async function buildProfileFile(file) {
   if (!state.profiles.some(p => p.file === file)) return flash("That profile no longer exists.", true);
-  goView("build");
   $("#profile-select").value = file;
+  await loadProfileIntoEditor(file, false, { notify: false });
   await build();
 }
 
@@ -752,7 +852,8 @@ const dz = $("#package-drop");
 ["dragenter", "dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("drag"); }));
 ["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("drag"); }));
 dz.addEventListener("drop", e => uploadFiles([...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith(".zip")), "packages").catch(e => flash(e.message, true)));
-$("#build-config").onchange = e => loadBuildSelection(e.target.value);
+$("#build-config").onchange = e => { currentElementorSelection = null; loadBuildSelection(e.target.value); };
+$("#profile-select").onchange = e => loadProfileIntoEditor(e.target.value, false, { notify: false });
 $("#build-name").oninput = e => e.target.dataset.changed = "1";
 $("#build-locale").onchange = e => { e.target.dataset.changed = "1"; selectWordPressForLocale(); };
 $("#build-wordpress").onchange = e => {

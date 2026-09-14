@@ -33,13 +33,28 @@ function validatePluginRows(rows: unknown, scope: string, allowActive: boolean) 
   });
 }
 
+function validateSourceDomain(value: unknown): void {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new BuilderError("invalid_config_export", "source.site_domain must be a non-empty hostname.");
+  }
+  const domain = value.trim();
+  // This is deliberately a hostname check, not a URL check. Provenance must
+  // never carry scheme, credentials, port, path, query, or fragment data.
+  const hostname = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+  const ipv6 = /^(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}$/;
+  if (domain.length > 253 || /[/?#[\]@]/.test(domain) || (!hostname.test(domain) && !ipv6.test(domain))) {
+    throw new BuilderError("invalid_config_export", "source.site_domain must contain only a valid hostname.");
+  }
+}
+
 export function validatePortableSnapshot(raw: any): void {
   if (Number(raw?.schema_version) !== 2) return; // v1 stays backward-compatible and is treated as legacy/trusted input.
   const root = object(raw);
   rejectUnknown(root, TOP_LEVEL, "snapshot");
 
   const source = object(root.source);
-  rejectUnknown(source, new Set(["wordpress_version","php_version","locale","theme","plugins"]), "source");
+  rejectUnknown(source, new Set(["wordpress_version","php_version","locale","theme","plugins","site_domain"]), "source");
+  if (Object.prototype.hasOwnProperty.call(source, "site_domain")) validateSourceDomain(source.site_domain);
   const theme = object(source.theme);
   rejectUnknown(theme, new Set(["slug","name","version"]), "source.theme");
   validatePluginRows(source.plugins, "source.plugins", true);

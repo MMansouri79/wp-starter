@@ -32,11 +32,11 @@ The Phase 1 build pipeline provides:
 
 ## Phase 2 status
 
-**Phase 2 is in progress as of v0.1.0-alpha.22.** Configuration inspection/comparison, security hardening, explicit starter targeting, Code Snippets restoration, and reusable Font Systems are now implemented.
+**Phase 2 is in progress as of v0.1.0-alpha.22.** Configuration inspection/comparison, security hardening, explicit starter targeting, Code Snippets restoration, reusable Font Systems, and source-aware Elementor template composition are now implemented.
 
 In the GUI, open **Configurations → Inspect** to review a snapshot through Overview, Packages, WordPress, Structures, Adapters, and Safety tabs. Use **Configurations → Compare Snapshots** to compare a baseline export against a target export. The diff keeps software/package changes separate from portable setting changes and object/structure changes.
 
-The comparison model currently covers WordPress/theme/plugin coordinates, WordPress options and permalink behavior, adapter values, starter pages, adapter status, and exporter safety boundaries. Builder alpha.22 also separates source inventory from starter targets, restores selected Code Snippets idempotently, hardens local/build-time archive handling and installer cleanup, and adds reusable WOFF2-only Font Profiles. One font ZIP may contain several families; each family is split into its own named profile and installed into Elementor Pro Custom Fonts as real WordPress Media attachments, allowing Elementor's Edit Font screen to display each WOFF2 file normally. The Fonts screen also shows each WOFF2 filename beside its detected numeric CSS weight, readable weight name, and style so detection can be audited before building. Phase 2 continues with formal adapter remapping and portable object-backed structures such as Elementor templates and FilterX definitions.
+The comparison model currently covers WordPress/theme/plugin coordinates, WordPress options and permalink behavior, adapter values, starter pages, adapter status, and exporter safety boundaries. Builder alpha.22 also separates source inventory from starter targets, restores selected Code Snippets idempotently, hardens local/build-time archive handling and installer cleanup, adds reusable WOFF2-only Font Profiles, and composes source-aware Elementor templates across snapshots. One font ZIP may contain several families; each family is split into its own named profile and installed into Elementor Pro Custom Fonts as real WordPress Media attachments, allowing Elementor's Edit Font screen to display each WOFF2 file normally. The Fonts screen also shows each WOFF2 filename beside its detected numeric CSS weight, readable weight name, and style so detection can be audited before building. Phase 2 continues with formal adapter contracts and remapping for future portable structures such as FilterX definitions.
 
 ## Stabilization and vNext
 
@@ -150,6 +150,14 @@ The GUI currently supports:
 - downloading previous builds.
 
 The CLI remains supported for diagnostics, scripting, and CI.
+
+## Standalone Windows desktop app (WIP)
+
+The Builder can also be packaged as a standalone Windows desktop app. The app embeds the local GUI in its own window, so users do not need Node, a command, a terminal, or a separate browser window.
+
+Run `npm run package:desktop` on Windows to create an unsigned installer and a portable ZIP under `artifacts\desktop`. The installer creates Start Menu and Desktop shortcuts. The portable ZIP can be extracted and launched directly. Both versions use the existing `%USERPROFILE%\.wp-starter` library and do not remove existing profiles or packages.
+
+These first desktop artifacts are unsigned WIP builds, so Windows SmartScreen may display a warning until code signing is added.
 
 ## Versioned packages and localized WordPress core
 

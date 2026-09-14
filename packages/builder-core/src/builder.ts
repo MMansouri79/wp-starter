@@ -1,10 +1,11 @@
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { createZip, extractZip } from "./archive.js";
 import { BuilderError } from "./errors.js";
 import { compatibilityReport } from "./compatibility.js";
+import { composeElementorTemplates } from "./snapshot.js";
 import {
   copyDirectoryContents,
   detectPackageRoot,
@@ -199,6 +200,7 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
     }
 
     let configExport: StarterBuildManifest["configExport"] = null;
+    let manifestElementorTemplates: StarterBuildManifest["elementorTemplates"] = [];
     if (profile.configExport) {
       await emit(options, { percent: 78, stage: "configuration", message: "Embedding configuration snapshot…" });
       await ensureEmptyDir(configExtract);
@@ -207,7 +209,29 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       if (!configFile) {
         throw new BuilderError("invalid_config_export", "starter-config.json was not found in the configuration export ZIP.");
       }
-      await cp(configFile, path.join(starterDataDir, "starter-config.json"), { force: true });
+      let config: any;
+      try { config = JSON.parse(await readFile(configFile, "utf8")); }
+      catch (error) { throw new BuilderError("invalid_config_export", `Could not parse starter-config.json: ${error instanceof Error ? error.message : String(error)}`); }
+      const originalTemplates = Array.isArray(config?.adapters?.elementor?.templates) ? config.adapters.elementor.templates : [];
+      if (profile.schemaVersion === 7) {
+        const selected = profile.elementorTemplates || [];
+        const composed = await composeElementorTemplates(selected);
+        config.adapters = config.adapters && typeof config.adapters === "object" && !Array.isArray(config.adapters) ? config.adapters : {};
+        config.adapters.elementor = config.adapters.elementor && typeof config.adapters.elementor === "object" && !Array.isArray(config.adapters.elementor) ? config.adapters.elementor : {};
+        config.adapters.elementor.templates = composed;
+        manifestElementorTemplates = selected.map((template) => ({ snapshotId: template.snapshotId, templateId: template.templateId, name: template.name, type: template.type }));
+        await writeJson(path.join(starterDataDir, "starter-config.json"), config);
+      } else {
+        // Profiles v1-v6 intentionally retain their original behavior: every
+        // template already present in the base snapshot is imported.
+        manifestElementorTemplates = originalTemplates.filter((template: any) => template && typeof template.id === "string").map((template: any) => ({
+          snapshotId: profile.configurationSnapshotId || "legacy-base",
+          templateId: template.id,
+          name: String(template.name || template.id),
+          type: String(template.type || "generic"),
+        }));
+        await cp(configFile, path.join(starterDataDir, "starter-config.json"), { force: true });
+      }
       configExport = {
         path: path.basename(profile.configExport),
         sha256: await sha256File(profile.configExport)
@@ -245,6 +269,7 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       fontSystem: bundledFontSystem,
       languageArchives: bundledLanguages,
       vnext,
+      elementorTemplates: manifestElementorTemplates,
       compatibility: compatibilityReport(profile)
     };
 

@@ -101,11 +101,32 @@ export interface ConfigSnapshotRecord {
   sha256: string;
   sourceFilename: string;
   addedAt: string;
+  /** Optional on legacy registry records; derived from the export when absent. */
+  sourceDomain?: string;
+  /** Lightweight inventory only. Elementor documents are never stored here. */
+  elementorTemplates?: ElementorTemplateSummary[];
 }
 
 export interface ConfigSnapshotFile {
   schemaVersion: 1;
   snapshots: ConfigSnapshotRecord[];
+}
+
+export interface ElementorTemplateSummary {
+  templateId: string;
+  name: string;
+  type: string;
+  sourceDomain: string;
+  snapshotId: string;
+  snapshotName: string;
+  exportDate: string;
+  documentLocation: string;
+  dependencies: string[];
+}
+
+export interface ResolvedElementorTemplate extends ElementorTemplateSummary {
+  /** Internal build-time source path; never serialized into GUI/profile state. */
+  sourceZip: string;
 }
 
 export interface SnapshotRequirement {
@@ -228,6 +249,7 @@ export interface ConfigSnapshotInspection {
   exporterVersion: string;
   generatedAt: string;
   source: {
+    siteDomain: string;
     wordpressVersion: string;
     phpVersion: string;
     locale: string;
@@ -349,8 +371,31 @@ export interface ProfileDocumentV6 {
   languageArchives?: LanguageArchiveRef[];
 }
 
+export interface ElementorTemplateSelection {
+  snapshotId: string;
+  templateId: string;
+}
+
+export interface ProfileDocumentV7 {
+  schemaVersion: 7;
+  name: string;
+  locale: string;
+  wordpress: { version: string; variant: string };
+  theme: { slug: string; version: string } | null;
+  plugins: Array<{
+    slug: string;
+    version: string;
+    required?: boolean;
+    locales?: string[];
+  }>;
+  config: { id: string } | null;
+  fontSystem: { id: string } | null;
+  elementorTemplates: ElementorTemplateSelection[];
+  languageArchives?: LanguageArchiveRef[];
+}
+
 export interface BuildProfile {
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   name: string;
   locale: string;
   wordpress: ArtifactRef;
@@ -360,6 +405,9 @@ export interface BuildProfile {
   fontSystem?: ResolvedFontSystem | null;
   languageArchives?: LanguageArchiveRef[];
   vnext?: VNextBuildPayload | null;
+  /** Resolved v7 selections, including source ZIPs for composition. */
+  elementorTemplates?: ResolvedElementorTemplate[];
+  configurationSnapshotId?: string;
   /** Export metadata resolved from a configuration snapshot at load time. */
   configurationSource?: {
     wordpressVersion: string;
@@ -409,6 +457,12 @@ export interface StarterBuildManifest {
   } | null;
   languageArchives: Array<LanguageArchiveRef & { sha256: string }>;
   vnext?: { path: string; sha256: string } | null;
+  elementorTemplates: Array<{
+    snapshotId: string;
+    templateId: string;
+    name: string;
+    type: string;
+  }>;
   compatibility?: CompatibilityReport;
 }
 

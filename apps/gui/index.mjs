@@ -150,6 +150,7 @@ async function listProfiles() {
         plugins: Array.isArray(raw.plugins) ? raw.plugins.length : 0,
         config: String(raw.config?.id || ""),
         fontSystem: String(raw.fontSystem?.id || ""),
+        elementorTemplates: Array.isArray(raw.elementorTemplates) ? raw.elementorTemplates.length : 0,
         updatedAt: info.mtime.toISOString()
       });
     } catch {
@@ -196,6 +197,7 @@ async function state() {
     library: libraryRoot,
     packages,
     configs,
+    elementorTemplates: await new ConfigSnapshotRegistry(libraryRoot).listElementorTemplates(),
     fonts: await new FontSystemRegistry(libraryRoot).list(),
     vnext: {
       typography: await new VNextResourceRegistry(vnextDir, "typography.json").list(),
@@ -246,7 +248,8 @@ async function createOrUpdateProfile(body) {
       wordpressVariant: String(body.wordpressVariant || "").trim() || undefined,
       themeVersion: String(body.themeVersion || "").trim() || undefined,
       pluginVersions,
-      fontSystemId: String(body.fontSystemId || "").trim() || null
+      fontSystemId: String(body.fontSystemId || "").trim() || null,
+      elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined
     });
   }
 
@@ -259,7 +262,8 @@ async function createOrUpdateProfile(body) {
     themeSlug: String(body.themeSlug || "").trim() || null,
     themeVersion: String(body.themeVersion || "").trim() || null,
     plugins: pluginVersions,
-    fontSystemId: String(body.fontSystemId || "").trim() || null
+    fontSystemId: String(body.fontSystemId || "").trim() || null,
+    elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined
   });
 }
 
@@ -624,25 +628,38 @@ function openBrowser(url) {
   execFile(command, args, { windowsHide: true }, () => undefined);
 }
 
-async function main() {
+export async function startGuiServer({ port = Number.parseInt(process.env.WP_STARTER_GUI_PORT || "47831", 10), openBrowser: shouldOpenBrowser = false, log = true } = {}) {
   await Promise.all([mkdir(profilesDir, { recursive: true }), mkdir(buildsDir, { recursive: true })]);
-  const preferred = Number.parseInt(process.env.WP_STARTER_GUI_PORT || "47831", 10);
   const server = createGuiServer();
-  server.on("error", (error) => {
-    if (error.code === "EADDRINUSE") {
-      console.error(`Port ${preferred} is already in use. Set WP_STARTER_GUI_PORT to another local port.`);
-      process.exit(1);
-    }
-    throw error;
+  await new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off("listening", onListening);
+      if (error.code === "EADDRINUSE") reject(new BuilderError("gui_port_in_use", `Port ${port} is already in use. Set WP_STARTER_GUI_PORT to another local port.`));
+      else reject(error);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
   });
-  server.listen(preferred, "127.0.0.1", () => {
-    const url = `http://127.0.0.1:${preferred}/`;
+  const address = server.address();
+  const actualPort = typeof address === "object" && address ? address.port : port;
+  const url = `http://127.0.0.1:${actualPort}/`;
+  if (log) {
     console.log(`WP Starter GUI ${VERSION}`);
     console.log(`Library: ${libraryRoot}`);
     console.log(`Open: ${url}`);
     console.log("Keep this window open while using the GUI. Press Ctrl+C to stop it.");
-    openBrowser(url);
-  });
+  }
+  if (shouldOpenBrowser) openBrowser(url);
+  return { server, url, port: actualPort };
+}
+
+async function main() {
+  await startGuiServer({ openBrowser: true });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
