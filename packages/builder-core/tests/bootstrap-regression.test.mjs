@@ -16,6 +16,37 @@ test("bootstrap owns only custom pages and repairs Elementor kit", async () => {
   assert.equal(bootstrap.includes("verify_configuration"), true);
 });
 
+test("bootstrap disables Elementor Atomic Editor before activation and after plugin hooks only when Elementor is bundled", async () => {
+  const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
+  const activationStart = bootstrap.indexOf("if ( 'activate_plugins' === $phase )");
+  const activationEnd = bootstrap.indexOf("if ( 'fonts' === $phase )", activationStart);
+  assert.notEqual(activationStart, -1, "plugin activation phase should exist");
+  assert.notEqual(activationEnd, -1, "font phase should follow plugin activation");
+
+  const activation = bootstrap.slice(activationStart, activationEnd);
+  const optionPreparation = activation.indexOf("self::disable_elementor_atomic_editor()");
+  const pluginActivation = activation.indexOf("self::activate_plugin_component( $plugin )");
+  assert.notEqual(optionPreparation, -1, "Atomic Editor preparation should run in the activation phase");
+  assert.ok(optionPreparation < pluginActivation, "Atomic Editor must be disabled before any bundled plugin activation");
+  assert.match(activation, /if \( ! \$atomic_editor_prepared && self::build_has_plugin\( \$plugins, 'elementor\/elementor\.php' \) \)/, "the option should only be prepared when Elementor is bundled");
+  assert.match(bootstrap, /'activation_failures'\s*=>\s*0, 'elementor_prepared'\s*=>\s*false, 'atomic_editor_prepared'\s*=>\s*false/, "fresh plugin activation should initialize the one-time preparation state");
+
+  const queueFinished = activation.indexOf("if ( empty( $queue ) )");
+  const fontsTransition = activation.indexOf("self::save_state( array( 'phase' => 'fonts' ) )", queueFinished);
+  const finalPreparation = activation.indexOf("self::disable_elementor_atomic_editor()", queueFinished);
+  assert.notEqual(queueFinished, -1, "the activation phase should have a completion branch");
+  assert.ok(finalPreparation >= queueFinished && finalPreparation < fontsTransition, "the option should be verified in the empty-queue branch before setup advances");
+  assert.match(activation.slice(queueFinished, fontsTransition), /self::build_has_plugin\( \$plugins, 'elementor\/elementor\.php' \)/, "the final check should remain conditional on Elementor being bundled");
+
+  const helperStart = bootstrap.indexOf("private static function disable_elementor_atomic_editor()");
+  const helperEnd = bootstrap.indexOf("private static function ensure_woocommerce_ready()", helperStart);
+  const helper = bootstrap.slice(helperStart, helperEnd);
+  assert.match(helper, /\$option = 'elementor_experiment-e_atomic_elements'/);
+  assert.match(helper, /update_option\( \$option, 'inactive', false \)/, "the experiment should be seeded inactive");
+  assert.match(helper, /'inactive' !== get_option\( \$option \)/, "the persisted option should be verified before setup proceeds");
+  assert.match(helper, /starter_atomic_editor_disable_failed/, "failed verification should stop setup with a clear error");
+});
+
 test("exporter includes complete reviewed WordPress baseline keys", async () => {
   const whitelist = await readFile(path.join(repoRoot, "wordpress/exporter/config/whitelists.php"), "utf8");
   assert.equal(whitelist.includes("'large_size_h'"), true, "large_size_h should be exported");
@@ -67,9 +98,11 @@ test("bootstrap registers Elementor font files as WordPress attachments with id 
   assert.equal(bootstrap.includes("'post_mime_type' => 'font/woff2'"), true);
   assert.equal(bootstrap.includes("'id'  => absint( $attachment_id )"), true);
   assert.equal(bootstrap.includes("'url' => esc_url_raw( $url )"), true);
-  assert.equal(bootstrap.includes("const CONFIG_REVISION = 9;"), true);
+  assert.equal(bootstrap.includes("const CONFIG_REVISION = 12;"), true);
+  assert.match(bootstrap, /\$font_profiles = isset\( \$build\['fontSystems'\] \)[\s\S]*?foreach \( \$font_profiles as \$font_profile \)/);
   assert.equal(bootstrap.includes("starter-elementor-templates.json"), true);
-  assert.match(bootstrap, /\$completed && \$revision < self::CONFIG_REVISION[\s\S]{0,180}'phase' => 'fonts'/);
+  assert.match(bootstrap, /\$completed && \$revision < self::CONFIG_REVISION[\s\S]{0,180}'phase' => 'atomic_editor'/);
+  assert.match(bootstrap, /if \( 'atomic_editor' === \$phase \)[\s\S]+?build_has_plugin\( \$plugins, 'elementor\/elementor\.php' \)[\s\S]+?disable_elementor_atomic_editor\(\)[\s\S]+?'phase' => 'fonts'/, "completed older setups should disable Atomic Editor once, then continue the existing migration");
 });
 
 
@@ -90,9 +123,20 @@ test("bootstrap runs real activation hooks and serializes WooCommerce first boot
 
 test("bootstrap applies vNext design-system globals and fails unresolved template references", async () => {
   const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
-  for (const marker of ["starter-design-system.json", "apply_vnext_design_system", "system_colors", "custom_colors", "system_typography", "body_typography_font_family", "link_normal_typography", "h1_typography", "button_typography", "form_field_typography", "apply_elementor_theme_typography", "starter_vnext_unresolved_reference", "remap_vnext_value", "_wp_starter_vnext_id"]) {
+  for (const marker of ["starter-design-system.json", "apply_vnext_design_system", "system_colors", "custom_colors", "system_typography", "custom_typography", "globalTypography", "globalCustomTypography", "typography_typography", "default_generic_fonts", "body_typography_font_family", "link_normal_typography", "h1_typography", "button_typography", "form_field_typography", "apply_elementor_theme_typography", "starter_vnext_unresolved_reference", "remap_vnext_value", "_wp_starter_vnext_id"]) {
     assert.equal(bootstrap.includes(marker), true, `${marker} should be present in the vNext provisioning path`);
   }
+  assert.match(bootstrap, /Always emit all four system fonts/);
+  assert.match(bootstrap, /'typography_typography'\s*=>\s*'custom'/);
+  assert.match(bootstrap, /\$id = \$alias;/);
+});
+
+test("bootstrap shows a staged progress screen and advances provisioning through authenticated requests", async () => {
+  const bootstrap = await readFile(path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), "utf8");
+  for (const marker of ["SETUP_PAGE_SLUG = 'wp-starter-setup'", "register_setup_page", "setup_progress_data", "role=\"progressbar\"", "wpstarter_step", "wp_starter_setup_step", "This screen will update as each stage finishes."])
+    assert.equal(bootstrap.includes(marker), true, `${marker} should be present in the setup progress flow`);
+  assert.match(bootstrap, /'install_plugins' => 'Installing plugins'/);
+  assert.match(bootstrap, /'configure' => 'Applying WordPress settings'/);
 });
 
 test("bootstrap imports the independent template payload between design and configuration", async () => {

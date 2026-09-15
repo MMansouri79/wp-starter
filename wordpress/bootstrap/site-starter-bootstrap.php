@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Starter Bootstrap
  * Description: Installs bundled local packages and applies a starter configuration after normal WordPress installation.
- * Version: 0.1.0-alpha.26
+ * Version: 0.1.0-alpha.31
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -15,13 +15,29 @@ final class MMS_WP_Starter_Bootstrap {
     const ERROR_OPTION    = 'mms_wp_starter_bootstrap_error';
     const REPORT_OPTION   = 'mms_wp_starter_bootstrap_report';
     const REVISION_OPTION = 'mms_wp_starter_bootstrap_revision';
-    const CONFIG_REVISION = 9;
+    const SETUP_PAGE_SLUG = 'wp-starter-setup';
+    const CONFIG_REVISION = 12;
     const VNEXT_MANIFEST_FILENAME = 'starter-design-system.json';
     const ELEMENTOR_TEMPLATES_FILENAME = 'starter-elementor-templates.json';
 
     public static function init() {
         add_action( 'admin_init', array( __CLASS__, 'maybe_run' ), 1 );
+        add_action( 'admin_menu', array( __CLASS__, 'register_setup_page' ) );
         add_action( 'admin_notices', array( __CLASS__, 'render_notice' ) );
+    }
+
+    public static function register_setup_page() {
+        add_dashboard_page( 'WP Starter Setup', 'WP Starter Setup', 'manage_options', self::SETUP_PAGE_SLUG, array( __CLASS__, 'render_setup_page' ) );
+    }
+
+    private static function setup_url( $step = false ) {
+        $url = admin_url( 'admin.php?page=' . self::SETUP_PAGE_SLUG );
+        if ( $step ) $url = add_query_arg( array( 'wpstarter_step' => '1', '_wpnonce' => wp_create_nonce( 'wp_starter_setup_step' ) ), $url );
+        return $url;
+    }
+
+    private static function is_setup_page() {
+        return is_admin() && isset( $_GET['page'] ) && self::SETUP_PAGE_SLUG === sanitize_key( wp_unslash( $_GET['page'] ) );
     }
 
     public static function maybe_run() {
@@ -43,9 +59,20 @@ final class MMS_WP_Starter_Bootstrap {
             return;
         }
         if ( $completed && $revision < self::CONFIG_REVISION ) {
-            self::save_state( array( 'phase' => 'fonts' ) );
+            self::save_state( array( 'phase' => 'atomic_editor' ) );
             delete_option( self::COMPLETE_OPTION );
         }
+
+        // Route the first authenticated dashboard request to a visible progress
+        // screen. That screen advances one safe provisioning request at a time.
+        if ( ! self::is_setup_page() ) {
+            wp_safe_redirect( self::setup_url() );
+            exit;
+        }
+        if ( empty( $_GET['wpstarter_step'] ) ) {
+            return;
+        }
+        check_admin_referer( 'wp_starter_setup_step' );
 
         $root = self::package_root();
         if ( is_wp_error( $root ) ) {
@@ -105,6 +132,19 @@ final class MMS_WP_Starter_Bootstrap {
         $state = self::get_state();
         $phase = isset( $state['phase'] ) ? (string) $state['phase'] : 'theme';
 
+        // A Builder update can re-run this one-time installer on a site that
+        // already completed an older setup. Apply this targeted migration once
+        // before the existing font/configuration revision migration continues.
+        if ( 'atomic_editor' === $phase ) {
+            $plugins = array_values( (array) ( $build['plugins'] ?? array() ) );
+            if ( self::build_has_plugin( $plugins, 'elementor/elementor.php' ) ) {
+                $atomic_result = self::disable_elementor_atomic_editor();
+                if ( is_wp_error( $atomic_result ) ) { self::fail( $atomic_result->get_error_message() ); return; }
+            }
+            self::save_state( array( 'phase' => 'fonts' ) );
+            self::continue_setup();
+        }
+
         if ( 'theme' === $phase ) {
             $result = self::install_theme( $build );
             if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
@@ -121,7 +161,7 @@ final class MMS_WP_Starter_Bootstrap {
                 self::save_state( array( 'phase' => 'install_plugins', 'plugin_index' => $index + 1 ) );
                 self::continue_setup();
             }
-            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => self::ordered_activation_queue( $plugins ), 'activation_failures' => 0, 'elementor_prepared' => false ) );
+            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => self::ordered_activation_queue( $plugins ), 'activation_failures' => 0, 'elementor_prepared' => false, 'atomic_editor_prepared' => false ) );
             self::continue_setup();
         }
 
@@ -131,6 +171,18 @@ final class MMS_WP_Starter_Bootstrap {
             $queue   = array_values( (array) ( $state['activation_queue'] ?? self::ordered_activation_queue( $plugins ) ) );
             $failed  = absint( $state['activation_failures'] ?? 0 );
             $elementor_prepared = ! empty( $state['elementor_prepared'] );
+            $atomic_editor_prepared = ! empty( $state['atomic_editor_prepared'] );
+
+            // Atomic Editor is enabled by Elementor on fresh sites. Seed its
+            // experiment option before Elementor's first activation, then leave
+            // administrators free to turn it back on after setup completes.
+            if ( ! $atomic_editor_prepared && self::build_has_plugin( $plugins, 'elementor/elementor.php' ) ) {
+                $atomic_result = self::disable_elementor_atomic_editor();
+                if ( is_wp_error( $atomic_result ) ) { self::fail( $atomic_result->get_error_message() ); return; }
+                $atomic_editor_prepared = true;
+                self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => $queue, 'activation_failures' => $failed, 'elementor_prepared' => $elementor_prepared, 'atomic_editor_prepared' => true ) );
+                self::continue_setup();
+            }
 
             // Elementor Pro and WooCommerce both update Kit settings during their
             // own activation/install flows. Make sure Elementor has a real active
@@ -139,11 +191,18 @@ final class MMS_WP_Starter_Bootstrap {
             if ( ! $elementor_prepared && self::build_has_plugin( $plugins, 'elementor/elementor.php' ) && is_plugin_active( 'elementor/elementor.php' ) ) {
                 $kit_result = self::ensure_elementor_kit( array() );
                 if ( is_wp_error( $kit_result ) ) { self::fail( $kit_result->get_error_message() ); return; }
-                self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => $queue, 'activation_failures' => $failed, 'elementor_prepared' => true ) );
+                self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => $queue, 'activation_failures' => $failed, 'elementor_prepared' => true, 'atomic_editor_prepared' => $atomic_editor_prepared ) );
                 self::continue_setup();
             }
 
             if ( empty( $queue ) ) {
+                // Recheck after every bundled plugin's activation hook has
+                // completed, in case Elementor or a dependant changed the
+                // experiment option while activating.
+                if ( self::build_has_plugin( $plugins, 'elementor/elementor.php' ) ) {
+                    $atomic_result = self::disable_elementor_atomic_editor();
+                    if ( is_wp_error( $atomic_result ) ) { self::fail( $atomic_result->get_error_message() ); return; }
+                }
                 self::save_state( array( 'phase' => 'fonts' ) );
                 self::continue_setup();
             }
@@ -157,13 +216,17 @@ final class MMS_WP_Starter_Bootstrap {
             } else {
                 $failed = 0;
             }
-            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => $queue, 'activation_failures' => $failed, 'elementor_prepared' => $elementor_prepared ) );
+            self::save_state( array( 'phase' => 'activate_plugins', 'activation_queue' => $queue, 'activation_failures' => $failed, 'elementor_prepared' => $elementor_prepared, 'atomic_editor_prepared' => $atomic_editor_prepared ) );
             self::continue_setup();
         }
 
         if ( 'fonts' === $phase ) {
-            $result = self::install_font_system( isset( $build['fontSystem'] ) && is_array( $build['fontSystem'] ) ? $build['fontSystem'] : array() );
-            if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
+            $font_profiles = isset( $build['fontSystems'] ) && is_array( $build['fontSystems'] ) ? $build['fontSystems'] : array();
+            if ( empty( $font_profiles ) && isset( $build['fontSystem'] ) && is_array( $build['fontSystem'] ) ) { $font_profiles[] = $build['fontSystem']; }
+            foreach ( $font_profiles as $font_profile ) {
+                $result = self::install_font_system( is_array( $font_profile ) ? $font_profile : array() );
+                if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
+            }
             foreach ( (array) ( $build['designSystem']['fontProfiles'] ?? array() ) as $font_profile ) {
                 $result = self::install_font_system( is_array( $font_profile ) ? $font_profile : array() );
                 if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
@@ -234,7 +297,7 @@ final class MMS_WP_Starter_Bootstrap {
     }
 
     private static function continue_setup() {
-        wp_safe_redirect( admin_url() );
+        wp_safe_redirect( self::setup_url() );
         exit;
     }
 
@@ -539,6 +602,17 @@ final class MMS_WP_Starter_Bootstrap {
         if ( true === $created ) {
             @unlink( ABSPATH . '.maintenance' );
         }
+    }
+
+    private static function disable_elementor_atomic_editor() {
+        $option = 'elementor_experiment-e_atomic_elements';
+        if ( 'inactive' !== get_option( $option ) ) {
+            update_option( $option, 'inactive', false );
+        }
+        if ( 'inactive' !== get_option( $option ) ) {
+            return new WP_Error( 'starter_atomic_editor_disable_failed', 'Could not disable Elementor Atomic Editor before plugin activation.' );
+        }
+        return true;
     }
 
     private static function ensure_woocommerce_ready() {
@@ -1314,41 +1388,67 @@ final class MMS_WP_Starter_Bootstrap {
             $logical[ 'elementor:color:' . $id ] = $id;
         }
 
-        // Elementor's Global Fonts collection is separate from Site Settings
-        // > Theme Style > Typography. Keep four compact aliases for portable
-        // template references, while putting the actual role values into the
-        // matching Theme Style controls below.
+        // Elementor's Global Fonts collection is separate from Theme Style
+        // typography. Always emit all four system fonts so they remain visible
+        // and editable even when no imported template references them.
         $system_typography = array();
         $fallback_typography = reset( $typography );
-        $global_typography_aliases = array(
+        $legacy_global_typography = array(
             'primary'   => isset( $typography['h1'] ) ? $typography['h1'] : ( $typography['body'] ?? $fallback_typography ),
             'secondary' => isset( $typography['h2'] ) ? $typography['h2'] : ( $typography['body'] ?? $fallback_typography ),
             'text'      => isset( $typography['body'] ) ? $typography['body'] : $fallback_typography,
             'accent'    => isset( $typography['links'] ) ? $typography['links'] : ( $typography['body'] ?? $fallback_typography ),
         );
-        $required_aliases = self::elementor_required_typography_aliases( $payload, $template_payload );
+        $global_typography_aliases = array_merge( $legacy_global_typography, (array) ( $system['globalTypography'] ?? array() ) );
         $global_typography_ids = array();
         foreach ( $global_typography_aliases as $alias => $alias_token ) {
-            if ( ! in_array( $alias, $required_aliases, true ) || ! is_array( $alias_token ) ) continue;
-            $id = 'wpstarter_' . substr( hash( 'sha256', 'typography:global:' . $alias ), 0, 12 );
+            if ( ! in_array( $alias, array( 'primary', 'secondary', 'text', 'accent' ), true ) || ! is_array( $alias_token ) ) continue;
+            $id = $alias;
             $font_role = isset( $alias_token['fontRole'] ) ? (string) $alias_token['fontRole'] : '';
             $family = isset( $font_families[ $font_role ] ) ? (string) $font_families[ $font_role ] : (string) ( $system['fontBindings'][ $font_role ] ?? '' );
             $row = array(
                 '_id'          => $id,
                 'title'        => ucfirst( $alias ),
-                'typography'   => 'yes',
-                'font_family'  => sanitize_text_field( $family ),
-                'font_weight'  => (string) absint( $alias_token['weight'] ?? 400 ),
-                'font_style'   => sanitize_key( (string) ( $alias_token['style'] ?? 'normal' ) ),
+                'typography_typography'  => 'custom',
+                'typography_font_family' => sanitize_text_field( $family ),
+                'typography_font_weight' => (string) absint( $alias_token['weight'] ?? 400 ),
+                'typography_font_style'  => sanitize_key( (string) ( $alias_token['style'] ?? 'normal' ) ),
             );
-            self::apply_elementor_responsive_dimension( $row, $alias_token, 'size', 'font_size' );
-            self::apply_elementor_responsive_dimension( $row, $alias_token, 'lineHeight', 'line_height' );
-            self::apply_elementor_responsive_dimension( $row, $alias_token, 'letterSpacing', 'letter_spacing' );
-            self::apply_elementor_responsive_dimension( $row, $alias_token, 'wordSpacing', 'word_spacing' );
-            if ( isset( $alias_token['textTransform'] ) ) $row['text_transform'] = sanitize_key( (string) $alias_token['textTransform'] );
-            if ( isset( $alias_token['textDecoration'] ) ) $row['text_decoration'] = sanitize_key( (string) $alias_token['textDecoration'] );
+            self::apply_elementor_responsive_dimension( $row, $alias_token, 'size', 'typography_font_size' );
+            self::apply_elementor_responsive_dimension( $row, $alias_token, 'lineHeight', 'typography_line_height' );
+            self::apply_elementor_responsive_dimension( $row, $alias_token, 'letterSpacing', 'typography_letter_spacing' );
+            self::apply_elementor_responsive_dimension( $row, $alias_token, 'wordSpacing', 'typography_word_spacing' );
+            if ( isset( $alias_token['textTransform'] ) ) $row['typography_text_transform'] = sanitize_key( (string) $alias_token['textTransform'] );
+            if ( isset( $alias_token['textDecoration'] ) ) $row['typography_text_decoration'] = sanitize_key( (string) $alias_token['textDecoration'] );
             $system_typography[] = $row;
             $global_typography_ids[ $alias ] = $id;
+            $logical[ 'typography:' . $alias ] = $id;
+            $logical[ 'elementor:typography:' . $alias ] = $id;
+            $logical[ 'elementor:typography:' . $id ] = $id;
+        }
+        $custom_typography = array();
+        foreach ( (array) ( $settings['custom_typography'] ?? array() ) as $existing_font ) {
+            if ( is_array( $existing_font ) && ! empty( $existing_font['_id'] ) && 0 !== strpos( (string) $existing_font['_id'], 'wpstarter_' ) ) $custom_typography[] = $existing_font;
+        }
+        foreach ( (array) ( $system['globalCustomTypography'] ?? array() ) as $custom_font ) {
+            if ( ! is_array( $custom_font ) || empty( $custom_font['id'] ) || empty( $custom_font['token'] ) || ! is_array( $custom_font['token'] ) ) continue;
+            $custom_reference_id = (string) $custom_font['id'];
+            $custom_id = sanitize_key( $custom_reference_id );
+            $token = $custom_font['token'];
+            $id = 'wpstarter_' . substr( hash( 'sha256', 'typography:custom:' . $custom_id ), 0, 12 );
+            $font_role = isset( $token['fontRole'] ) ? (string) $token['fontRole'] : '';
+            $family = isset( $font_families[ $font_role ] ) ? (string) $font_families[ $font_role ] : (string) ( $system['fontBindings'][ $font_role ] ?? '' );
+            $row = array( '_id' => $id, 'title' => sanitize_text_field( (string) ( $custom_font['name'] ?? $custom_id ) ), 'typography_typography' => 'custom', 'typography_font_family' => sanitize_text_field( $family ), 'typography_font_weight' => (string) absint( $token['weight'] ?? 400 ), 'typography_font_style' => sanitize_key( (string) ( $token['style'] ?? 'normal' ) ) );
+            self::apply_elementor_responsive_dimension( $row, $token, 'size', 'typography_font_size' );
+            self::apply_elementor_responsive_dimension( $row, $token, 'lineHeight', 'typography_line_height' );
+            self::apply_elementor_responsive_dimension( $row, $token, 'letterSpacing', 'typography_letter_spacing' );
+            self::apply_elementor_responsive_dimension( $row, $token, 'wordSpacing', 'typography_word_spacing' );
+            if ( isset( $token['textTransform'] ) ) $row['typography_text_transform'] = sanitize_key( (string) $token['textTransform'] );
+            if ( isset( $token['textDecoration'] ) ) $row['typography_text_decoration'] = sanitize_key( (string) $token['textDecoration'] );
+            $custom_typography[] = $row;
+            $logical[ 'typography:' . $custom_reference_id ] = $id;
+            $logical[ 'elementor:typography:' . $custom_reference_id ] = $id;
+            $logical[ 'elementor:typography:' . $id ] = $id;
         }
 
         $theme_typography_prefixes = array( 'body_typography', 'link_normal_typography', 'link_hover_typography', 'h1_typography', 'h2_typography', 'h3_typography', 'h4_typography', 'h5_typography', 'h6_typography', 'button_typography', 'form_label_typography', 'form_field_typography' );
@@ -1394,6 +1494,8 @@ final class MMS_WP_Starter_Bootstrap {
         $settings['system_colors']     = $system_colors;
         $settings['custom_colors']     = $custom_colors;
         $settings['system_typography'] = $system_typography;
+        $settings['custom_typography'] = $custom_typography;
+        if ( ! empty( $system['fallbackFontFamily'] ) ) $settings['default_generic_fonts'] = sanitize_text_field( (string) $system['fallbackFontFamily'] );
         update_post_meta( $kit_id, '_elementor_page_settings', $settings );
 
         $template_count = 0;
@@ -1431,33 +1533,6 @@ final class MMS_WP_Starter_Bootstrap {
         return 'text';
     }
 
-    private static function elementor_required_typography_aliases( array $payload, array $template_payload ) {
-        $required = array();
-        $design = (array) ( $payload['designSystem'] ?? array() );
-        $typography = (array) ( $design['typography'] ?? array() );
-        foreach ( (array) ( $template_payload['mappings'] ?? array() ) as $target ) {
-            if ( ! is_string( $target ) || 0 !== strpos( $target, 'typography:' ) ) continue;
-            $role = substr( $target, 11 );
-            if ( isset( $typography[ $role ] ) ) $required[ self::elementor_design_typography_alias_for_role( $role ) ] = true;
-        }
-        foreach ( (array) ( $template_payload['templates'] ?? array() ) as $template ) {
-            foreach ( (array) ( $template['globalReferences'] ?? array() ) as $reference ) {
-                $target = (string) ( $template_payload['mappings'][ $reference['reference'] ] ?? '' );
-                if ( 0 === strpos( $target, 'typography:' ) ) {
-                    $role = substr( $target, 11 );
-                    if ( isset( $typography[ $role ] ) ) $required[ self::elementor_design_typography_alias_for_role( $role ) ] = true;
-                }
-            }
-        }
-        foreach ( (array) ( $payload['templates'] ?? array() ) as $template ) {
-            foreach ( (array) ( $template['globalReferences'] ?? array() ) as $reference ) {
-                $role = (string) ( $reference['sourceId'] ?? '' );
-                if ( isset( $typography[ $role ] ) ) $required[ self::elementor_design_typography_alias_for_role( $role ) ] = true;
-            }
-        }
-        return array_keys( $required );
-    }
-
     private static function apply_elementor_theme_typography( array &$settings, $prefix, array $token, $family ) {
         // Elementor Theme Style stores these controls as body_typography_font_family,
         // link_normal_typography_font_family, h1_typography_font_family,
@@ -1489,6 +1564,24 @@ final class MMS_WP_Starter_Bootstrap {
         }
         if ( isset( $token['textTransform'] ) && sanitize_key( (string) ( $settings[ $prefix . '_text_transform' ] ?? '' ) ) !== sanitize_key( (string) $token['textTransform'] ) ) return false;
         if ( isset( $token['textDecoration'] ) && sanitize_key( (string) ( $settings[ $prefix . '_text_decoration' ] ?? '' ) ) !== sanitize_key( (string) $token['textDecoration'] ) ) return false;
+        return true;
+    }
+
+    private static function elementor_global_typography_matches( array $row, array $token, $family ) {
+        if ( 'custom' !== (string) ( $row['typography_typography'] ?? '' ) ) return false;
+        if ( (string) ( $row['typography_font_family'] ?? '' ) !== (string) $family ) return false;
+        if ( absint( $row['typography_font_weight'] ?? 0 ) !== absint( $token['weight'] ?? 0 ) ) return false;
+        if ( sanitize_key( (string) ( $row['typography_font_style'] ?? '' ) ) !== sanitize_key( (string) ( $token['style'] ?? 'normal' ) ) ) return false;
+        foreach ( array( 'size' => 'font_size', 'lineHeight' => 'line_height', 'letterSpacing' => 'letter_spacing', 'wordSpacing' => 'word_spacing' ) as $source_key => $target_key ) {
+            foreach ( array( 'desktop' => '', 'tablet' => '_tablet', 'mobile' => '_mobile' ) as $breakpoint => $suffix ) {
+                $dimension = $token[ $source_key ][ $breakpoint ] ?? null;
+                if ( ! is_array( $dimension ) || ! isset( $dimension['value'], $dimension['unit'] ) ) continue;
+                $actual = $row[ 'typography_' . $target_key . $suffix ] ?? null;
+                if ( ! is_array( $actual ) || (string) ( $actual['unit'] ?? '' ) !== (string) $dimension['unit'] || ! is_numeric( $actual['size'] ?? null ) || abs( (float) $actual['size'] - (float) $dimension['value'] ) > 0.0001 ) return false;
+            }
+        }
+        if ( isset( $token['textTransform'] ) && sanitize_key( (string) ( $row['typography_text_transform'] ?? '' ) ) !== sanitize_key( (string) $token['textTransform'] ) ) return false;
+        if ( isset( $token['textDecoration'] ) && sanitize_key( (string) ( $row['typography_text_decoration'] ?? '' ) ) !== sanitize_key( (string) $token['textDecoration'] ) ) return false;
         return true;
     }
 
@@ -1709,6 +1802,31 @@ final class MMS_WP_Starter_Bootstrap {
                         $id = 'wpstarter_' . substr( hash( 'sha256', 'color:' . (string) $role ), 0, 12 );
                         if ( empty( $colors_by_id[ $id ] ) || strtolower( (string) $colors_by_id[ $id ]['color'] ) !== strtolower( (string) $value ) ) $mismatches[] = 'elementor_color:' . sanitize_key( (string) $role );
                     }
+                    $global_fonts_by_id = array();
+                    foreach ( array( 'system_typography', 'custom_typography' ) as $font_collection ) {
+                        foreach ( (array) ( $settings[ $font_collection ] ?? array() ) as $row ) if ( is_array( $row ) && ! empty( $row['_id'] ) ) $global_fonts_by_id[ $row['_id'] ] = $row;
+                    }
+                    foreach ( (array) ( $design['globalTypography'] ?? array() ) as $alias => $token ) {
+                        if ( ! is_array( $token ) ) continue;
+                        $checked++;
+                        $id = sanitize_key( (string) $alias );
+                        $font_role = (string) ( $token['fontRole'] ?? '' );
+                        $family = (string) ( $design['fontFamilies'][ $font_role ] ?? '' );
+                        if ( empty( $global_fonts_by_id[ $id ] ) || ! self::elementor_global_typography_matches( $global_fonts_by_id[ $id ], $token, $family ) ) $mismatches[] = 'elementor_global_font:' . sanitize_key( (string) $alias );
+                    }
+                    foreach ( (array) ( $design['globalCustomTypography'] ?? array() ) as $custom_font ) {
+                        if ( ! is_array( $custom_font ) || empty( $custom_font['id'] ) || empty( $custom_font['token'] ) ) continue;
+                        $checked++;
+                        $id = 'wpstarter_' . substr( hash( 'sha256', 'typography:custom:' . sanitize_key( (string) $custom_font['id'] ) ), 0, 12 );
+                        $token = (array) $custom_font['token'];
+                        $font_role = (string) ( $token['fontRole'] ?? '' );
+                        $family = (string) ( $design['fontFamilies'][ $font_role ] ?? '' );
+                        if ( empty( $global_fonts_by_id[ $id ] ) || ! self::elementor_global_typography_matches( $global_fonts_by_id[ $id ], $token, $family ) ) $mismatches[] = 'elementor_global_font:' . sanitize_key( (string) $custom_font['id'] );
+                    }
+                    if ( ! empty( $design['fallbackFontFamily'] ) ) {
+                        $checked++;
+                        if ( (string) ( $settings['default_generic_fonts'] ?? '' ) !== (string) $design['fallbackFontFamily'] ) $mismatches[] = 'elementor_fallback_font_family';
+                    }
                     $theme_role_prefixes = array(
                         'body'       => array( 'body_typography' ),
                         'links'      => array( 'link_normal_typography', 'link_hover_typography' ),
@@ -1885,10 +2003,85 @@ final class MMS_WP_Starter_Bootstrap {
         update_option( self::ERROR_OPTION, sanitize_text_field( $message ), false );
     }
 
+    private static function setup_progress_data() {
+        $state = self::get_state();
+        $phase = isset( $state['phase'] ) ? (string) $state['phase'] : 'theme';
+        $labels = array(
+            'atomic_editor' => 'Disabling Elementor Atomic Editor',
+            'theme' => 'Installing the theme',
+            'install_plugins' => 'Installing plugins',
+            'activate_plugins' => 'Activating plugins',
+            'fonts' => 'Installing fonts',
+            'design_system' => 'Applying Global Fonts, colors and typography',
+            'elementor_templates' => 'Importing Elementor templates',
+            'languages' => 'Installing language files',
+            'configure' => 'Applying WordPress settings',
+            'complete' => 'Complete',
+        );
+        $root = self::package_root();
+        $build = is_wp_error( $root ) ? array() : self::read_json( $root . '/starter-build.json' );
+        if ( is_wp_error( $build ) ) $build = array();
+        $plugin_count = count( (array) ( $build['plugins'] ?? array() ) );
+        $language_count = count( (array) ( $build['languageArchives'] ?? array() ) );
+        $percentage = array(
+            'theme' => 5,
+            'install_plugins' => 10 + ( $plugin_count ? (int) round( 18 * min( $plugin_count, absint( $state['plugin_index'] ?? 0 ) ) / $plugin_count ) : 18 ),
+            'activate_plugins' => 30 + ( $plugin_count ? (int) round( 20 * max( 0, $plugin_count - count( (array) ( $state['activation_queue'] ?? array() ) ) ) / $plugin_count ) : 20 ),
+            'fonts' => 55,
+            'design_system' => 64,
+            'elementor_templates' => 72,
+            'languages' => 78 + ( $language_count ? (int) round( 12 * min( $language_count, absint( $state['language_index'] ?? 0 ) ) / $language_count ) : 12 ),
+            'configure' => 94,
+            'complete' => 100,
+        );
+        return array( 'phase' => $phase, 'label' => $labels[ $phase ] ?? 'Preparing WordPress', 'percent' => $percentage[ $phase ] ?? 2, 'state' => $state, 'pluginCount' => $plugin_count, 'languageCount' => $language_count );
+    }
+
+    public static function render_setup_page() {
+        if ( ! current_user_can( 'manage_options' ) ) return;
+        $error = get_option( self::ERROR_OPTION );
+        $completed = get_option( self::COMPLETE_OPTION );
+        $progress = self::setup_progress_data();
+        $dashboard_url = admin_url();
+        echo '<div class="wrap wp-starter-setup"><h1>Setting up your WordPress site</h1>';
+        if ( $error ) {
+            echo '<div class="notice notice-error"><p><strong>Setup paused:</strong> ' . esc_html( $error ) . '</p></div>';
+            echo '<p>Fix the issue shown above, then retry the current step.</p><p><a class="button button-primary" href="' . esc_url( self::setup_url( true ) ) . '">Retry setup</a> <a class="button" href="' . esc_url( $dashboard_url ) . '">Open dashboard</a></p></div>';
+            return;
+        }
+        if ( $completed ) {
+            echo '<div class="notice notice-success"><p><strong>Setup complete.</strong> Your WordPress site is ready.</p></div>';
+            echo '<p><a class="button button-primary" href="' . esc_url( $dashboard_url ) . '">Open WordPress dashboard</a></p></div>';
+            echo '<script>window.setTimeout(function(){ window.location.assign(' . wp_json_encode( $dashboard_url ) . '); }, 1800);</script>';
+            return;
+        }
+        $percent = absint( $progress['percent'] );
+        $label = esc_html( $progress['label'] );
+        $phase = esc_html( str_replace( '_', ' ', $progress['phase'] ) );
+        $detail = '';
+        if ( 'install_plugins' === $progress['phase'] && $progress['pluginCount'] ) {
+            $plugin_index = absint( $progress['state']['plugin_index'] ?? 0 );
+            $detail = $plugin_index >= $progress['pluginCount'] ? 'Finishing plugin installation' : sprintf( 'Plugin %d of %d', $plugin_index + 1, $progress['pluginCount'] );
+        }
+        if ( 'activate_plugins' === $progress['phase'] ) $detail = 'Activating packages and completing first-run setup';
+        if ( 'languages' === $progress['phase'] && $progress['languageCount'] ) {
+            $language_index = absint( $progress['state']['language_index'] ?? 0 );
+            $detail = $language_index >= $progress['languageCount'] ? 'Finishing language setup' : sprintf( 'Language pack %d of %d', $language_index + 1, $progress['languageCount'] );
+        }
+        if ( '' === $detail ) $detail = 'This step may take a little while. Keep this page open.';
+        echo '<p>WP Starter is installing and configuring the packages in your build. This screen will update as each stage finishes.</p>';
+        echo '<section aria-live="polite" style="max-width:720px;background:#fff;border:1px solid #dcdcde;border-radius:8px;padding:24px;margin-top:24px">';
+        echo '<div style="display:flex;justify-content:space-between;gap:16px;align-items:center"><strong>' . $label . '</strong><strong>' . $percent . '%</strong></div>';
+        echo '<div role="progressbar" aria-label="WordPress setup progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' . $percent . '" style="height:14px;background:#e2e4e7;border-radius:999px;overflow:hidden;margin:14px 0 10px"><div style="width:' . $percent . '%;height:100%;background:#2271b1;transition:width .35s ease"></div></div>';
+        echo '<p style="margin:0;color:#646970">Stage: ' . $phase . ' · ' . esc_html( $detail ) . '</p></section>';
+        echo '<script>window.setTimeout(function(){ window.location.assign(' . wp_json_encode( self::setup_url( true ) ) . '); }, 650);</script></div>';
+    }
+
     public static function render_notice() {
         if ( ! current_user_can( 'manage_options' ) ) {
             return;
         }
+        if ( self::is_setup_page() ) return;
 
         $error = get_option( self::ERROR_OPTION );
         if ( $error ) {

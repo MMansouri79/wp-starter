@@ -185,6 +185,14 @@ When `config` is `null`, Builder does not embed `starter-config.json` and Bootst
 
 Manifest schema v3 added `configurationEnabled` and nullable `theme`/`configExport`. Schema v4 adds optional design-system provenance and checksum entries for `starter-design-system.json` and `starter-elementor-templates.json`. The `elementorTemplates` inventory can now be populated in package-only builds and records a library ID plus source provenance for v8 assets.
 
+Standalone Font Profiles remain available to v7 profiles and template-only v8
+profiles. A profile may use the
+legacy singular `fontSystem` reference or the optional `fontSystems` array to
+select several profiles. Builds bundle each selected profile into the v4
+manifest's `fontSystems` array; the legacy `fontSystem` field mirrors the first
+profile for older installers. Bootstrap registers each profile's font family
+and faces with Elementor Pro.
+
 ## Build profile schema v7
 
 Schema v7 adds explicit, source-aware Elementor template selection while
@@ -222,7 +230,7 @@ Elementor template in their base configuration snapshot.
 
 ## Build profile schema v8
 
-Schema v8 selects a reusable Elementor design system by ID. The design system owns font selection, so a v8 document has no standalone `fontSystem` field.
+Schema v8 selects reusable Elementor design systems and independent template-library entries. When a design system is selected, it owns font selection; template-only v8 profiles can instead use the optional `fontSystems` array for standalone Font Profiles. The legacy singular `fontSystem` field is not used in v8.
 
 ```json
 {
@@ -244,4 +252,4 @@ Schema v8 selects a reusable Elementor design system by ID. The design system ow
 }
 ```
 
-The design system requires Elementor and Elementor Pro; templates require Elementor. A snapshot is optional. Template IDs resolve against the independent library, dependency selections are closed before persistence, and every source global reference must auto-map or have an explicit mapping. Interim v8 documents using `elementorTemplates: [{snapshotId, templateId}]` remain readable while their snapshots exist. Generated manifests retain schema v4 and add optional `designSystem` provenance with resource hashes and deduplicated staged font faces. Both generated payloads are independently checksum-protected.
+The design system requires Elementor and Elementor Pro; templates require Elementor. A snapshot is optional. Template IDs resolve against the independent library, dependency selections are closed before persistence, and every source global reference must auto-map or have an explicit mapping. Interim v8 documents using `elementorTemplates: [{snapshotId, templateId}]` remain readable while their snapshots exist. Generated manifests retain schema v4 and add optional `designSystem` provenance with resource hashes and deduplicated staged font faces. The design-system payload includes all four Elementor system Global Fonts, custom Global Fonts, and the fallback family, even when no templates are selected. Both generated payloads are independently checksum-protected.

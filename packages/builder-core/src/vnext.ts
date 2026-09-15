@@ -8,6 +8,7 @@ import type { FontFaceRecord, FontStyle, ResolvedFontSystem } from "./types.js";
 
 export const VNEXT_SCHEMA_VERSION = 1 as const;
 export type TypographyRole = "body" | "links" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "buttons" | "formFields";
+export type ElementorGlobalFontRole = "primary" | "secondary" | "text" | "accent";
 export type DesignReferenceKind = "color" | "typography" | "font" | "template" | "object";
 
 export interface FontAsset {
@@ -48,6 +49,11 @@ export interface TypographyProfile {
   custom?: Record<string, TypographyToken>;
   fontSlots?: Record<string, { name: string }>;
   customRoleNames?: Record<string, string>;
+  /** Elementor's four system Global Fonts. Older resources inherit these from matching typography roles. */
+  globalTypography?: Partial<Record<ElementorGlobalFontRole, TypographyToken>>;
+  /** User-created Elementor Global Fonts, separate from semantic Theme Style rows. */
+  globalCustomTypography?: Array<{ id: string; name: string; token: TypographyToken }>;
+  fallbackFontFamily?: string;
 }
 
 export interface NamedColorToken { id: string; name: string; value: string; }
@@ -103,6 +109,9 @@ export interface VNextBuildPayload {
     colorNames?: Record<string, string>;
     typography: Partial<Record<TypographyRole, TypographyToken>> & Record<string, TypographyToken>;
     typographyNames?: Record<string, string>;
+    globalTypography: Record<ElementorGlobalFontRole, TypographyToken>;
+    globalCustomTypography?: Array<{ id: string; name: string; token: TypographyToken }>;
+    fallbackFontFamily?: string;
     resources: {
       typography: { id: string; sha256: string };
       colors: { id: string; sha256: string };
@@ -130,6 +139,7 @@ export interface ValidationReport {
 
 const ROLE_NAMES = new Set<TypographyRole>(["body", "links", "h1", "h2", "h3", "h4", "h5", "h6", "buttons", "formFields"]);
 const ELEMENTOR_COLOR_ROLES = new Set(["primary", "secondary", "text", "accent"]);
+const ELEMENTOR_FONT_ROLES = ["primary", "secondary", "text", "accent"] as const;
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const HEX_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 const DIMENSION_PATTERN = /^(-?(?:\d+(?:\.\d+)?|\.\d+))\s*(px|rem|em|%|vw|vh|lh|rlh)?$/i;
@@ -189,12 +199,18 @@ function normalizeToken(token: TypographyToken, pathName: string): TypographyTok
 export function normalizeTypographyProfile(profile: TypographyProfile): TypographyProfile {
   const roles = Object.fromEntries(Object.entries(profile.roles || {}).map(([name, token]) => [name, normalizeToken(token as TypographyToken, `roles.${name}`)]));
   const custom = Object.fromEntries(Object.entries(profile.custom || {}).map(([name, token]) => [name, normalizeToken(token, `custom.${name}`)]));
-  const usedSlots = new Set([...Object.values(roles), ...Object.values(custom)].map((token) => (token as TypographyToken).fontRole).filter(Boolean));
+  const globalTypography = Object.fromEntries(Object.entries(profile.globalTypography || {}).map(([name, token]) => [name, normalizeToken(token as TypographyToken, `globalTypography.${name}`)])) as TypographyProfile["globalTypography"];
+  const globalCustomTypography = (profile.globalCustomTypography || []).map((item, index) => ({ id: String(item.id || "").trim().toLowerCase(), name: String(item.name || "").trim(), token: normalizeToken(item.token, `globalCustomTypography[${index}].token`) }));
+  const allTokens = [...Object.values(roles), ...Object.values(custom), ...Object.values(globalTypography), ...globalCustomTypography.map((item) => item.token)];
+  const usedSlots = new Set(allTokens.map((token) => (token as TypographyToken).fontRole).filter(Boolean));
   const legacySlotName = (id: string) => id === "body" || id === "primary" ? "Body font" : id === "heading" || id === "headings" ? "Heading font" : id === "accent" ? "Accent font" : id.replace(/[-_]+/g, " ").replace(/^./, (value) => value.toUpperCase());
   const fontSlots = Object.fromEntries([...usedSlots].map((id) => [id, { name: String(profile.fontSlots?.[id]?.name || legacySlotName(id)).trim() }]));
   const normalized: TypographyProfile = { schemaVersion: VNEXT_SCHEMA_VERSION, id: String(profile.id || "").trim(), name: String(profile.name || "").trim(), roles, fontSlots };
   if (Object.keys(custom).length) normalized.custom = custom;
   if (profile.customRoleNames) normalized.customRoleNames = Object.fromEntries(Object.entries(profile.customRoleNames).map(([id, name]) => [id, String(name).trim()]));
+  if (Object.keys(globalTypography).length) normalized.globalTypography = globalTypography;
+  if (globalCustomTypography.length) normalized.globalCustomTypography = globalCustomTypography;
+  if (profile.fallbackFontFamily !== undefined) normalized.fallbackFontFamily = String(profile.fallbackFontFamily).trim();
   assertValidReport(validateTypographyProfile(normalized));
   return normalized;
 }
@@ -233,7 +249,25 @@ export function validateTypographyProfile(profile: TypographyProfile): Validatio
     if (!ID_PATTERN.test(name)) issue(issues, `custom.${name}`, "invalid_token_name", "Custom token names must use lowercase identifier characters.");
     validateToken(token, `custom.${name}`, issues);
   }
-  for (const [name, token] of [...Object.entries(profile.roles || {}), ...Object.entries(profile.custom || {})]) if (token && !profile.fontSlots?.[token.fontRole]) issue(issues, `typography.${name}.fontRole`, "font_slot_missing", `Font slot ${token.fontRole} is not defined by this profile.`);
+  for (const [role, token] of Object.entries(profile.globalTypography || {})) {
+    if (!ELEMENTOR_FONT_ROLES.includes(role as ElementorGlobalFontRole)) issue(issues, `globalTypography.${role}`, "unknown_global_font_role", `Unsupported Elementor Global Font role: ${role}.`);
+    if (token) validateToken(token, `globalTypography.${role}`, issues);
+  }
+  const globalCustomIds = new Set<string>();
+  const globalCustomNames = new Set<string>();
+  for (const [index, item] of (profile.globalCustomTypography || []).entries()) {
+    if (!ID_PATTERN.test(item.id || "") || ELEMENTOR_FONT_ROLES.includes(item.id as ElementorGlobalFontRole)) issue(issues, `globalCustomTypography[${index}].id`, "invalid_global_font_id", "Custom Global Font IDs must use lowercase identifier characters and cannot use a system font ID.");
+    if (!item.name?.trim()) issue(issues, `globalCustomTypography[${index}].name`, "missing_name", "A custom Global Font name is required.");
+    if (globalCustomIds.has(item.id)) issue(issues, `globalCustomTypography[${index}].id`, "duplicate_id", "Custom Global Font IDs must be unique.");
+    const name = item.name.trim().toLowerCase();
+    if (globalCustomNames.has(name)) issue(issues, `globalCustomTypography[${index}].name`, "duplicate_name", "Custom Global Font names must be unique.");
+    globalCustomIds.add(item.id);
+    globalCustomNames.add(name);
+    validateToken(item.token, `globalCustomTypography[${index}].token`, issues);
+  }
+  if (profile.fallbackFontFamily !== undefined && (typeof profile.fallbackFontFamily !== "string" || !profile.fallbackFontFamily.trim() || /[;{}<>]/.test(profile.fallbackFontFamily))) issue(issues, "fallbackFontFamily", "invalid_fallback_font_family", "Fallback font family must be a non-empty CSS font-family value without CSS delimiters.");
+  const allTokens = [...Object.entries(profile.roles || {}), ...Object.entries(profile.custom || {}), ...Object.entries(profile.globalTypography || {}), ...(profile.globalCustomTypography || []).map((item) => [item.id, item.token] as [string, TypographyToken])];
+  for (const [name, token] of allTokens) if (token && !profile.fontSlots?.[token.fontRole]) issue(issues, `typography.${name}.fontRole`, "font_slot_missing", `Font slot ${token.fontRole} is not defined by this profile.`);
   for (const [id, slot] of Object.entries(profile.fontSlots || {})) {
     if (!ID_PATTERN.test(id)) issue(issues, `fontSlots.${id}`, "invalid_font_slot", "Font slot IDs must use lowercase identifier characters.");
     if (!slot?.name?.trim()) issue(issues, `fontSlots.${id}.name`, "missing_name", "A friendly font slot name is required.");
@@ -299,7 +333,7 @@ export function validateDesignSystem(system: DesignSystem, typography: Typograph
   if (system.typographyProfileId !== typography.id) issue(issues, "typographyProfileId", "profile_mismatch", "Design system typography profile does not match the selected profile.");
   if (system.colorProfileId !== colors.id) issue(issues, "colorProfileId", "profile_mismatch", "Design system color profile does not match the selected profile.");
   const fontById = new Map(fonts.map((font) => [font.id, font]));
-  const tokens = [...Object.entries(typography.roles || {}), ...Object.entries(typography.custom || {})].filter((entry): entry is [string, TypographyToken] => Boolean(entry[1]));
+  const tokens = [...Object.entries(typography.roles || {}), ...Object.entries(typography.custom || {}), ...Object.entries(typography.globalTypography || {}), ...(typography.globalCustomTypography || []).map((item) => [item.id, item.token] as [string, TypographyToken])].filter((entry): entry is [string, TypographyToken] => Boolean(entry[1]));
   for (const [tokenName, token] of tokens) if (!system.fontBindings?.[token.fontRole]) issue(issues, `typography.${tokenName}.fontRole`, "font_binding_missing", `Font slot ${typography.fontSlots?.[token.fontRole]?.name || token.fontRole} has no font assignment.`);
   for (const [role, fontId] of Object.entries(system.fontBindings || {})) {
     if (!ID_PATTERN.test(role)) issue(issues, `fontBindings.${role}`, "invalid_font_slot", "Font slot IDs must use lowercase identifier characters.");
@@ -309,7 +343,7 @@ export function validateDesignSystem(system: DesignSystem, typography: Typograph
       issue(issues, `fontBindings.${role}`, "font_asset_missing", `Font asset ${fontId} is not available.`);
       continue;
     }
-    const requested = [...Object.values(typography.roles || {}), ...Object.values(typography.custom || {})]
+    const requested = [...Object.values(typography.roles || {}), ...Object.values(typography.custom || {}), ...Object.values(typography.globalTypography || {}), ...(typography.globalCustomTypography || []).map((item) => item.token)]
       .filter((token): token is TypographyToken => Boolean(token) && token.fontRole === role);
     const faces = new Set(font.faces.map((face) => `${face.weight}:${face.style}`));
     for (const token of requested) if (!faces.has(`${token.weight}:${token.style || "normal"}`)) issue(issues, `fontBindings.${role}`, "font_face_missing", `Font profile ${font.name} does not provide ${token.weight} ${token.style || "normal"} required by ${role}.`);
@@ -323,6 +357,14 @@ export function assertValidReport(report: ValidationReport, code = "invalid_vnex
 
 export function compileVNextPayload(system: DesignSystem, typography: TypographyProfile, colors: ColorProfile, fonts: FontAsset[], templates: PortableTemplate[] = []): VNextBuildPayload {
   assertValidReport(validateDesignSystem(system, typography, colors, fonts), "invalid_vnext_design_system");
+  const fallbackTypography = Object.values(typography.roles || {})[0];
+  const globalTypography = {
+    primary: typography.globalTypography?.primary || typography.roles.h1 || typography.roles.body || fallbackTypography,
+    secondary: typography.globalTypography?.secondary || typography.roles.h2 || typography.roles.body || fallbackTypography,
+    text: typography.globalTypography?.text || typography.roles.body || fallbackTypography,
+    accent: typography.globalTypography?.accent || typography.roles.links || typography.roles.body || fallbackTypography
+  };
+  if (ELEMENTOR_FONT_ROLES.some((role) => !globalTypography[role])) throw new BuilderError("invalid_vnext_design_system", "Typography profile needs at least one typography token to provide Elementor's four system Global Fonts.");
   return {
     schemaVersion: VNEXT_SCHEMA_VERSION,
     designSystem: {
@@ -334,6 +376,9 @@ export function compileVNextPayload(system: DesignSystem, typography: Typography
       colorNames: { primary: "Primary", secondary: "Secondary", text: "Text", accent: "Accent", ...Object.fromEntries(Object.keys(colors.semantic || {}).map((id) => [id, id.replace(/[-_]+/g, " ")])), ...Object.fromEntries((colors.custom || []).map((token) => [token.id, token.name])) },
       typography: { ...(typography.roles || {}), ...(typography.custom || {}) } as VNextBuildPayload["designSystem"]["typography"],
       typographyNames: { body: "Body", links: "Links", h1: "H1", h2: "H2", h3: "H3", h4: "H4", h5: "H5", h6: "H6", buttons: "Buttons", formFields: "Form Fields", ...(typography.customRoleNames || {}) },
+      globalTypography: globalTypography as Record<ElementorGlobalFontRole, TypographyToken>,
+      ...(typography.globalCustomTypography?.length ? { globalCustomTypography: typography.globalCustomTypography.map((item) => ({ ...item })) } : {}),
+      ...(typography.fallbackFontFamily ? { fallbackFontFamily: typography.fallbackFontFamily } : {}),
       resources: {
         typography: { id: typography.id, sha256: resourceHash(typography) },
         colors: { id: colors.id, sha256: resourceHash(colors) }

@@ -180,25 +180,30 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
         })
     );
 
-    let bundledFontSystem: StarterBuildManifest["fontSystem"] = null;
-    if (profile.fontSystem) {
-      await emit(options, { percent: 75, stage: "fonts", message: `Packaging font system ${profile.fontSystem.name}…` });
-      const faces = [];
-      for (let index = 0; index < profile.fontSystem.faces.length; index++) {
-        const face = profile.fontSystem.faces[index];
-        const safeFile = `${index + 1}-${safeArtifactName(face.filename)}`;
-        const relative = `fonts/${safeFile}`;
-        const target = path.join(bundledFontDir, safeFile);
-        await cp(face.absoluteFile, target, { force: true });
-        faces.push({
-          family: face.family, weight: face.weight, style: face.style, format: face.format, filename: face.filename,
-          file: relative, sha256: await sha256File(target), variable: face.variable === true
-        });
+    const selectedFontSystems = profile.fontSystems ?? (profile.fontSystem ? [profile.fontSystem] : []);
+    const bundledFontSystems: NonNullable<StarterBuildManifest["fontSystems"]> = [];
+    if (selectedFontSystems.length) {
+      for (let systemIndex = 0; systemIndex < selectedFontSystems.length; systemIndex++) {
+        const system = selectedFontSystems[systemIndex];
+        await emit(options, { percent: 75, stage: "fonts", message: `Packaging font profile ${system.name}…` });
+        const faces = [];
+        for (let faceIndex = 0; faceIndex < system.faces.length; faceIndex++) {
+          const face = system.faces[faceIndex];
+          const safeFile = `${systemIndex + 1}-${faceIndex + 1}-${safeArtifactName(face.filename)}`;
+          const relative = `fonts/${safeFile}`;
+          const target = path.join(bundledFontDir, safeFile);
+          await cp(face.absoluteFile, target, { force: true });
+          faces.push({
+            family: face.family, weight: face.weight, style: face.style, format: face.format, filename: face.filename,
+            file: relative, sha256: await sha256File(target), variable: face.variable === true
+          });
+        }
+        bundledFontSystems.push({ id: system.id, name: system.name, faces });
       }
-      bundledFontSystem = { id: profile.fontSystem.id, name: profile.fontSystem.name, faces };
     } else {
       await emit(options, { percent: 75, stage: "fonts", message: "No font system selected." });
     }
+    const bundledFontSystem = bundledFontSystems[0] || null;
 
     let bundledDesignSystem: StarterBuildManifest["designSystem"] = null;
     if (profile.designSystem) {
@@ -324,6 +329,7 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       plugins: bundledPlugins,
       configExport,
       fontSystem: bundledFontSystem,
+      fontSystems: bundledFontSystems,
       designSystem: bundledDesignSystem,
       languageArchives: bundledLanguages,
       vnext,

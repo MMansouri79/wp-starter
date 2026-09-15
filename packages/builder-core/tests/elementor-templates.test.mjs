@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   ConfigSnapshotRegistry,
   ElementorTemplateLibrary,
+  FontSystemRegistry,
   PackageRegistry,
   buildStarter,
   composeElementorTemplates,
@@ -131,12 +132,22 @@ test("v8 template library survives snapshot deletion and builds package-only pay
     assert.equal((await templateLibrary.list()).find(item => item.sourceTemplateId === "page").id, page.id, "re-import keeps immutable ID");
     await snapshots.remove("source"); assert.equal((await templateLibrary.resolve([page.id])).length, 2, "dependency closure remains after snapshot removal");
     await makePackages(root, library);
-    const document = await createProfileFromPackages({ libraryDir: library, name: "Package templates", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", plugins: { elementor: "4.0.8" }, elementorTemplateIds: [page.id] });
+    const proPlugin = path.join(root, "plugin-pro", "elementor-pro"); await mkdir(proPlugin, { recursive: true });
+    await writeFile(path.join(proPlugin, "elementor-pro.php"), "<?php\n/*\nPlugin Name: Elementor Pro\nVersion: 4.0.8\n*/");
+    const proZip = path.join(root, "elementor-pro.zip"); await zipDir(path.join(root, "plugin-pro"), proZip); await new PackageRegistry(library).add(proZip);
+    const fontRegistry = new FontSystemRegistry(library);
+    const firstFonts = path.join(root, "font-one"); await mkdir(firstFonts, { recursive: true }); await writeFile(path.join(firstFonts, "Inter-Regular.woff2"), "inter-font");
+    const firstFontZip = path.join(root, "font-one.zip"); await zipDir(firstFonts, firstFontZip); const [inter] = await fontRegistry.add(firstFontZip, { name: "Inter", replace: true });
+    const secondFonts = path.join(root, "font-two"); await mkdir(secondFonts, { recursive: true }); await writeFile(path.join(secondFonts, "NotoSans-Regular.woff2"), "noto-font");
+    const secondFontZip = path.join(root, "font-two.zip"); await zipDir(secondFonts, secondFontZip); const [noto] = await fontRegistry.add(secondFontZip, { name: "Noto Sans", replace: true });
+    const document = await createProfileFromPackages({ libraryDir: library, name: "Package templates", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", plugins: { elementor: "4.0.8", "elementor-pro": "4.0.8" }, elementorTemplateIds: [page.id], fontSystemIds: [inter.id, noto.id] });
     assert.equal(document.schemaVersion, 8); assert.deepEqual(document.elementorTemplateIds.sort(), [page.id, part.id].sort());
+    assert.deepEqual(document.fontSystems.map(font => font.id), [inter.id, noto.id]);
     const profilePath = path.join(root, "package-profile.json"); await writeFile(profilePath, JSON.stringify(document));
     const loaded = await loadProfile(profilePath, { libraryDir: library }); const output = path.join(root, "package-templates.zip");
     const build = await buildStarter({ profile: loaded, outputZip: output, bootstrapFile: path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), builderVersion: "test" });
     assert.equal(build.manifest.configurationEnabled, false); assert.equal(build.manifest.elementorTemplates.length, 2); assert.equal(build.manifest.elementorTemplatePayload.path, "starter-elementor-templates.json");
+    assert.deepEqual(build.manifest.fontSystems.map(font => font.id), [inter.id, noto.id]);
     const unpacked = path.join(root, "package-unpacked"); await extractZip(output, unpacked); const payloadName=(await readdir(path.join(unpacked,"wp-content"))).find(name=>name.startsWith(".wp-starter-"));
     const payload=JSON.parse(await readFile(path.join(unpacked,"wp-content",payloadName,"starter-elementor-templates.json"),"utf8")); assert.equal(payload.templates.length,2); assert.equal(payload.mappings["elementor:color:primary"],"elementor:color:primary");
     await assert.rejects(() => templateLibrary.remove(part.id), error => error?.code === "resource_in_use");

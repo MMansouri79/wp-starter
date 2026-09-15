@@ -19,12 +19,19 @@ import type {
   ProfileDocumentV8
 } from "./types.js";
 
-function requireFontDependencies(pluginSlugs: string[], fontSystemId?: string | null): void {
-  if (!fontSystemId) return;
+function requireFontDependencies(pluginSlugs: string[], fontSystemIds: string[] = []): void {
+  if (fontSystemIds.length === 0) return;
   const set = new Set(pluginSlugs);
   if (!set.has("elementor") || !set.has("elementor-pro")) {
-    throw new BuilderError("font_dependencies_missing", "A font system requires both Elementor and Elementor Pro in the build profile.");
+    throw new BuilderError("font_dependencies_missing", "Font profiles require both Elementor and Elementor Pro in the build profile.");
   }
+}
+
+function selectedFontSystemIds(options: { fontSystemId?: string | null; fontSystemIds?: string[] }): string[] {
+  const requested = options.fontSystemIds ?? (options.fontSystemId ? [options.fontSystemId] : []);
+  const ids = requested.map((id, index) => requireString(id, `fontSystems[${index}].id`).trim());
+  if (ids.some((id) => !id)) throw new BuilderError("invalid_profile", "Font profile IDs cannot be empty.");
+  return [...new Set(ids)];
 }
 
 function requireDesignSystemDependencies(pluginSlugs: string[], designSystemId?: string | null): void {
@@ -139,7 +146,10 @@ async function loadRegistryProfile(raw: any, absolute: string, options: LoadProf
   if (schemaVersion === 7 && !Array.isArray(raw.elementorTemplates)) throw new BuilderError("invalid_profile", "elementorTemplates must be an array in profile schema v7.");
   if (schemaVersion === 8 && raw.elementorTemplates !== undefined && !Array.isArray(raw.elementorTemplates)) throw new BuilderError("invalid_profile", "Legacy elementorTemplates must be an array.");
   if (schemaVersion === 8 && raw.elementorTemplateIds !== undefined && !Array.isArray(raw.elementorTemplateIds)) throw new BuilderError("invalid_profile", "elementorTemplateIds must be an array.");
-  if (schemaVersion === 8 && raw.fontSystem != null) throw new BuilderError("invalid_profile", "Profile schema v8 design systems own their fonts; fontSystem cannot also be selected.");
+  if (schemaVersion === 7 && raw.fontSystems !== undefined && !Array.isArray(raw.fontSystems)) throw new BuilderError("invalid_profile", "fontSystems must be an array in profile schema v7.");
+  if (schemaVersion === 8 && raw.fontSystem != null) throw new BuilderError("invalid_profile", "Profile schema v8 uses fontSystems for standalone fonts and does not accept the legacy fontSystem field.");
+  if (schemaVersion === 8 && raw.fontSystems !== undefined && !Array.isArray(raw.fontSystems)) throw new BuilderError("invalid_profile", "fontSystems must be an array in profile schema v8.");
+  if (schemaVersion === 8 && raw.designSystem?.id && Array.isArray(raw.fontSystems) && raw.fontSystems.length > 0) throw new BuilderError("invalid_profile", "A v8 design system owns its font selection; standalone Font Profiles cannot also be selected.");
 
   const libraryDir = path.resolve(options.libraryDir || defaultLibraryDir());
   const { wordpress, theme, plugins } = await resolveRegistryArtifacts(raw, libraryDir);
@@ -151,7 +161,11 @@ async function loadRegistryProfile(raw: any, absolute: string, options: LoadProf
   const libraryTemplateIds = schemaVersion === 8 && Array.isArray(raw.elementorTemplateIds) ? raw.elementorTemplateIds.map((id: unknown, index: number) => requireString(id, `elementorTemplateIds[${index}]`)) : [];
   const elementorLibraryTemplates = libraryTemplateIds.length > 0 ? await new ElementorTemplateLibrary(libraryDir).resolve(libraryTemplateIds, { requireClosed: true }) : undefined;
   requireElementorForTemplates(plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(raw.locale)).map((plugin) => plugin.slug), [...(elementorTemplates || []), ...(elementorLibraryTemplates || [])]);
-  const fontSystem = schemaVersion >= 6 && raw.fontSystem?.id ? await new FontSystemRegistry(libraryDir).resolve(requireString(raw.fontSystem.id, "fontSystem.id")) : null;
+  const fontSystemIds = schemaVersion >= 7 && Array.isArray(raw.fontSystems)
+    ? raw.fontSystems.map((entry: any, index: number) => requireString(entry?.id, `fontSystems[${index}].id`))
+    : schemaVersion >= 6 && raw.fontSystem?.id ? [requireString(raw.fontSystem.id, "fontSystem.id")] : [];
+  const fontSystems = await Promise.all(fontSystemIds.map((id: string) => new FontSystemRegistry(libraryDir).resolve(id)));
+  const fontSystem = fontSystems[0] || null;
   const designSystemId = schemaVersion === 8 && raw.designSystem?.id ? requireString(raw.designSystem.id, "designSystem.id") : null;
   const designSystem = designSystemId ? await new DesignSystemResourceService(libraryDir).resolve(designSystemId) : null;
   const elementorTemplateMappings = schemaVersion === 8 ? validatedTemplateMappings(elementorLibraryTemplates || [], designSystem, raw.elementorTemplateMappings && typeof raw.elementorTemplateMappings === "object" ? raw.elementorTemplateMappings : {}) : {};
@@ -160,7 +174,7 @@ async function loadRegistryProfile(raw: any, absolute: string, options: LoadProf
     schemaVersion, name: raw.name, locale: raw.locale,
     wordpress: { version: raw.wordpress.version, variant: wordpress.variant, zip: wordpress.absoluteZip },
     theme: theme ? { slug: theme.slug, installDir: theme.installDir, version: raw.theme.version, zip: theme.absoluteZip, requiresWordPress: theme.requiresWordPress, requiresPhp: theme.requiresPhp } : null,
-    plugins, configExport: snapshot ? snapshot.absoluteZip : null, fontSystem, designSystem, vnext: designSystem?.payload ?? raw.vnext ?? null,
+    plugins, configExport: snapshot ? snapshot.absoluteZip : null, fontSystem, fontSystems, designSystem, vnext: designSystem?.payload ?? raw.vnext ?? null,
     elementorTemplates, elementorLibraryTemplates,
     elementorTemplateMappings,
     configurationSnapshotId: raw.config?.id,
@@ -186,15 +200,16 @@ export async function loadProfile(profilePath: string, options: LoadProfileOptio
   else if ([3, 4, 5, 6, 7, 8].includes(raw.schemaVersion)) profile = await loadRegistryProfile(raw, absolute, options, raw.schemaVersion);
   else throw new BuilderError("invalid_profile", "Only profile schemaVersion 1 through 8 are supported.");
 
-  requireFontDependencies(profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale)).map((plugin) => plugin.slug), profile.fontSystem?.id);
+  const fontSystems = profile.fontSystems ?? (profile.fontSystem ? [profile.fontSystem] : []);
+  requireFontDependencies(profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale)).map((plugin) => plugin.slug), fontSystems.map((font) => font.id));
   requireDesignSystemDependencies(profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale)).map((plugin) => plugin.slug), profile.designSystem?.system.id);
-  const requiredPaths = [profile.wordpress.zip, ...(profile.theme ? [profile.theme.zip] : []), ...(profile.configExport ? [profile.configExport] : []), ...profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale)).map((plugin) => plugin.zip), ...(profile.fontSystem?.faces || []).map((face) => face.absoluteFile), ...(profile.designSystem?.fontProfiles || []).flatMap((font) => font.faces.map((face) => face.absoluteFile)), ...(profile.languageArchives ?? []).filter((archive) => archive.locale === profile.locale).map((archive) => archive.zip)];
+  const requiredPaths = [profile.wordpress.zip, ...(profile.theme ? [profile.theme.zip] : []), ...(profile.configExport ? [profile.configExport] : []), ...profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale)).map((plugin) => plugin.zip), ...fontSystems.flatMap((font) => font.faces.map((face) => face.absoluteFile)), ...(profile.designSystem?.fontProfiles || []).flatMap((font) => font.faces.map((face) => face.absoluteFile)), ...(profile.languageArchives ?? []).filter((archive) => archive.locale === profile.locale).map((archive) => archive.zip)];
   for (const input of requiredPaths) if (!(await exists(input))) throw new BuilderError("missing_input", `Input file does not exist: ${input}`);
   return profile;
 }
 
 export interface CreateProfileFromSnapshotOptions {
-  libraryDir?: string; name?: string; locale?: string; excludePlugins?: string[]; wordpressVersion?: string; wordpressVariant?: string; themeVersion?: string; pluginVersions?: Record<string, string>; fontSystemId?: string | null; designSystemId?: string | null; elementorTemplates?: ElementorTemplateSelection[]; elementorTemplateIds?: string[]; elementorTemplateMappings?: Record<string, string>;
+  libraryDir?: string; name?: string; locale?: string; excludePlugins?: string[]; wordpressVersion?: string; wordpressVariant?: string; themeVersion?: string; pluginVersions?: Record<string, string>; fontSystemId?: string | null; fontSystemIds?: string[]; designSystemId?: string | null; elementorTemplates?: ElementorTemplateSelection[]; elementorTemplateIds?: string[]; elementorTemplateMappings?: Record<string, string>;
 }
 
 export async function createProfileFromSnapshot(snapshotId: string, options: CreateProfileFromSnapshotOptions = {}): Promise<ProfileDocumentV7 | ProfileDocumentV8> {
@@ -237,20 +252,22 @@ export async function createProfileFromSnapshot(snapshotId: string, options: Cre
     try { await packages.resolve("plugin", plugin.slug, version); } catch (error) { if (error instanceof BuilderError && error.code === "package_not_found") missing.push(`plugin:${plugin.slug}@${version}`); else throw error; }
     plugins.push({ slug: plugin.slug, version, required: true });
   }
-  requireFontDependencies(plugins.map((plugin) => plugin.slug), options.fontSystemId);
-  if (options.fontSystemId && options.designSystemId) throw new BuilderError("profile_font_selection_conflict", "Select either a design system or a standalone Font Profile, not both.");
+  const fontSystemIds = selectedFontSystemIds(options);
+  requireFontDependencies(plugins.map((plugin) => plugin.slug), fontSystemIds);
+  if (fontSystemIds.length && options.designSystemId) throw new BuilderError("profile_font_selection_conflict", "Select either a design system or standalone Font Profiles, not both.");
   requireDesignSystemDependencies(plugins.map((plugin) => plugin.slug), options.designSystemId);
-  if (options.fontSystemId) await new FontSystemRegistry(libraryDir).resolve(options.fontSystemId);
+  const fontRegistry = new FontSystemRegistry(libraryDir);
+  for (const id of fontSystemIds) await fontRegistry.resolve(id);
   const resolvedDesignSystem = options.designSystemId ? await new DesignSystemResourceService(libraryDir).resolve(options.designSystemId) : null;
   if (missing.length > 0) throw new BuilderError("missing_profile_packages", `Cannot create a build-ready profile because ${missing.length} selected package(s) are missing: ${missing.join(", ")}`);
   requireElementorForTemplates(plugins.map((plugin) => plugin.slug), selectedLibraryTemplates);
   const common = { name: options.name?.trim() || snapshot.id, locale, wordpress: { version: wordpressVersion, variant: wordpressVariant }, theme: { slug: snapshot.theme.slug, version: themeVersion }, plugins, config: { id: snapshot.id }, languageArchives: [] };
-  if (options.designSystemId || selectedLibraryTemplates.length > 0) return { schemaVersion: 8, ...common, designSystem: options.designSystemId ? { id: options.designSystemId } : null, elementorTemplateIds: selectedLibraryTemplates.map((template) => template.id), elementorTemplateMappings: validatedTemplateMappings(selectedLibraryTemplates, resolvedDesignSystem, options.elementorTemplateMappings || {}) };
-  return { schemaVersion: 7, ...common, elementorTemplates: selectedTemplates.map((template) => ({ snapshotId: template.snapshotId, templateId: template.templateId })), fontSystem: options.fontSystemId ? { id: options.fontSystemId } : null };
+  if (options.designSystemId || selectedLibraryTemplates.length > 0) return { schemaVersion: 8, ...common, designSystem: options.designSystemId ? { id: options.designSystemId } : null, ...(fontSystemIds.length && !options.designSystemId ? { fontSystems: fontSystemIds.map((id) => ({ id })) } : {}), elementorTemplateIds: selectedLibraryTemplates.map((template) => template.id), elementorTemplateMappings: validatedTemplateMappings(selectedLibraryTemplates, resolvedDesignSystem, options.elementorTemplateMappings || {}) };
+  return { schemaVersion: 7, ...common, elementorTemplates: selectedTemplates.map((template) => ({ snapshotId: template.snapshotId, templateId: template.templateId })), fontSystem: fontSystemIds.length === 1 ? { id: fontSystemIds[0] } : null, ...(fontSystemIds.length > 1 ? { fontSystems: fontSystemIds.map((id) => ({ id })) } : {}) };
 }
 
 export interface CreateProfileFromPackagesOptions {
-  libraryDir?: string; name: string; locale: string; wordpressVersion: string; wordpressVariant: string; themeSlug?: string | null; themeVersion?: string | null; plugins?: Record<string, string>; fontSystemId?: string | null; designSystemId?: string | null; elementorTemplates?: ElementorTemplateSelection[]; elementorTemplateIds?: string[]; elementorTemplateMappings?: Record<string, string>;
+  libraryDir?: string; name: string; locale: string; wordpressVersion: string; wordpressVariant: string; themeSlug?: string | null; themeVersion?: string | null; plugins?: Record<string, string>; fontSystemId?: string | null; fontSystemIds?: string[]; designSystemId?: string | null; elementorTemplates?: ElementorTemplateSelection[]; elementorTemplateIds?: string[]; elementorTemplateMappings?: Record<string, string>;
 }
 
 export async function createProfileFromPackages(options: CreateProfileFromPackagesOptions): Promise<ProfileDocumentV7 | ProfileDocumentV8> {
@@ -263,15 +280,17 @@ export async function createProfileFromPackages(options: CreateProfileFromPackag
   const plugins = [];
   for (const [slugRaw, versionRaw] of Object.entries(options.plugins ?? {})) { const slug = String(slugRaw).trim(); const version = String(versionRaw).trim(); if (!slug || !version) continue; await packages.resolve("plugin", slug, version); plugins.push({ slug, version, required: true }); }
   plugins.sort((a, b) => a.slug.localeCompare(b.slug));
-  requireFontDependencies(plugins.map((plugin) => plugin.slug), options.fontSystemId);
-  if (options.fontSystemId && options.designSystemId) throw new BuilderError("profile_font_selection_conflict", "Select either a design system or a standalone Font Profile, not both.");
+  const fontSystemIds = selectedFontSystemIds(options);
+  requireFontDependencies(plugins.map((plugin) => plugin.slug), fontSystemIds);
+  if (fontSystemIds.length && options.designSystemId) throw new BuilderError("profile_font_selection_conflict", "Select either a design system or standalone Font Profiles, not both.");
   requireDesignSystemDependencies(plugins.map((plugin) => plugin.slug), options.designSystemId);
   requireElementorForTemplates(plugins.map((plugin) => plugin.slug), selectedLibraryTemplates);
-  if (options.fontSystemId) await new FontSystemRegistry(libraryDir).resolve(options.fontSystemId);
+  const fontRegistry = new FontSystemRegistry(libraryDir);
+  for (const id of fontSystemIds) await fontRegistry.resolve(id);
   const resolvedDesignSystem = options.designSystemId ? await new DesignSystemResourceService(libraryDir).resolve(options.designSystemId) : null;
   const common = { name, locale, wordpress: { version: wordpressVersion, variant: wordpressVariant }, theme, plugins, config: null, languageArchives: [] };
-  if (options.designSystemId || selectedLibraryTemplates.length > 0) return { schemaVersion: 8, ...common, designSystem: options.designSystemId ? { id: options.designSystemId } : null, elementorTemplateIds: selectedLibraryTemplates.map((template) => template.id), elementorTemplateMappings: validatedTemplateMappings(selectedLibraryTemplates, resolvedDesignSystem, options.elementorTemplateMappings || {}) };
-  return { schemaVersion: 7, ...common, elementorTemplates: [], fontSystem: options.fontSystemId ? { id: options.fontSystemId } : null };
+  if (options.designSystemId || selectedLibraryTemplates.length > 0) return { schemaVersion: 8, ...common, designSystem: options.designSystemId ? { id: options.designSystemId } : null, ...(fontSystemIds.length && !options.designSystemId ? { fontSystems: fontSystemIds.map((id) => ({ id })) } : {}), elementorTemplateIds: selectedLibraryTemplates.map((template) => template.id), elementorTemplateMappings: validatedTemplateMappings(selectedLibraryTemplates, resolvedDesignSystem, options.elementorTemplateMappings || {}) };
+  return { schemaVersion: 7, ...common, elementorTemplates: [], fontSystem: fontSystemIds.length === 1 ? { id: fontSystemIds[0] } : null, ...(fontSystemIds.length > 1 ? { fontSystems: fontSystemIds.map((id) => ({ id })) } : {}) };
 }
 
 export type { ProfileDocumentV3, ProfileDocumentV4, ProfileDocumentV5, ProfileDocumentV6, ProfileDocumentV7, ProfileDocumentV8 };

@@ -418,6 +418,8 @@ export interface ProfileDocumentV7 {
   }>;
   config: { id: string } | null;
   fontSystem: { id: string } | null;
+  /** Optional multi-font extension; fontSystem remains for legacy single-font profiles. */
+  fontSystems?: Array<{ id: string }>;
   elementorTemplates: ElementorTemplateSelection[];
   languageArchives?: LanguageArchiveRef[];
 }
@@ -431,6 +433,8 @@ export interface ProfileDocumentV8 {
   plugins: Array<{ slug: string; version: string; required?: boolean; locales?: string[] }>;
   config: { id: string } | null;
   designSystem: { id: string } | null;
+  /** Standalone profiles are allowed only when no design system is selected. */
+  fontSystems?: Array<{ id: string }>;
   /** Canonical snapshot-independent selections. */
   elementorTemplateIds?: string[];
   elementorTemplateMappings?: Record<string, string>;
@@ -448,6 +452,8 @@ export interface BuildProfile {
   plugins: PluginRef[];
   configExport: string | null;
   fontSystem?: ResolvedFontSystem | null;
+  /** Resolved standalone font profiles. Legacy profiles use fontSystem. */
+  fontSystems?: ResolvedFontSystem[];
   designSystem?: ResolvedDesignSystem | null;
   languageArchives?: LanguageArchiveRef[];
   vnext?: VNextBuildPayload | null;
@@ -503,6 +509,12 @@ export interface StarterBuildManifest {
     name: string;
     faces: Array<Omit<FontFaceRecord, "file"> & { file: string }>;
   } | null;
+  /** Multiple standalone font profiles; fontSystem mirrors the first for older installers. */
+  fontSystems?: Array<{
+    id: string;
+    name: string;
+    faces: Array<Omit<FontFaceRecord, "file"> & { file: string }>;
+  }>;
   languageArchives: Array<LanguageArchiveRef & { sha256: string }>;
   vnext?: { path: string; sha256: string } | null;
   elementorTemplatePayload?: { path: string; sha256: string } | null;

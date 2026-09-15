@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.0-alpha.31
+
+- Added a one-time setup revision migration that disables Elementor Atomic Editor on sites rerunning WP Starter with an updated package, while preserving administrators' ability to re-enable it after setup.
+
+## 0.1.0-alpha.30
+
+- Recheck and verify Elementor Atomic Editor remains inactive after all bundled plugin activation hooks complete.
+
+## 0.1.0-alpha.29
+
+- Disabled Elementor Atomic Editor during fresh package setup before Elementor's first activation, verifying the saved experiment option and leaving administrators free to re-enable it after setup.
+
+## 0.1.0-alpha.28
+
+- Added multi-select standalone Font Profiles to build profiles and packaged/register every selected family with Elementor Pro while preserving legacy single-profile builds.
+
+## 0.1.0-alpha.27
+
+- Restored Elementor's four system Global Fonts for every design-system build, added editable system/custom Global Fonts and fallback family settings, and included them in offline font validation and setup verification.
+- Added a staged WordPress setup screen with an auto-updating progress bar; provisioning now advances through authenticated requests and returns to the dashboard when complete.
+
 ## 0.1.0-alpha.26
 
 - Applied design-system custom colors to Elementor Custom Colors and applied typography roles to the matching Elementor Theme Style controls for body, links, headings, buttons, and form fields.

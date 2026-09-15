@@ -103,6 +103,21 @@ test("font-enabled profiles require Elementor Pro and bundle detected faces", as
     assert.equal(result.manifest.fontSystem.faces[0].weight, 700);
     assert.equal(result.manifest.fontSystem.faces[0].format, "woff2");
 
+    const secondFonts = path.join(temp, "fonts-second"); await mkdir(secondFonts, { recursive: true }); await writeFile(path.join(secondFonts, "Vazirmatn-Regular.woff2"), "second-font");
+    const secondZip = path.join(temp, "fonts-second.zip"); await zipDir(secondFonts, secondZip);
+    const [secondSystem] = await new FontSystemRegistry(library).add(secondZip, { name: "Vazirmatn", replace: true });
+    const multiDoc = await createProfileFromPackages({ libraryDir: library, name: "multi-font-build", locale: "en_US", wordpressVersion: "7.1", wordpressVariant: "en_US", plugins: { elementor: "4.2.1", "elementor-pro": "4.2.1" }, fontSystemIds: [system.id, secondSystem.id] });
+    assert.equal(multiDoc.fontSystem, null);
+    assert.deepEqual(multiDoc.fontSystems.map(font => font.id), [system.id, secondSystem.id]);
+    const multiProfilePath = path.join(temp, "multi-font-profile.json"); await writeFile(multiProfilePath, JSON.stringify(multiDoc));
+    const multiProfile = await loadProfile(multiProfilePath, { libraryDir: library });
+    const multiResult = await buildStarter({ profile: multiProfile, outputZip: path.join(temp, "multi-font-starter.zip"), bootstrapFile: path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), builderVersion: "test" });
+    assert.deepEqual(multiResult.manifest.fontSystems.map(font => font.id), [system.id, secondSystem.id]);
+    assert.equal(multiResult.manifest.fontSystems[0].faces[0].family, "Peyda");
+    assert.equal(multiResult.manifest.fontSystems[1].faces[0].family, "Vazirmatn");
+    assert.notEqual(multiResult.manifest.fontSystems[0].faces[0].file, multiResult.manifest.fontSystems[1].faces[0].file);
+    assert.equal(multiResult.manifest.fontSystem.id, system.id, "legacy manifest field mirrors the first selected profile");
+
     const resources = new DesignSystemResourceService(library);
     await resources.saveTypography({ schemaVersion: 1, id: "brand-type", name: "Brand Type", roles: { body: { fontRole: "primary", weight: 700, size: { desktop: "16px", tablet: "15px", mobile: "14px" } } } });
     await resources.saveColors({ schemaVersion: 1, id: "brand-colors", name: "Brand Colors", elementor: { primary: "#112233", secondary: "#445566", text: "#222222", accent: "#abcdef" } });

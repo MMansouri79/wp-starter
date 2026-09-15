@@ -149,6 +149,7 @@ async function listProfiles() {
         plugins: Array.isArray(raw.plugins) ? raw.plugins.length : 0,
         config: String(raw.config?.id || ""),
         fontSystem: String(raw.fontSystem?.id || ""),
+        fontSystems: Array.isArray(raw.fontSystems) ? raw.fontSystems.map(font => String(font?.id || "")).filter(Boolean) : raw.fontSystem?.id ? [String(raw.fontSystem.id)] : [],
         designSystem: String(raw.designSystem?.id || ""),
         elementorTemplates: Array.isArray(raw.elementorTemplateIds) ? raw.elementorTemplateIds.length : Array.isArray(raw.elementorTemplates) ? raw.elementorTemplates.length : 0,
         updatedAt: info.mtime.toISOString()
@@ -250,6 +251,7 @@ async function createOrUpdateProfile(body) {
       wordpressVariant: String(body.wordpressVariant || "").trim() || undefined,
       themeVersion: String(body.themeVersion || "").trim() || undefined,
       pluginVersions,
+      fontSystemIds: Array.isArray(body.fontSystemIds) ? body.fontSystemIds.map(id => String(id).trim()).filter(Boolean) : undefined,
       fontSystemId: String(body.fontSystemId || "").trim() || null,
       designSystemId: String(body.designSystemId || "").trim() || null,
       elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined,
@@ -267,6 +269,7 @@ async function createOrUpdateProfile(body) {
     themeSlug: String(body.themeSlug || "").trim() || null,
     themeVersion: String(body.themeVersion || "").trim() || null,
     plugins: pluginVersions,
+    fontSystemIds: Array.isArray(body.fontSystemIds) ? body.fontSystemIds.map(id => String(id).trim()).filter(Boolean) : undefined,
     fontSystemId: String(body.fontSystemId || "").trim() || null,
     designSystemId: String(body.designSystemId || "").trim() || null,
     elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined,

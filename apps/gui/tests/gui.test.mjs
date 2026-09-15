@@ -49,6 +49,10 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(html, /id="type-rows"/);
     assert.match(html, /id="type-devices"/);
     assert.match(html, /Clear current breakpoint/);
+    assert.match(html, /Elementor Global Fonts/);
+    assert.match(html, /id="global-font-rows"/);
+    assert.match(html, /id="global-font-fallback"/);
+    assert.match(html, /\+ Add Global Font/);
     assert.match(html, /\+ Custom color/);
     assert.match(html, /id="build-design-system"/);
     assert.match(html, /Elementor Templates/);
@@ -117,11 +121,13 @@ test("GUI validates and composes design-system resources", async () => {
     const base = `http://127.0.0.1:${server.address().port}`;
     const authFetch = await localSession(base);
     const post = (kind, body) => authFetch(`${base}/api/vnext/${kind}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    assert.equal((await post("typography", { schemaVersion: 1, id: "base-type", name: "Base Type", roles: { body: { fontRole: "primary", weight: 400, size: { desktop: "16px" } } } })).status, 200);
+    assert.equal((await post("typography", { schemaVersion: 1, id: "base-type", name: "Base Type", roles: { body: { fontRole: "primary", weight: 400, size: { desktop: "16px" } } }, globalTypography: { text: { fontRole: "primary", weight: 400, size: { desktop: "16px" } } }, globalCustomTypography: [{ id: "eyebrow", name: "Eyebrow", token: { fontRole: "primary", weight: 400 } }], fallbackFontFamily: "Arial, sans-serif" })).status, 200);
     assert.equal((await post("colors", { schemaVersion: 1, id: "base-colors", name: "Base Colors", elementor: { primary: "#112233", secondary: "#445566", text: "#222222", accent: "#abcdef" } })).status, 200);
     assert.equal((await post("designSystems", { schemaVersion: 1, id: "base", name: "Base", typographyProfileId: "base-type", colorProfileId: "base-colors", fontBindings: { primary: "inter" } })).status, 200);
     const state = await (await authFetch(`${base}/api/state`)).json();
     assert.deepEqual(state.vnext.typography[0].roles.body.size.desktop, { value: 16, unit: "px" });
+    assert.equal(state.vnext.typography[0].globalTypography.text.size.desktop.value, 16);
+    assert.equal(state.vnext.typography[0].globalCustomTypography[0].name, "Eyebrow");
     assert.equal(state.vnext.designSystems[0].id, "base");
     const blocked = await authFetch(`${base}/api/vnext/typography/base-type`, { method: "DELETE" });
     assert.equal(blocked.status, 400);

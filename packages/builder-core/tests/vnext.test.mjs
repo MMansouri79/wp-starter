@@ -11,11 +11,36 @@ import {
   DesignSystemResourceService,
   FontSystemRegistry,
   normalizeTypographyProfile,
+  compileVNextPayload,
   remapPortableTemplate,
   validateColorProfile,
   validateDesignSystem,
   validateTypographyProfile
 } from "../dist/index.js";
+
+test("compiled design systems keep all four Elementor Global Fonts and custom font styles", () => {
+  const token = { fontRole: "brand", weight: 400, style: "normal", size: { desktop: "16px" } };
+  const typography = normalizeTypographyProfile({ schemaVersion: 1, id: "brand-type", name: "Brand Type", roles: { body: token, h1: { ...token, size: { desktop: "42px" } }, h2: { ...token, size: { desktop: "34px" } }, links: token }, globalTypography: { primary: { ...token, size: { desktop: "46px" } }, secondary: token, text: token, accent: token }, globalCustomTypography: [{ id: "eyebrow", name: "Eyebrow", token: { ...token, weight: 700, size: { desktop: "12px" } } }], fallbackFontFamily: "Arial, sans-serif", fontSlots: { brand: { name: "Brand font" } } });
+  const colors = { schemaVersion: 1, id: "brand-colors", name: "Brand Colors", elementor: { primary: "#112233", secondary: "#445566", text: "#222222", accent: "#abcdef" } };
+  const fonts = [{ schemaVersion: 1, id: "inter", name: "Inter", family: "Inter", faces: [{ family: "Inter", weight: 400, style: "normal", format: "woff2", filename: "regular.woff2", file: "regular.woff2", sha256: "" }, { family: "Inter", weight: 700, style: "normal", format: "woff2", filename: "bold.woff2", file: "bold.woff2", sha256: "" }] }];
+  const system = { schemaVersion: 1, id: "brand", name: "Brand", typographyProfileId: typography.id, colorProfileId: colors.id, fontBindings: { brand: "inter" } };
+  const payload = compileVNextPayload(system, typography, colors, fonts);
+  assert.deepEqual(Object.keys(payload.designSystem.globalTypography), ["primary", "secondary", "text", "accent"]);
+  assert.equal(payload.designSystem.globalTypography.primary.size.desktop.value, 46);
+  assert.equal(payload.designSystem.globalCustomTypography[0].id, "eyebrow");
+  assert.equal(payload.designSystem.fallbackFontFamily, "Arial, sans-serif");
+});
+
+test("legacy typography profiles receive all Elementor Global Font aliases", () => {
+  const typography = normalizeTypographyProfile({ schemaVersion: 1, id: "legacy-type", name: "Legacy Type", roles: { body: { fontRole: "body", weight: 400 }, h1: { fontRole: "heading", weight: 700 } } });
+  const colors = { schemaVersion: 1, id: "legacy-colors", name: "Legacy Colors", elementor: { primary: "#112233", secondary: "#445566", text: "#222222", accent: "#abcdef" } };
+  const fonts = [{ schemaVersion: 1, id: "body", name: "Body", family: "Body", faces: [{ family: "Body", weight: 400, style: "normal", format: "woff2", filename: "regular.woff2", file: "regular.woff2", sha256: "" }] }, { schemaVersion: 1, id: "heading", name: "Heading", family: "Heading", faces: [{ family: "Heading", weight: 700, style: "normal", format: "woff2", filename: "bold.woff2", file: "bold.woff2", sha256: "" }] }];
+  const system = { schemaVersion: 1, id: "legacy", name: "Legacy", typographyProfileId: typography.id, colorProfileId: colors.id, fontBindings: { body: "body", heading: "heading" } };
+  const payload = compileVNextPayload(system, typography, colors, fonts);
+  assert.deepEqual(Object.keys(payload.designSystem.globalTypography), ["primary", "secondary", "text", "accent"]);
+  assert.equal(payload.designSystem.globalTypography.primary.fontRole, "heading");
+  assert.equal(payload.designSystem.globalTypography.accent.fontRole, "body");
+});
 
 test("vNext typography and color resources validate semantic fields", () => {
   const typography = {
