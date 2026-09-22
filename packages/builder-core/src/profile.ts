@@ -10,14 +10,17 @@ import { ElementorTemplateLibrary } from "./template-library.js";
 import type {
   BuildProfile,
   ConfigSnapshotRecord,
+  ElementorGlobalReference,
   ElementorTemplateSelection,
   ProfileDocumentV3,
   ProfileDocumentV4,
   ProfileDocumentV5,
   ProfileDocumentV6,
   ProfileDocumentV7,
-  ProfileDocumentV8
+  ProfileDocumentV8,
+  ProfileDocumentV9
 } from "./types.js";
+import { SampleContentRegistry } from "./sample-content.js";
 
 function requireFontDependencies(pluginSlugs: string[], fontSystemIds: string[] = []): void {
   if (fontSystemIds.length === 0) return;
@@ -46,7 +49,7 @@ function requireElementorForTemplates(pluginSlugs: string[], templates: unknown[
   }
 }
 
-function validatedTemplateMappings(templates: Array<{ globalReferences?: Array<{ reference: string; kind: string; name: string }> }>, designSystem: Awaited<ReturnType<DesignSystemResourceService["resolve"]>> | null, supplied: Record<string, string>): Record<string, string> {
+function validatedTemplateMappings(templates: Array<{ globalReferences?: ElementorGlobalReference[] }>, designSystem: Awaited<ReturnType<DesignSystemResourceService["resolve"]>> | null, supplied: Record<string, string>): Record<string, string> {
   const mappings = { ...supplied };
   const colorKeys = new Set(Object.keys(designSystem?.payload.designSystem.colors || {}));
   const typographyKeys = new Set(Object.keys(designSystem?.payload.designSystem.typography || {}));
@@ -75,6 +78,19 @@ function requireString(value: unknown, field: string): string {
 }
 
 export interface LoadProfileOptions { libraryDir?: string; }
+
+async function resolveProfileSamples(libraryDir: string, ids: string[] | undefined, plugins: Array<{ slug: string; version: string; locales?: string[] }>, locale: string) {
+  const samples = await new SampleContentRegistry(libraryDir).resolve(ids ?? []);
+  if (samples.content.some(row => row.kind === "product")) {
+    const woo = plugins.find(plugin => plugin.slug === "woocommerce" && (!plugin.locales || plugin.locales.includes(locale)));
+    if (!woo) throw new BuilderError("sample_woocommerce_required", "Sample products require an explicitly selected WooCommerce package for this locale.");
+    const version = woo.version.match(/^(\d+)\.(\d+)/);
+    const atLeast = (major: number, minor: number) => !!version && (Number(version[1]) > major || (Number(version[1]) === major && Number(version[2]) >= minor));
+    if (samples.terms.some(term => term.taxonomy === "product_brand") && !atLeast(9, 6)) throw new BuilderError("sample_woocommerce_capability", "Sample brands require WooCommerce 9.6 or newer with core brands enabled.");
+    if (samples.content.some(row => row.kind === "product" && (row.inventory.globalUniqueId || (row.productType === "variable" && row.variations.some(v => v.inventory.globalUniqueId)))) && !atLeast(9, 2)) throw new BuilderError("sample_woocommerce_capability", "Global unique IDs require WooCommerce 9.2 or newer.");
+  }
+  return samples;
+}
 
 async function resolveRegistryArtifacts(raw: any, libraryDir: string): Promise<{ wordpress: any; theme: any | null; plugins: any[] }> {
   const registry = new PackageRegistry(libraryDir);
@@ -137,19 +153,21 @@ async function loadLegacySchema2(raw: any, absolute: string, options: LoadProfil
   return { schemaVersion: 2, name: raw.name, locale: raw.locale, wordpress: { version: raw.wordpress.version, variant: wordpress.variant, zip: wordpress.absoluteZip }, theme: theme ? { slug: theme.slug, installDir: theme.installDir, version: raw.theme.version, zip: theme.absoluteZip, requiresWordPress: theme.requiresWordPress, requiresPhp: theme.requiresPhp } : null, plugins, configExport: resolveLocal(raw.configExport), fontSystem: null, vnext: null, languageArchives: Array.isArray(raw.languageArchives) ? raw.languageArchives.map((archive: any, index: number) => ({ locale: requireString(archive.locale, `languageArchives[${index}].locale`), zip: resolveLocal(requireString(archive.zip, `languageArchives[${index}].zip`)) })) : [] };
 }
 
-async function loadRegistryProfile(raw: any, absolute: string, options: LoadProfileOptions, schemaVersion: 3 | 4 | 5 | 6 | 7 | 8): Promise<BuildProfile> {
+async function loadRegistryProfile(raw: any, absolute: string, options: LoadProfileOptions, schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9): Promise<BuildProfile> {
   requireString(raw.name, "name"); requireString(raw.locale, "locale"); requireString(raw.wordpress?.version, "wordpress.version");
   if (schemaVersion >= 4) requireString(raw.wordpress?.variant, "wordpress.variant");
   if (schemaVersion < 5 || raw.theme !== null) { requireString(raw.theme?.slug, "theme.slug"); requireString(raw.theme?.version, "theme.version"); }
   if (schemaVersion < 5 || raw.config !== null) requireString(raw.config?.id, "config.id");
   if (!Array.isArray(raw.plugins)) throw new BuilderError("invalid_profile", "plugins must be an array.");
+  if (schemaVersion === 9 && !Array.isArray(raw.sampleContentIds)) throw new BuilderError("invalid_profile", "sampleContentIds must be an array in profile schema v9.");
+  if (schemaVersion < 9 && raw.sampleContentIds !== undefined) throw new BuilderError("invalid_profile", "Sample selections require profile schema v9.");
   if (schemaVersion === 7 && !Array.isArray(raw.elementorTemplates)) throw new BuilderError("invalid_profile", "elementorTemplates must be an array in profile schema v7.");
-  if (schemaVersion === 8 && raw.elementorTemplates !== undefined && !Array.isArray(raw.elementorTemplates)) throw new BuilderError("invalid_profile", "Legacy elementorTemplates must be an array.");
-  if (schemaVersion === 8 && raw.elementorTemplateIds !== undefined && !Array.isArray(raw.elementorTemplateIds)) throw new BuilderError("invalid_profile", "elementorTemplateIds must be an array.");
+  if (schemaVersion >= 8 && raw.elementorTemplates !== undefined && !Array.isArray(raw.elementorTemplates)) throw new BuilderError("invalid_profile", "Legacy elementorTemplates must be an array.");
+  if (schemaVersion >= 8 && raw.elementorTemplateIds !== undefined && !Array.isArray(raw.elementorTemplateIds)) throw new BuilderError("invalid_profile", "elementorTemplateIds must be an array.");
   if (schemaVersion === 7 && raw.fontSystems !== undefined && !Array.isArray(raw.fontSystems)) throw new BuilderError("invalid_profile", "fontSystems must be an array in profile schema v7.");
-  if (schemaVersion === 8 && raw.fontSystem != null) throw new BuilderError("invalid_profile", "Profile schema v8 uses fontSystems for standalone fonts and does not accept the legacy fontSystem field.");
-  if (schemaVersion === 8 && raw.fontSystems !== undefined && !Array.isArray(raw.fontSystems)) throw new BuilderError("invalid_profile", "fontSystems must be an array in profile schema v8.");
-  if (schemaVersion === 8 && raw.designSystem?.id && Array.isArray(raw.fontSystems) && raw.fontSystems.length > 0) throw new BuilderError("invalid_profile", "A v8 design system owns its font selection; standalone Font Profiles cannot also be selected.");
+  if (schemaVersion >= 8 && raw.fontSystem != null) throw new BuilderError("invalid_profile", "Profile schema v8 uses fontSystems for standalone fonts and does not accept the legacy fontSystem field.");
+  if (schemaVersion >= 8 && raw.fontSystems !== undefined && !Array.isArray(raw.fontSystems)) throw new BuilderError("invalid_profile", "fontSystems must be an array in profile schema v8.");
+  if (schemaVersion >= 8 && raw.designSystem?.id && Array.isArray(raw.fontSystems) && raw.fontSystems.length > 0) throw new BuilderError("invalid_profile", "A v8 design system owns its font selection; standalone Font Profiles cannot also be selected.");
 
   const libraryDir = path.resolve(options.libraryDir || defaultLibraryDir());
   const { wordpress, theme, plugins } = await resolveRegistryArtifacts(raw, libraryDir);
@@ -158,7 +176,7 @@ async function loadRegistryProfile(raw: any, absolute: string, options: LoadProf
   const selected: ElementorTemplateSelection[] = schemaVersion >= 7 && Array.isArray(raw.elementorTemplates) ? raw.elementorTemplates.map((entry: any, index: number) => ({ snapshotId: requireString(entry?.snapshotId, `elementorTemplates[${index}].snapshotId`), templateId: requireString(entry?.templateId, `elementorTemplates[${index}].templateId`) })) : [];
   if (schemaVersion === 7 && selected.length > 0 && !snapshot) throw new BuilderError("invalid_profile", "Elementor template selections require a base configuration snapshot.");
   const elementorTemplates = selected.length > 0 ? await snapshots.resolveElementorTemplates(selected, { requireClosed: true }) : undefined;
-  const libraryTemplateIds = schemaVersion === 8 && Array.isArray(raw.elementorTemplateIds) ? raw.elementorTemplateIds.map((id: unknown, index: number) => requireString(id, `elementorTemplateIds[${index}]`)) : [];
+  const libraryTemplateIds = schemaVersion >= 8 && Array.isArray(raw.elementorTemplateIds) ? raw.elementorTemplateIds.map((id: unknown, index: number) => requireString(id, `elementorTemplateIds[${index}]`)) : [];
   const elementorLibraryTemplates = libraryTemplateIds.length > 0 ? await new ElementorTemplateLibrary(libraryDir).resolve(libraryTemplateIds, { requireClosed: true }) : undefined;
   requireElementorForTemplates(plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(raw.locale)).map((plugin) => plugin.slug), [...(elementorTemplates || []), ...(elementorLibraryTemplates || [])]);
   const fontSystemIds = schemaVersion >= 7 && Array.isArray(raw.fontSystems)
@@ -166,9 +184,9 @@ async function loadRegistryProfile(raw: any, absolute: string, options: LoadProf
     : schemaVersion >= 6 && raw.fontSystem?.id ? [requireString(raw.fontSystem.id, "fontSystem.id")] : [];
   const fontSystems = await Promise.all(fontSystemIds.map((id: string) => new FontSystemRegistry(libraryDir).resolve(id)));
   const fontSystem = fontSystems[0] || null;
-  const designSystemId = schemaVersion === 8 && raw.designSystem?.id ? requireString(raw.designSystem.id, "designSystem.id") : null;
+  const designSystemId = schemaVersion >= 8 && raw.designSystem?.id ? requireString(raw.designSystem.id, "designSystem.id") : null;
   const designSystem = designSystemId ? await new DesignSystemResourceService(libraryDir).resolve(designSystemId) : null;
-  const elementorTemplateMappings = schemaVersion === 8 ? validatedTemplateMappings(elementorLibraryTemplates || [], designSystem, raw.elementorTemplateMappings && typeof raw.elementorTemplateMappings === "object" ? raw.elementorTemplateMappings : {}) : {};
+  const elementorTemplateMappings = schemaVersion >= 8 ? validatedTemplateMappings(elementorLibraryTemplates || [], designSystem, raw.elementorTemplateMappings && typeof raw.elementorTemplateMappings === "object" ? raw.elementorTemplateMappings : {}) : {};
   const base = path.dirname(absolute); const resolveLocal = (input: string) => path.resolve(base, input);
   return {
     schemaVersion, name: raw.name, locale: raw.locale,
@@ -177,6 +195,7 @@ async function loadRegistryProfile(raw: any, absolute: string, options: LoadProf
     plugins, configExport: snapshot ? snapshot.absoluteZip : null, fontSystem, fontSystems, designSystem, vnext: designSystem?.payload ?? raw.vnext ?? null,
     elementorTemplates, elementorLibraryTemplates,
     elementorTemplateMappings,
+    sampleContent: schemaVersion === 9 ? await resolveProfileSamples(libraryDir, raw.sampleContentIds, plugins, raw.locale) : null,
     configurationSnapshotId: raw.config?.id,
     configurationSource: snapshot ? {
       wordpressVersion: snapshot.wordpressVersion,
@@ -197,8 +216,8 @@ export async function loadProfile(profilePath: string, options: LoadProfileOptio
   let profile: BuildProfile;
   if (raw.schemaVersion === 1) profile = await loadLegacySchema1(raw, absolute);
   else if (raw.schemaVersion === 2) profile = await loadLegacySchema2(raw, absolute, options);
-  else if ([3, 4, 5, 6, 7, 8].includes(raw.schemaVersion)) profile = await loadRegistryProfile(raw, absolute, options, raw.schemaVersion);
-  else throw new BuilderError("invalid_profile", "Only profile schemaVersion 1 through 8 are supported.");
+  else if ([3, 4, 5, 6, 7, 8, 9].includes(raw.schemaVersion)) profile = await loadRegistryProfile(raw, absolute, options, raw.schemaVersion);
+  else throw new BuilderError("invalid_profile", "Only profile schemaVersion 1 through 9 are supported.");
 
   const fontSystems = profile.fontSystems ?? (profile.fontSystem ? [profile.fontSystem] : []);
   requireFontDependencies(profile.plugins.filter((plugin) => !plugin.locales || plugin.locales.includes(profile.locale)).map((plugin) => plugin.slug), fontSystems.map((font) => font.id));
@@ -209,10 +228,10 @@ export async function loadProfile(profilePath: string, options: LoadProfileOptio
 }
 
 export interface CreateProfileFromSnapshotOptions {
-  libraryDir?: string; name?: string; locale?: string; excludePlugins?: string[]; wordpressVersion?: string; wordpressVariant?: string; themeVersion?: string; pluginVersions?: Record<string, string>; fontSystemId?: string | null; fontSystemIds?: string[]; designSystemId?: string | null; elementorTemplates?: ElementorTemplateSelection[]; elementorTemplateIds?: string[]; elementorTemplateMappings?: Record<string, string>;
+  libraryDir?: string; name?: string; locale?: string; excludePlugins?: string[]; wordpressVersion?: string; wordpressVariant?: string; themeVersion?: string; pluginVersions?: Record<string, string>; fontSystemId?: string | null; fontSystemIds?: string[]; designSystemId?: string | null; elementorTemplates?: ElementorTemplateSelection[]; elementorTemplateIds?: string[]; elementorTemplateMappings?: Record<string, string>; sampleContentIds?: string[];
 }
 
-export async function createProfileFromSnapshot(snapshotId: string, options: CreateProfileFromSnapshotOptions = {}): Promise<ProfileDocumentV7 | ProfileDocumentV8> {
+export async function createProfileFromSnapshot(snapshotId: string, options: CreateProfileFromSnapshotOptions = {}): Promise<ProfileDocumentV7 | ProfileDocumentV8 | ProfileDocumentV9> {
   if (typeof snapshotId !== "string" || snapshotId.trim() === "") throw new BuilderError("invalid_profile", "A non-empty configuration snapshot ID is required.");
   const libraryDir = path.resolve(options.libraryDir || defaultLibraryDir()); const snapshots = new ConfigSnapshotRegistry(libraryDir); const snapshot = await snapshots.resolve(snapshotId); const packages = new PackageRegistry(libraryDir);
   const excluded = new Set((options.excludePlugins ?? []).map((slug) => slug.trim()).filter(Boolean)); const locale = options.locale?.trim() || snapshot.locale; if (!locale) throw new BuilderError("invalid_profile", "Profile locale cannot be empty.");
@@ -222,6 +241,12 @@ export async function createProfileFromSnapshot(snapshotId: string, options: Cre
   const selectedTemplates = await snapshots.resolveElementorTemplates(requestedTemplates);
   const selectedLibraryTemplates = await new ElementorTemplateLibrary(libraryDir).resolve(options.elementorTemplateIds || []);
   const snapshotPlugins = [...snapshot.plugins];
+  const requestedSamples = await new SampleContentRegistry(libraryDir).resolve(options.sampleContentIds ?? []);
+  if (requestedSamples.content.some(row => row.kind === "product") && !snapshotPlugins.some(plugin => plugin.slug === "woocommerce")) {
+    const wooVersion = options.pluginVersions?.woocommerce?.trim();
+    if (!wooVersion) throw new BuilderError("sample_woocommerce_required", "Select an explicit WooCommerce version to include sample products.");
+    snapshotPlugins.push({ slug: "woocommerce", name: "WooCommerce", version: wooVersion, file: "woocommerce/woocommerce.php", active: true });
+  }
   if ((selectedTemplates.length > 0 || selectedLibraryTemplates.length > 0) && !snapshotPlugins.some((plugin) => plugin.slug === "elementor")) {
     const requestedElementorVersion = String(options.pluginVersions?.elementor || "").trim();
     if (requestedElementorVersion) snapshotPlugins.push({ slug: "elementor", name: "Elementor", version: requestedElementorVersion, file: "elementor/elementor.php", active: true });
@@ -262,15 +287,17 @@ export async function createProfileFromSnapshot(snapshotId: string, options: Cre
   if (missing.length > 0) throw new BuilderError("missing_profile_packages", `Cannot create a build-ready profile because ${missing.length} selected package(s) are missing: ${missing.join(", ")}`);
   requireElementorForTemplates(plugins.map((plugin) => plugin.slug), selectedLibraryTemplates);
   const common = { name: options.name?.trim() || snapshot.id, locale, wordpress: { version: wordpressVersion, variant: wordpressVariant }, theme: { slug: snapshot.theme.slug, version: themeVersion }, plugins, config: { id: snapshot.id }, languageArchives: [] };
+  const sampleContent = await resolveProfileSamples(libraryDir, options.sampleContentIds, plugins, locale);
+  if (sampleContent.content.length > 0) return { schemaVersion: 9, ...common, sampleContentIds: sampleContent.content.map(row => row.id), designSystem: options.designSystemId ? { id: options.designSystemId } : null, ...(fontSystemIds.length && !options.designSystemId ? { fontSystems: fontSystemIds.map(id => ({ id })) } : {}), elementorTemplateIds: selectedLibraryTemplates.map(template => template.id), ...("id" in (common.config || {}) ? { elementorTemplates: options.elementorTemplates || [] } : {}), elementorTemplateMappings: validatedTemplateMappings(selectedLibraryTemplates, resolvedDesignSystem, options.elementorTemplateMappings || {}) };
   if (options.designSystemId || selectedLibraryTemplates.length > 0) return { schemaVersion: 8, ...common, designSystem: options.designSystemId ? { id: options.designSystemId } : null, ...(fontSystemIds.length && !options.designSystemId ? { fontSystems: fontSystemIds.map((id) => ({ id })) } : {}), elementorTemplateIds: selectedLibraryTemplates.map((template) => template.id), elementorTemplateMappings: validatedTemplateMappings(selectedLibraryTemplates, resolvedDesignSystem, options.elementorTemplateMappings || {}) };
   return { schemaVersion: 7, ...common, elementorTemplates: selectedTemplates.map((template) => ({ snapshotId: template.snapshotId, templateId: template.templateId })), fontSystem: fontSystemIds.length === 1 ? { id: fontSystemIds[0] } : null, ...(fontSystemIds.length > 1 ? { fontSystems: fontSystemIds.map((id) => ({ id })) } : {}) };
 }
 
 export interface CreateProfileFromPackagesOptions {
-  libraryDir?: string; name: string; locale: string; wordpressVersion: string; wordpressVariant: string; themeSlug?: string | null; themeVersion?: string | null; plugins?: Record<string, string>; fontSystemId?: string | null; fontSystemIds?: string[]; designSystemId?: string | null; elementorTemplates?: ElementorTemplateSelection[]; elementorTemplateIds?: string[]; elementorTemplateMappings?: Record<string, string>;
+  libraryDir?: string; name: string; locale: string; wordpressVersion: string; wordpressVariant: string; themeSlug?: string | null; themeVersion?: string | null; plugins?: Record<string, string>; fontSystemId?: string | null; fontSystemIds?: string[]; designSystemId?: string | null; elementorTemplates?: ElementorTemplateSelection[]; elementorTemplateIds?: string[]; elementorTemplateMappings?: Record<string, string>; sampleContentIds?: string[];
 }
 
-export async function createProfileFromPackages(options: CreateProfileFromPackagesOptions): Promise<ProfileDocumentV7 | ProfileDocumentV8> {
+export async function createProfileFromPackages(options: CreateProfileFromPackagesOptions): Promise<ProfileDocumentV7 | ProfileDocumentV8 | ProfileDocumentV9> {
   const libraryDir = path.resolve(options.libraryDir || defaultLibraryDir()); const packages = new PackageRegistry(libraryDir); const name = requireString(options.name, "name").trim(); const locale = requireString(options.locale, "locale").trim(); const wordpressVersion = requireString(options.wordpressVersion, "wordpressVersion").trim(); const wordpressVariant = requireString(options.wordpressVariant, "wordpressVariant").trim();
   if (Array.isArray(options.elementorTemplates) && options.elementorTemplates.length > 0) throw new BuilderError("elementor_template_base_required", "Legacy snapshot template selections require a base configuration snapshot. Use template library IDs for package-only profiles.");
   const selectedLibraryTemplates = await new ElementorTemplateLibrary(libraryDir).resolve(options.elementorTemplateIds || []);
@@ -289,8 +316,10 @@ export async function createProfileFromPackages(options: CreateProfileFromPackag
   for (const id of fontSystemIds) await fontRegistry.resolve(id);
   const resolvedDesignSystem = options.designSystemId ? await new DesignSystemResourceService(libraryDir).resolve(options.designSystemId) : null;
   const common = { name, locale, wordpress: { version: wordpressVersion, variant: wordpressVariant }, theme, plugins, config: null, languageArchives: [] };
+  const sampleContent = await resolveProfileSamples(libraryDir, options.sampleContentIds, plugins, locale);
+  if (sampleContent.content.length > 0) return { schemaVersion: 9, ...common, sampleContentIds: sampleContent.content.map(row => row.id), designSystem: options.designSystemId ? { id: options.designSystemId } : null, ...(fontSystemIds.length && !options.designSystemId ? { fontSystems: fontSystemIds.map(id => ({ id })) } : {}), elementorTemplateIds: selectedLibraryTemplates.map(template => template.id), ...("id" in (common.config || {}) ? { elementorTemplates: options.elementorTemplates || [] } : {}), elementorTemplateMappings: validatedTemplateMappings(selectedLibraryTemplates, resolvedDesignSystem, options.elementorTemplateMappings || {}) };
   if (options.designSystemId || selectedLibraryTemplates.length > 0) return { schemaVersion: 8, ...common, designSystem: options.designSystemId ? { id: options.designSystemId } : null, ...(fontSystemIds.length && !options.designSystemId ? { fontSystems: fontSystemIds.map((id) => ({ id })) } : {}), elementorTemplateIds: selectedLibraryTemplates.map((template) => template.id), elementorTemplateMappings: validatedTemplateMappings(selectedLibraryTemplates, resolvedDesignSystem, options.elementorTemplateMappings || {}) };
   return { schemaVersion: 7, ...common, elementorTemplates: [], fontSystem: fontSystemIds.length === 1 ? { id: fontSystemIds[0] } : null, ...(fontSystemIds.length > 1 ? { fontSystems: fontSystemIds.map((id) => ({ id })) } : {}) };
 }
 
-export type { ProfileDocumentV3, ProfileDocumentV4, ProfileDocumentV5, ProfileDocumentV6, ProfileDocumentV7, ProfileDocumentV8 };
+export type { ProfileDocumentV3, ProfileDocumentV4, ProfileDocumentV5, ProfileDocumentV6, ProfileDocumentV7, ProfileDocumentV8, ProfileDocumentV9 };

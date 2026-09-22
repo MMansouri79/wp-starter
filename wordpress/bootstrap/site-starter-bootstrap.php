@@ -275,6 +275,33 @@ final class MMS_WP_Starter_Bootstrap {
                 update_option( self::REPORT_OPTION, array_merge( (array) get_option( self::REPORT_OPTION, array() ), array( 'verification' => array( 'checked' => 0, 'mismatches' => 0 ), 'woocommerce_duplicates_removed' => 0, 'configuration_skipped' => true ) ), false );
             }
 
+            if ( ! empty( $build['sampleContentPayload'] ) ) {
+                self::save_state( array( 'phase' => 'sample_content' ) );
+                self::continue_setup();
+            }
+        }
+
+        if ( 'sample_content' === $phase ) {
+            $descriptor = $build['sampleContentPayload'] ?? array();
+            if ( ( $descriptor['path'] ?? '' ) !== 'starter-sample-content.json' || ! preg_match( '/^[a-f0-9]{64}$/D', $descriptor['sha256'] ?? '' ) ) {
+                self::fail( 'Sample payload descriptor is missing or invalid.' ); return;
+            }
+            $file = self::bundled_payload_file_path( 'starter-sample-content.json', $descriptor['sha256'] );
+            if ( is_wp_error( $file ) ) { self::fail( $file->get_error_message() ); return; }
+            $samples = self::read_json( $file );
+            if ( is_wp_error( $samples ) ) { self::fail( $samples->get_error_message() ); return; }
+            $installer_file = self::bundled_payload_file_path( 'sample-content-installer.php', $descriptor['installerSha256'] ?? '' );
+            if ( is_wp_error( $installer_file ) ) { self::fail( $installer_file->get_error_message() ); return; }
+            require_once $installer_file;
+            $result = ( new MMS_WP_Starter_Sample_Content( $samples, $root ) )->step();
+            if ( is_wp_error( $result ) ) { self::fail( $result->get_error_message() ); return; }
+            if ( ! $result ) { self::save_state( array( 'phase' => 'sample_content' ) ); self::continue_setup(); }
+            $report = (array) get_option( self::REPORT_OPTION, array() );
+            $report['sample_content_verified'] = count( $samples['content'] );
+            update_option( self::REPORT_OPTION, $report, false );
+        }
+
+        if ( 'configure' === $phase || 'sample_content' === $phase ) {
             self::save_state( array( 'phase' => 'complete' ) );
             update_option( self::COMPLETE_OPTION, gmdate( 'c' ), false );
             update_option( self::REVISION_OPTION, self::CONFIG_REVISION, false );

@@ -18,6 +18,7 @@ const titles = {
   "design-systems": ["Design Systems", "Compose vNext design-system resources and portable templates."],
   configs: ["Configurations", "Reference-site exports and their package requirements."],
   "elementor-templates": ["Elementor Templates", "Browse source-aware templates from every imported configuration snapshot."],
+  "sample-content": ["Sample Content", "Create reusable sample posts and WooCommerce products for offline starter builds."],
   profiles: ["Profiles", "Manage reusable, version-pinned build profiles."],
   build: ["Build", "Choose exact package versions and generate a complete offline WordPress ZIP."],
   builds: ["Build History", "Review, download, rebuild, or remove generated distributions."]
@@ -55,7 +56,6 @@ function groups(kind = null) {
 }
 
 async function refresh() { state = await request("/api/state"); render(); }
-
 function renderPackages() {
   const html = groups().map(records => {
     const p = records[0];
@@ -339,6 +339,7 @@ function render() {
   renderFonts();
   renderVNext();
   renderElementorLibrary();
+  SampleContentUI.render(state);
   renderFontSystemOptions(previousFontSystems);
   renderDesignSystemOptions(previousDesignSystem);
 
@@ -813,6 +814,7 @@ async function createProfile() {
     designSystemId: $("#build-design-system").value,
     elementorTemplateIds: currentElementorSelection || [],
     elementorTemplateMappings: templateMappingDraft,
+    sampleContentIds: SampleContentUI.selectedIds(),
     sourceFile: currentEditingProfileFile
   };
   const missingTemplates = selectedMissingElementorDependencies();
@@ -853,11 +855,12 @@ async function populateProfileEditor(profile) {
   $("#build-name").value = profile.name;
   $("#build-locale").value = profile.locale || "en_US";
   const baseId = profile.config?.id || "";
-  currentElementorSelection = profile.schemaVersion === 8
+  currentElementorSelection = profile.schemaVersion >= 8
     ? (profile.elementorTemplateIds || [])
     : profile.schemaVersion >= 7
     ? (profile.elementorTemplates || []).map(old => elementorTemplatesForBuild().find(template => template.snapshotId === old.snapshotId && template.sourceTemplateId === old.templateId)?.id).filter(Boolean)
     : elementorTemplatesForBuild().filter(template => template.snapshotId === baseId).map(template => template.id);
+  SampleContentUI.setSelectedIds(profile.sampleContentIds || []);
   { const selected=new Set(currentElementorSelection), depended=new Set(elementorTemplatesForBuild().filter(t=>selected.has(t.id)).flatMap(t=>t.dependencies||[])); currentElementorRoots=[...selected].filter(id=>!depended.has(id)); }
   templateMappingDraft = structuredClone(profile.elementorTemplateMappings || {});
   await loadBuildSelection(baseId);
@@ -1025,7 +1028,7 @@ $("#template-search").oninput = renderElementorChecklist;
 $("#template-source").onchange = renderElementorChecklist;
 $("#template-type").onchange = renderElementorChecklist;
 
-document.querySelectorAll(".nav").forEach(btn => btn.onclick = () => goView(btn.dataset.view));
+document.querySelectorAll(".nav").forEach(btn => btn.onclick = () => { if (btn.dataset.view !== "sample-content" && !SampleContentUI.confirmLeave()) return; goView(btn.dataset.view); });
 $("#refresh").onclick = () => refresh().catch(e => flash(e.message, true));
 $("#package-file").onchange = e => uploadFiles([...e.target.files], "packages").catch(e => flash(e.message, true));
 $("#font-file").onchange = e => uploadFiles([...e.target.files], "fonts").catch(e => flash(e.message, true));

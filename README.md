@@ -46,6 +46,12 @@ Builder Core also exposes an isolated vNext resource API for Builder-owned Typog
 
 On fresh package installations that include Elementor, Bootstrap sets Elementor's Atomic Editor experiment to inactive before plugin activation and checks it again after plugin setup. An updated bootstrap also applies a one-time migration to older WP Starter setup revisions. Administrators can re-enable Atomic Editor in Elementor settings after setup.
 
+## Sample content
+
+The Builder includes a reusable Sample Content library for authoring classic WordPress posts and WooCommerce products (simple, variable, grouped, and external) with the standard fields: titles, editable Unicode slugs, content and excerpt/short description, categories, tags, brands, images, attributes with global terms, variations, inventory, shipping, tax, linked products, and downloads. Content defaults to draft; field-addressed validation explains anything an editor still needs.
+
+Sample posts and products are selected per build profile (schema v9, `sampleContentIds`). Required linked products are closed automatically, products require an explicitly selected WooCommerce version, and builds bundle only the selected content plus its verified local assets (`starter-sample-content.json`). Bootstrap installs samples in resumable stages with real taxonomy terms (exact taxonomy, slug, and hierarchy), real media attachments, protected download files, and verification of persisted slugs, statuses, and term assignments. Unrelated destination content is never overwritten; conflicts stop with an explanation. Sample assets are imported deliberately in the Builder — real stores' products, customers, orders, and uploads stay outside generated builds.
+
 ## Quick start
 
 Install the exporter on the reference site and download `starter-config.zip`.

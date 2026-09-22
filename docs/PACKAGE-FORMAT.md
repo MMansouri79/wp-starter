@@ -253,3 +253,43 @@ Schema v8 selects reusable Elementor design systems and independent template-lib
 ```
 
 The design system requires Elementor and Elementor Pro; templates require Elementor. A snapshot is optional. Template IDs resolve against the independent library, dependency selections are closed before persistence, and every source global reference must auto-map or have an explicit mapping. Interim v8 documents using `elementorTemplates: [{snapshotId, templateId}]` remain readable while their snapshots exist. Generated manifests retain schema v4 and add optional `designSystem` provenance with resource hashes and deduplicated staged font faces. The design-system payload includes all four Elementor system Global Fonts, custom Global Fonts, and the fallback family, even when no templates are selected. Both generated payloads are independently checksum-protected.
+
+## Build profile schema v9 — sample content
+
+Schema v9 extends v8 with a reusable sample-content selection. Sample content is Builder-authored; it never comes from exported site data.
+
+```json
+{
+  "schemaVersion": 9,
+  "name": "store-samples",
+  "locale": "en_US",
+  "wordpress": { "version": "7.1", "variant": "en_US" },
+  "theme": { "slug": "hello-elementor", "version": "3.4.9" },
+  "plugins": [
+    { "slug": "woocommerce", "version": "9.6.0", "required": true }
+  ],
+  "config": null,
+  "designSystem": null,
+  "sampleContentIds": ["post-…", "product-…"]
+}
+```
+
+Selections resolve through the local sample-content library: linked products (upsells, cross-sells, grouped children), category/brand ancestors, and referenced assets are added automatically. Selecting any product requires an explicitly version-selected WooCommerce package for the profile locale. Post-only selections keep v7/v8 capabilities and do not require WooCommerce.
+
+## Generated sample-content payload
+
+Profiles with sample content add `wp-content/<payload>/starter-sample-content.json` (schema v1) containing `content`, `terms`, `attributes`, and `assets` with logical IDs only, plus `sample-content-installer.php`. The manifest v4 entry is optional:
+
+```json
+"sampleContentPayload": {
+  "path": "starter-sample-content.json",
+  "sha256": "…",
+  "installerSha256": "…",
+  "posts": 2,
+  "products": 3,
+  "assets": 5,
+  "resources": [{ "id": "…", "sha256": "…" }]
+}
+```
+
+Assets live under `sample-assets/` with generated names and SHA-256 hashes; images are limited to 20 MiB (JPEG/PNG/GIF/WebP) and downloads to 50 MiB (PDF/plain text), 500 MiB selected per build. Bootstrap verifies payload schema and checksums, installs terms with exact taxonomy/slug/hierarchy identity, stores images as real attachments, places downloads under WooCommerce's protected `woocommerce_uploads` area only when direct web access is denied, stages content as drafts, remaps logical references, applies final statuses, and verifies slugs, statuses, and term assignments before completing setup. Interrupted installs resume from saved checkpoints without duplicating records; conflicting slugs, SKUs, or terms stop with an actionable error. Content previews never execute sample HTML, and inline images use logical placeholders remapped to attachment URLs.

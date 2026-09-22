@@ -35,6 +35,7 @@ test("GUI serves the workspace and local API", async () => {
     assert.equal(state.packages.length, 0);
     assert.equal(state.configs.length, 0);
     assert.deepEqual(state.elementorTemplates, []);
+    assert.deepEqual(state.sampleContent, { schemaVersion: 1, content: [], terms: [], attributes: [], assets: [] });
     assert.equal(path.resolve(state.library), path.resolve(library));
 
     const htmlResponse = await authFetch(`${base}/`);
@@ -79,6 +80,52 @@ test("GUI serves the workspace and local API", async () => {
     assert.match(appJs, /sessionStorage/);
     assert.match(appJs, /saveResource/);
     assert.match(appJs, /profile-select"\)\.onchange/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    if (previous === undefined) delete process.env.WP_STARTER_HOME;
+    else process.env.WP_STARTER_HOME = previous;
+    await rm(library, { recursive: true, force: true });
+  }
+});
+
+test("GUI sample-content API creates, updates, and deletes posts and terms", async () => {
+  const library = await mkdtemp(path.join(os.tmpdir(), "wp-starter-gui-sample-"));
+  const previous = process.env.WP_STARTER_HOME;
+  process.env.WP_STARTER_HOME = library;
+  const { createGuiServer } = await import(`../index.mjs?sample-test=${Date.now()}`);
+  const server = createGuiServer();
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const authFetch = await localSession(base);
+    const post = (url, body) => authFetch(`${base}${url}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const created = await post("/api/sample-content", { kind: "post", title: "Hello", content: "<p>First</p>" });
+    assert.equal(created.status, 200);
+    const sample = await created.json();
+    assert.equal(sample.title, "Hello"); assert.equal(sample.status, "draft");
+    assert.equal((await post("/api/sample-content", { kind: "post", title: "" })).status, 400);
+    const invalid = await post("/api/sample-content", { kind: "post", title: "" });
+    assert.equal((await invalid.json()).issues.some(issue => issue.field === "title" && issue.message === "Required."), true);
+    const updated = await authFetch(`${base}/api/sample-content/${encodeURIComponent(sample.id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "Renamed", status: "publish" }) });
+    assert.equal(updated.status, 200);
+    const term = await post("/api/sample-content/terms", { taxonomy: "category", name: "News" });
+    assert.equal(term.status, 200);
+    const dup = await post(`/api/sample-content/${encodeURIComponent(sample.id)}/duplicate`, {});
+    assert.equal(dup.status, 200); assert.notEqual((await dup.json()).id, sample.id);
+    assert.equal((await authFetch(`${base}/api/sample-content/${encodeURIComponent(sample.id)}`, { method: "DELETE" })).status, 200);
+    assert.equal((await authFetch(`${base}/api/sample-content`)).status, 200);
+    const editorScript = await (await authFetch(`${base}/sample-content.js`)).text();
+    assert.match(editorScript, /SampleContentUI/);
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD3kAAAAASUVORK5CYII=", "base64");
+    const upload = await authFetch(`${base}/api/sample-content/library/assets?filename=test.png&kind=image&alt=Logo`, { method: "POST", body: png });
+    assert.equal(upload.status, 200);
+    const asset = await upload.json();
+    assert.equal(asset.mime, "image/png"); assert.equal(asset.alt, "Logo");
+    const fetched = await authFetch(`${base}/api/sample-content/assets/${asset.id}`);
+    assert.equal(fetched.status, 200); assert.equal(Buffer.from(await fetched.arrayBuffer()).length, png.length);
+    const meta = await authFetch(`${base}/api/sample-content/assets/${asset.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ caption: "Brand logo" }) });
+    assert.equal(meta.status, 200);
+    assert.equal((await (await authFetch(`${base}/api/sample-content`)).json()).assets[0].caption, "Brand logo");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (previous === undefined) delete process.env.WP_STARTER_HOME;

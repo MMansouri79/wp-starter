@@ -91,7 +91,9 @@ function compareVersions(left: string, right: string): number | null {
   const b = parseVersion(right);
   if (!a || !b) return null;
   for (let index = 0; index < 3; index++) {
-    if (a[index] !== b[index]) return a[index] > b[index] ? 1 : -1;
+    const left = a[index] as number;
+    const right = b[index] as number;
+    if (left !== right) return left > right ? 1 : -1;
   }
   if (a[3] === b[3]) return 0;
   if (a[3] === null) return 1;
@@ -178,7 +180,15 @@ function unsupportedReport(errors: string[], baselineId?: string): Compatibility
 }
 
 export function compatibilityReport(profile: BuildProfile, matrix = DEFAULT_COMPATIBILITY_MATRIX): CompatibilityReport {
-  if (!profile.configExport) return { status: "known-good", warnings: [], errors: [] };
+  if (!profile.configExport) {
+    // Package-only profiles skip baseline gating but must still satisfy
+    // package dependency declarations and locale consistency.
+    const errors = dependencyErrors(profile);
+    if (profile.wordpress.variant && profile.locale && profile.wordpress.variant !== profile.locale) {
+      errors.push(`Build blocked: locale ${profile.locale} does not match the WordPress package locale ${profile.wordpress.variant}. Solution: select the WordPress package for ${profile.locale}.`);
+    }
+    return errors.length ? unsupportedReport(errors) : { status: "known-good", warnings: [], errors: [] };
+  }
 
   const source = profile.configurationSource;
   const locale = profile.locale;

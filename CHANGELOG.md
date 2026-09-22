@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.32
+
+- Added a reusable Sample Content library in the Builder with classic-editor posts and WooCommerce simple, variable, grouped, and external products: title, editable Unicode slugs, content/excerpt or short description, categories, tags, brands, featured image and gallery, attributes with global terms, variations with generated combinations (max 200), inventory, shipping, tax, linked products, downloads, and catalog settings. Draft is the default status; validation returns field-addressed errors.
+- Added offline media handling with local JPEG/PNG/GIF/WebP image imports (20 MiB limit) and protected PDF/text product downloads (50 MiB), all checksum-verified; no remote fetching. Downloads install into WooCommerce's protected uploads area only after the target server proves direct-access denial.
+- Added build profile schema v9 (`sampleContentIds`) with linked-product dependency closure; sample products require an explicitly selected WooCommerce version. Bundles `starter-sample-content.json` plus only selected assets with an optional `sampleContentPayload` manifest entry including the installer checksum.
+- Added resumable sample provisioning to the bootstrap installer in separate attribute, term, asset, content, relationship, publish, and verify phases with an installation lock, ownership-based recovery, exact-slug verification, and payload cleanup only after verification; incompatible destination terms, slugs, SKUs, or unsupported WooCommerce capabilities fail with actionable messages.
+- Extended the GUI with Sample Content authoring screens, media metadata, and a searchable profile selection that keeps required linked products visible. All new behavior is covered by builder-core and GUI tests plus executable PHP contract fixtures driving the real bootstrap entry point.
+
 ## 0.1.0-alpha.31
 
 - Added a one-time setup revision migration that disables Elementor Atomic Editor on sites rerunning WP Starter with an updated package, while preserving administrators' ability to re-enable it after setup.
@@ -36,6 +44,13 @@
 - Fixed the Exporter treating empty Elementor `template_id` fields as missing templates, automatically includes real template dependencies, excludes the structural Default Kit, and bumped the paired Exporter release to `0.2.0-alpha.8`.
 
 ## Unreleased
+
+### Stabilization fixes
+
+- Enabled strict builder-core type checking and corrected the contracts it exposed.
+- Enforced compatibility before the core build API creates its workspace or output; package-only builds now validate declared dependencies and explicit WordPress locale consistency.
+- Added optional explicit compatibility matrices for programmatic builds and synthetic fixtures; dependency checks still apply.
+- Read the GUI version from its packaged workspace metadata instead of a stale constant.
 
 ### Elementor design systems
 

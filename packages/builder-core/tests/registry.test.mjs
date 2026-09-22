@@ -36,6 +36,16 @@ test("registers arbitrary packages and builds schema v2 profiles from exact pack
     const pluginZip = path.join(temp, "whatever-filename.zip");
     await zipDir(path.join(temp, "plugin"), pluginZip);
 
+    const stubPlugins = [];
+    for (const [slug, name] of [["woocommerce", "WooCommerce"], ["elementor", "Elementor"]]) {
+      const stub = path.join(temp, `stub-${slug}`, slug);
+      await mkdir(stub, { recursive: true });
+      await writeFile(path.join(stub, `${slug}.php`), `<?php\n/*\nPlugin Name: ${name}\nVersion: 1.0.0\n*/\n`);
+      const stubZip = path.join(temp, `${slug}.zip`);
+      await zipDir(path.join(temp, `stub-${slug}`), stubZip);
+      stubPlugins.push({ slug, zip: stubZip });
+    }
+
     const inspection = await inspectPackage(pluginZip);
     assert.equal(inspection.kind, "plugin");
     assert.equal(inspection.slug, "arbitrary-plugin");
@@ -48,9 +58,10 @@ test("registers arbitrary packages and builds schema v2 profiles from exact pack
     await registry.add(wpZip);
     await registry.add(themeZip);
     await registry.add(pluginZip);
+    for (const stub of stubPlugins) await registry.add(stub.zip);
 
     const packages = await registry.list();
-    assert.equal(packages.length, 3);
+    assert.equal(packages.length, 5);
     assert.equal((await registry.resolve("plugin", "arbitrary-plugin", "2.4.1")).mainFile, "arbitrary-plugin/bootstrap.php");
 
     const configDir = path.join(temp, "config");
@@ -73,6 +84,8 @@ test("registers arbitrary packages and builds schema v2 profiles from exact pack
       theme: { slug: "hello-elementor", version: "3.4.9" },
       plugins: [
         { slug: "arbitrary-plugin", version: "2.4.1", required: true },
+        { slug: "woocommerce", version: "1.0.0", required: true },
+        { slug: "elementor", version: "1.0.0", required: true },
         { slug: "persian-missing", version: "1.0.0", required: true, locales: ["fa_IR"] }
       ],
       configExport: configZip,
@@ -88,11 +101,18 @@ test("registers arbitrary packages and builds schema v2 profiles from exact pack
       profile,
       outputZip: output,
       bootstrapFile: path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"),
-      builderVersion: "test"
+      builderVersion: "test",
+      compatibilityMatrix: {
+        schemaVersion: 1, generatedAt: "2026-09-13T00:00:00Z",
+        entries: [{ id: "synthetic-registry", status: "known-good", php: "8.2",
+          wordpress: { version: "7.1", variant: "en_US" },
+          theme: { slug: "hello-elementor", version: "3.4.9" },
+          plugins: { "arbitrary-plugin": "2.4.1", woocommerce: "1.0.0", elementor: "1.0.0" } }]
+      }
     });
 
     assert.equal(result.manifest.wordpress.version, "7.1");
-    assert.equal(result.manifest.plugins.length, 1);
+    assert.equal(result.manifest.plugins.length, 3);
     assert.equal(result.manifest.plugins[0].slug, "arbitrary-plugin");
 
     const unpack = path.join(temp, "unpacked");

@@ -80,7 +80,14 @@ test("builds a self-contained WordPress distribution from local artifacts", asyn
       profile,
       outputZip: output,
       bootstrapFile: path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"),
-      builderVersion: "test"
+      builderVersion: "test",
+      compatibilityMatrix: {
+        schemaVersion: 1, generatedAt: "2026-09-13T00:00:00Z",
+        entries: [{ id: "synthetic-builder", status: "known-good", php: "8.2",
+          wordpress: { version: "1.0.0", variant: "en_US" },
+          theme: { slug: "hello-elementor", version: "1.0.0" },
+          plugins: { "example-plugin": "1.0.0" } }]
+      }
     });
 
     assert.equal(result.manifest.profile, "test");

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { createZip, extractZip } from "./archive.js";
 import { BuilderError } from "./errors.js";
-import { compatibilityReport } from "./compatibility.js";
+import { compatibilityReport, type CompatibilityMatrix } from "./compatibility.js";
 import { composeElementorTemplates } from "./snapshot.js";
 import {
   copyDirectoryContents,
@@ -18,12 +18,15 @@ import {
 } from "./fs-utils.js";
 import type { BuildProfile, BuildProgress, StarterBuildManifest } from "./types.js";
 import { resourceHash } from "./vnext.js";
+import { validateSampleLibrary, SAMPLE_BUILD_ASSET_LIMIT, type SampleContentPayload } from "./sample-content.js";
 
 export interface BuildOptions {
   profile: BuildProfile;
   outputZip: string;
   bootstrapFile: string;
   builderVersion: string;
+  /** Override the published compatibility matrix; mainly for tests and local baselines. */
+  compatibilityMatrix?: CompatibilityMatrix;
   keepWorkDir?: boolean;
   onProgress?: (progress: BuildProgress) => void | Promise<void>;
 }
@@ -69,6 +72,18 @@ async function createCanonicalPackageZip(options: {
 
 export async function buildStarter(options: BuildOptions): Promise<{ outputZip: string; sha256: string; manifest: StarterBuildManifest; compatibility: NonNullable<StarterBuildManifest["compatibility"]> }> {
   const { profile } = options;
+  // Compatibility enforcement must happen before any workspace or output is
+  // created so unsupported combinations never produce a distribution.
+  const compatibility = compatibilityReport(profile, options.compatibilityMatrix);
+  if (compatibility.status === "unsupported") {
+    throw new BuilderError("unsupported_compatibility", compatibility.errors.join(" "));
+  }
+  if (profile.sampleContent?.content.length) {
+    if (profile.schemaVersion !== 9) throw new BuilderError("invalid_profile", "Sample content requires profile schema v9.");
+    validateSampleLibrary(profile.sampleContent);
+    if (profile.sampleContent.content.some(row => row.kind === "product") && !profile.plugins.some(plugin => plugin.slug === "woocommerce" && (!plugin.locales || plugin.locales.includes(profile.locale)))) throw new BuilderError("sample_woocommerce_required", "Sample products require WooCommerce for the selected locale.");
+    if (profile.sampleContent.assets.reduce((sum, asset) => sum + asset.size, 0) > SAMPLE_BUILD_ASSET_LIMIT) throw new BuilderError("sample_asset_limit", "Selected sample assets exceed 500 MiB.");
+  }
   const workRoot = await mkdtemp(path.join(os.tmpdir(), "wp-starter-"));
   const coreExtract = path.join(workRoot, "wordpress-extract");
   const staging = path.join(workRoot, "distribution");
@@ -256,7 +271,7 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
         config.adapters.elementor.templates = composed;
         manifestElementorTemplates = selected.map((template) => ({ snapshotId: template.snapshotId, templateId: template.templateId, name: template.name, type: template.type }));
         await writeJson(path.join(starterDataDir, "starter-config.json"), config);
-      } else if (profile.schemaVersion === 8) {
+      } else if (profile.schemaVersion >= 8) {
         // v8 templates have their own payload. Keeping the structural snapshot
         // template-free prevents duplicate imports and lets library assets work
         // with or without a snapshot.
@@ -283,7 +298,7 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       await emit(options, { percent: 78, stage: "configuration", message: "No configuration snapshot selected. Settings import will be skipped." });
     }
 
-    if (profile.schemaVersion === 8 && ((profile.elementorLibraryTemplates?.length || 0) > 0 || (profile.elementorTemplates?.length || 0) > 0)) {
+    if (profile.schemaVersion >= 8 && ((profile.elementorLibraryTemplates?.length || 0) > 0 || (profile.elementorTemplates?.length || 0) > 0)) {
       await emit(options, { percent: 79, stage: "elementor_templates", message: "Embedding independent Elementor templates…" });
       const libraryTemplates = profile.elementorLibraryTemplates || [];
       const legacyTemplates = libraryTemplates.length === 0 ? await composeElementorTemplates(profile.elementorTemplates || []) : [];
@@ -310,6 +325,27 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       vnext = { path: "starter-design-system.json", sha256: await sha256File(designSystemPath) };
     }
 
+    let sampleContentPayload: StarterBuildManifest["sampleContentPayload"] = null;
+    if (profile.sampleContent?.content.length) {
+      await emit(options, { percent: 81, stage: "sample_content", message: "Embedding selected sample content and local assets…" });
+      const samples = profile.sampleContent;
+      const assets: SampleContentPayload["assets"] = [];
+      for (const asset of samples.assets) {
+        if (!/^sample-assets\/asset-[a-z0-9-]+\.(?:png|jpg|gif|webp|pdf|txt)$/.test(asset.file)) throw new BuilderError("invalid_sample_asset", "Unsafe sample asset payload path.");
+        if (await sha256File(asset.absoluteFile) !== asset.sha256) throw new BuilderError("sample_asset_checksum_mismatch", `Sample asset ${asset.filename} changed after profile resolution.`);
+        const target = path.join(starterDataDir, asset.file);
+        await ensureDir(path.dirname(target)); await cp(asset.absoluteFile, target);
+        if (await sha256File(target) !== asset.sha256) throw new BuilderError("sample_asset_checksum_mismatch", `Bundled asset ${asset.filename} failed checksum verification.`);
+        const { absoluteFile: _local, ...portable } = asset; assets.push(portable);
+      }
+      const payload: SampleContentPayload = { schemaVersion: 1, selectedIds: samples.selectedIds, content: samples.content, terms: samples.terms, attributes: samples.attributes, assets };
+      const payloadPath = path.join(starterDataDir, "starter-sample-content.json");
+      await writeJson(payloadPath, payload);
+      const installerPath = path.join(starterDataDir, "sample-content-installer.php");
+      await cp(path.join(path.dirname(path.resolve(options.bootstrapFile)), "sample-content-installer.php"), installerPath);
+      sampleContentPayload = { path: "starter-sample-content.json", sha256: await sha256File(payloadPath), installerSha256: await sha256File(installerPath), posts: samples.content.filter(row => row.kind === "post").length, products: samples.content.filter(row => row.kind === "product").length, assets: assets.length, resources: [...samples.content, ...samples.terms, ...samples.attributes, ...assets].map(row => ({ id: row.id, sha256: resourceHash(row) })) };
+    }
+
     await emit(options, { percent: 82, stage: "bootstrap", message: "Adding offline bootstrap…" });
     await cp(path.resolve(options.bootstrapFile), path.join(muPluginDir, "site-starter-bootstrap.php"), { force: true });
 
@@ -334,8 +370,9 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
       languageArchives: bundledLanguages,
       vnext,
       elementorTemplatePayload: templatePayload,
+      sampleContentPayload,
       elementorTemplates: manifestElementorTemplates,
-      compatibility: compatibilityReport(profile)
+      compatibility
     };
 
     await emit(options, { percent: 87, stage: "manifest", message: "Writing build manifest…" });

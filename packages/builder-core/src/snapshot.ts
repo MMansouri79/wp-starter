@@ -132,7 +132,7 @@ function normalizeStoredTemplateSummary(value: any, record: ConfigSnapshotRecord
       ? value.documentLocation
       : `starter-config.json:adapters.elementor.templates[${index}].document`,
     dependencies: Array.isArray(value?.dependencies)
-      ? [...new Set(value.dependencies.filter((dependency: unknown): dependency is string => typeof dependency === "string" && dependency.length > 0))].sort((left, right) => left.localeCompare(right))
+      ? [...new Set((value.dependencies as unknown[]).filter((dependency): dependency is string => typeof dependency === "string" && dependency.length > 0))].sort((left: string, right: string) => left.localeCompare(right))
       : []
   };
 }

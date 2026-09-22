@@ -19,6 +19,7 @@
         <button class="nav" data-view="design-systems">Design Systems</button>
         <button class="nav" data-view="configs">Configurations</button>
         <button class="nav" data-view="elementor-templates">Elementor Templates</button>
+        <button class="nav" data-view="sample-content">Sample Content</button>
         <button class="nav" data-view="profiles">Profiles</button>
         <button class="nav" data-view="build">Build</button>
         <button class="nav" data-view="builds">Build History</button>
@@ -91,6 +92,14 @@
         </div>
       </section>
 
+      <section class="view" id="view-sample-content">
+        <div class="panel"><div class="panel-head"><div><h2>Sample Content Library</h2><p>Create reusable posts and WooCommerce products. Select what to install in each build profile.</p></div><div class="action-list"><button id="sample-new-post">+ Post</button><button id="sample-new-product">+ Product</button></div></div><input id="sample-search" type="search" placeholder="Search posts and products"><div id="sample-list" class="cards"></div></div>
+        <div class="panel" id="sample-editor"></div>
+        <div class="panel"><h2>Categories, tags, brands and shipping classes</h2><p>Terms are installed with their real taxonomy, slug and hierarchy.</p><div id="sample-terms"></div><div id="sample-term-editor"></div></div>
+        <div class="panel"><h2>Global attributes</h2><div id="sample-global-attributes"></div><div id="sample-global-editor"></div></div>
+        <div class="panel"><h2>Offline media and downloads</h2><p>Images: JPEG, PNG, GIF, WebP (20 MiB). Downloads: these formats, PDF or text (50 MiB). No remote fetching.</p><label>Use as<select id="sample-asset-kind"><option value="image">Image attachment</option><option value="download">Protected product download</option></select></label><label>Import local file<input type="file" id="sample-asset-file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt"></label><div id="sample-assets" class="cards"></div></div>
+      </section>
+
       <section class="view" id="view-profiles">
         <div class="panel">
           <div class="panel-head"><div><h2>Saved Profiles</h2><p>Reusable, version-pinned build definitions. Edit one without changing your package library or configuration snapshots.</p></div><button id="new-profile" class="primary">+ New Profile</button></div>
@@ -111,6 +120,7 @@
             <label>Design system <span class="optional">optional</span><select id="build-design-system"></select><small class="field-help">A design system combines typography, colors, and its assigned offline fonts. Selecting one disables standalone Font Profiles.</small></label>
             <div class="field"><span class="label">Elementor Templates <span class="optional">optional</span></span><div class="template-filters"><input id="template-search" type="search" placeholder="Search templates"><select id="template-source"><option value="">All source sites</option></select><select id="template-type"><option value="">All types</option></select></div><div id="build-elementor-templates" class="checklist"></div><small id="build-elementor-help" class="field-help">Templates are independent from configuration snapshots. Nothing is selected by default.</small></div><div id="template-mappings" class="field hidden"><span class="label">Resolve template design references</span><small class="field-help">Only references that could not be matched automatically are shown.</small><div id="template-mapping-rows" class="cards"></div></div>
             <div class="field"><span class="label">Plugins and versions</span><div id="build-plugins" class="checklist"><span class="muted">Choose a configuration first.</span></div><div id="build-compatibility" class="compatibility-box hidden" aria-live="polite"></div></div>
+            <div class="field"><span class="label">Sample posts and products <span class="optional">optional</span></span><div id="build-sample-content" class="checklist"></div><small class="field-help">Linked sample products are included automatically. Products require an explicitly selected WooCommerce version.</small></div>
             <div class="profile-actions"><button id="create-profile" class="primary">Save Profile</button><button id="cancel-profile-edit" class="secondary hidden">Cancel Edit</button></div>
           </div>
           <div class="panel">
@@ -149,6 +159,7 @@
     <div id="comparison-body" class="inspector-body"><div class="empty">Choose two snapshots to compare.</div></div>
   </dialog>
 
+  <script src="/sample-content.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

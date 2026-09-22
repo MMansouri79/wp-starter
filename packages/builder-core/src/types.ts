@@ -1,4 +1,5 @@
 import type { ResolvedDesignSystem, VNextBuildPayload } from "./vnext.js";
+import type { ResolvedSampleContent } from "./sample-content.js";
 
 export type PackageKind = "wordpress" | "theme" | "plugin";
 
@@ -443,8 +444,14 @@ export interface ProfileDocumentV8 {
   languageArchives?: LanguageArchiveRef[];
 }
 
+export interface ProfileDocumentV9 extends Omit<ProfileDocumentV8, "schemaVersion"> {
+  schemaVersion: 9;
+  /** Builder-owned library roots; referenced products and assets are resolved at build time. */
+  sampleContentIds: string[];
+}
+
 export interface BuildProfile {
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   name: string;
   locale: string;
   wordpress: ArtifactRef;
@@ -461,6 +468,7 @@ export interface BuildProfile {
   elementorTemplates?: ResolvedElementorTemplate[];
   elementorLibraryTemplates?: ResolvedElementorLibraryTemplate[];
   elementorTemplateMappings?: Record<string, string>;
+  sampleContent?: ResolvedSampleContent | null;
   configurationSnapshotId?: string;
   /** Export metadata resolved from a configuration snapshot at load time. */
   configurationSource?: {
@@ -518,6 +526,7 @@ export interface StarterBuildManifest {
   languageArchives: Array<LanguageArchiveRef & { sha256: string }>;
   vnext?: { path: string; sha256: string } | null;
   elementorTemplatePayload?: { path: string; sha256: string } | null;
+  sampleContentPayload?: { path: string; sha256: string; installerSha256: string; posts: number; products: number; assets: number; resources: Array<{ id: string; sha256: string }> } | null;
   designSystem?: {
     id: string;
     sha256: string;

@@ -22,10 +22,12 @@ import {
   writeJson,
   VNextResourceRegistry,
   DesignSystemResourceService,
-  ElementorTemplateLibrary
+  ElementorTemplateLibrary,
+  SampleContentRegistry,
+  SampleContentValidationError
 } from "../../packages/builder-core/dist/index.js";
 
-const VERSION = "0.1.0-alpha.26";
+const VERSION = JSON.parse(await readFile(new URL("./package.json", import.meta.url), "utf8")).version;
 const SESSION_TOKEN = randomBytes(32).toString("hex");
 const SESSION_COOKIE = `wp_starter_session=${SESSION_TOKEN}`;
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -114,6 +116,18 @@ async function readJsonBody(req, maxBytes = 1024 * 1024) {
   } catch {
     throw new BuilderError("invalid_json", "Request body is not valid JSON.");
   }
+}
+
+async function receiveUpload(req, maxBytes, filename) {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wp-starter-gui-asset-"));
+  const file = path.join(tempDir, safeName(path.basename(String(filename || "asset")), "asset"));
+  let bytes = 0;
+  req.on("data", (chunk) => {
+    bytes += Buffer.byteLength(chunk);
+    if (bytes > maxBytes) req.destroy(new BuilderError("request_too_large", "Upload exceeds the asset size limit."));
+  });
+  await pipeline(req, createWriteStream(file));
+  return { tempDir, file };
 }
 
 async function receiveZip(req, filename) {
@@ -209,7 +223,8 @@ async function state() {
       templates: await new VNextResourceRegistry(vnextDir, "templates.json").list()
     },
     profiles: await listProfiles(),
-    builds: await listBuilds()
+    builds: await listBuilds(),
+    sampleContent: await new SampleContentRegistry(libraryRoot).list()
   };
 }
 
@@ -256,7 +271,8 @@ async function createOrUpdateProfile(body) {
       designSystemId: String(body.designSystemId || "").trim() || null,
       elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined,
       elementorTemplateIds: Array.isArray(body.elementorTemplateIds) ? body.elementorTemplateIds : [],
-      elementorTemplateMappings: body.elementorTemplateMappings && typeof body.elementorTemplateMappings === "object" ? body.elementorTemplateMappings : {}
+      elementorTemplateMappings: body.elementorTemplateMappings && typeof body.elementorTemplateMappings === "object" ? body.elementorTemplateMappings : {},
+      sampleContentIds: Array.isArray(body.sampleContentIds) ? body.sampleContentIds.map(id => String(id).trim()).filter(Boolean) : []
     });
   }
 
@@ -274,7 +290,8 @@ async function createOrUpdateProfile(body) {
     designSystemId: String(body.designSystemId || "").trim() || null,
     elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined,
     elementorTemplateIds: Array.isArray(body.elementorTemplateIds) ? body.elementorTemplateIds : [],
-    elementorTemplateMappings: body.elementorTemplateMappings && typeof body.elementorTemplateMappings === "object" ? body.elementorTemplateMappings : {}
+    elementorTemplateMappings: body.elementorTemplateMappings && typeof body.elementorTemplateMappings === "object" ? body.elementorTemplateMappings : {},
+    sampleContentIds: Array.isArray(body.sampleContentIds) ? body.sampleContentIds.map(id => String(id).trim()).filter(Boolean) : []
   });
 }
 
@@ -509,6 +526,101 @@ async function api(req, res, url) {
     return true;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/sample-content") {
+    const library = await new SampleContentRegistry(libraryRoot).list();
+    json(res, 200, library);
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/sample-content") {
+    const body = await readJsonBody(req);
+    json(res, 200, await new SampleContentRegistry(libraryRoot).save(body, typeof body.id === "string" && body.id ? body.id : undefined));
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname.startsWith("/api/sample-content/")) {
+    const segments = url.pathname.slice("/api/sample-content/".length).split("/");
+    const id = decodeURIComponent(segments[0] || "");
+    const action = segments[1] || "";
+    if (action === "duplicate") { json(res, 200, await new SampleContentRegistry(libraryRoot).duplicate(id)); return true; }
+    if (action === "assets") {
+      const upload = await receiveUpload(req, 52 * 1024 * 1024, url.searchParams.get("filename") || "asset");
+      try {
+        const asset = await new SampleContentRegistry(libraryRoot).importAsset(upload.file, { kind: url.searchParams.get("kind") === "download" ? "download" : "image", filename: url.searchParams.get("filename") || undefined, alt: url.searchParams.get("alt") || "", caption: url.searchParams.get("caption") || "", description: url.searchParams.get("description") || "" });
+        json(res, 200, asset);
+      } finally { await rm(upload.tempDir, { recursive: true, force: true }); }
+      return true;
+    }
+  }
+
+  if (req.method === "GET" && /^\/api\/sample-content\/[^/]+$/.test(url.pathname)) {
+    const id = decodeURIComponent(url.pathname.slice("/api/sample-content/".length));
+    json(res, 200, await new SampleContentRegistry(libraryRoot).get(id));
+    return true;
+  }
+
+  if (req.method === "PUT" && /^\/api\/sample-content\/[^/]+$/.test(url.pathname)) {
+    const id = decodeURIComponent(url.pathname.slice("/api/sample-content/".length));
+    const body = await readJsonBody(req);
+    json(res, 200, await new SampleContentRegistry(libraryRoot).save({ ...body, id }, id));
+    return true;
+  }
+
+  if (req.method === "DELETE" && /^\/api\/sample-content\/[^/]+$/.test(url.pathname)) {
+    const id = decodeURIComponent(url.pathname.slice("/api/sample-content/".length));
+    await new SampleContentRegistry(libraryRoot).remove("content", id);
+    json(res, 200, { removed: id });
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/sample-content/terms") {
+    const body = await readJsonBody(req);
+    json(res, 200, await new SampleContentRegistry(libraryRoot).saveTerm(body, typeof body.id === "string" && body.id ? body.id : undefined));
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/sample-content/terms/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/sample-content/terms/".length));
+    await new SampleContentRegistry(libraryRoot).remove("terms", id);
+    json(res, 200, { removed: id });
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/sample-content/attributes") {
+    const body = await readJsonBody(req);
+    json(res, 200, await new SampleContentRegistry(libraryRoot).saveAttribute(body, typeof body.id === "string" && body.id ? body.id : undefined));
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/sample-content/attributes/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/sample-content/attributes/".length));
+    await new SampleContentRegistry(libraryRoot).remove("attributes", id);
+    json(res, 200, { removed: id });
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname.startsWith("/api/sample-content/assets/")) {
+    const asset = await new SampleContentRegistry(libraryRoot).resolveAsset(decodeURIComponent(url.pathname.slice("/api/sample-content/assets/".length)));
+    const data = await readFile(asset.absoluteFile);
+    res.writeHead(200, { "Content-Type": asset.mime, "Content-Length": data.length, "Cache-Control": "no-store", ...securityHeaders() });
+    res.end(data);
+    return true;
+  }
+
+  if (req.method === "PUT" && url.pathname.startsWith("/api/sample-content/assets/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/sample-content/assets/".length));
+    const body = await readJsonBody(req);
+    json(res, 200, await new SampleContentRegistry(libraryRoot).saveAsset(id, body));
+    return true;
+  }
+
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/sample-content/assets/")) {
+    const id = decodeURIComponent(url.pathname.slice("/api/sample-content/assets/".length));
+    await new SampleContentRegistry(libraryRoot).remove("assets", id);
+    json(res, 200, { removed: id });
+    return true;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/profiles") {
     const body = await readJsonBody(req);
     const name = String(body.name || body.configId || "profile").trim();
@@ -646,6 +758,10 @@ export function createGuiServer() {
         await serveFile(res, path.join(publicDir, "app.js"), "text/javascript; charset=utf-8");
         return;
       }
+      if (req.method === "GET" && url.pathname === "/sample-content.js") {
+        await serveFile(res, path.join(publicDir, "sample-content.js"), "text/javascript; charset=utf-8");
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/styles.css") {
         await serveFile(res, path.join(publicDir, "styles.css"), "text/css; charset=utf-8");
         return;
@@ -655,7 +771,7 @@ export function createGuiServer() {
     } catch (error) {
       const code = error instanceof BuilderError ? error.code : "internal_error";
       const message = error instanceof Error ? error.message : String(error);
-      json(res, 400, { error: code, message });
+      json(res, 400, { error: code, message, ...(error instanceof SampleContentValidationError ? { issues: error.issues } : {}) });
     }
   });
 }

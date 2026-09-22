@@ -201,14 +201,14 @@ export function normalizeTypographyProfile(profile: TypographyProfile): Typograp
   const custom = Object.fromEntries(Object.entries(profile.custom || {}).map(([name, token]) => [name, normalizeToken(token, `custom.${name}`)]));
   const globalTypography = Object.fromEntries(Object.entries(profile.globalTypography || {}).map(([name, token]) => [name, normalizeToken(token as TypographyToken, `globalTypography.${name}`)])) as TypographyProfile["globalTypography"];
   const globalCustomTypography = (profile.globalCustomTypography || []).map((item, index) => ({ id: String(item.id || "").trim().toLowerCase(), name: String(item.name || "").trim(), token: normalizeToken(item.token, `globalCustomTypography[${index}].token`) }));
-  const allTokens = [...Object.values(roles), ...Object.values(custom), ...Object.values(globalTypography), ...globalCustomTypography.map((item) => item.token)];
+  const allTokens = [...Object.values(roles), ...Object.values(custom), ...Object.values(globalTypography ?? {}), ...globalCustomTypography.map((item) => item.token)];
   const usedSlots = new Set(allTokens.map((token) => (token as TypographyToken).fontRole).filter(Boolean));
   const legacySlotName = (id: string) => id === "body" || id === "primary" ? "Body font" : id === "heading" || id === "headings" ? "Heading font" : id === "accent" ? "Accent font" : id.replace(/[-_]+/g, " ").replace(/^./, (value) => value.toUpperCase());
   const fontSlots = Object.fromEntries([...usedSlots].map((id) => [id, { name: String(profile.fontSlots?.[id]?.name || legacySlotName(id)).trim() }]));
   const normalized: TypographyProfile = { schemaVersion: VNEXT_SCHEMA_VERSION, id: String(profile.id || "").trim(), name: String(profile.name || "").trim(), roles, fontSlots };
   if (Object.keys(custom).length) normalized.custom = custom;
   if (profile.customRoleNames) normalized.customRoleNames = Object.fromEntries(Object.entries(profile.customRoleNames).map(([id, name]) => [id, String(name).trim()]));
-  if (Object.keys(globalTypography).length) normalized.globalTypography = globalTypography;
+  if (Object.keys(globalTypography ?? {}).length) normalized.globalTypography = globalTypography;
   if (globalCustomTypography.length) normalized.globalCustomTypography = globalCustomTypography;
   if (profile.fallbackFontFamily !== undefined) normalized.fallbackFontFamily = String(profile.fallbackFontFamily).trim();
   assertValidReport(validateTypographyProfile(normalized));

@@ -223,7 +223,15 @@ test("schema-v7 selections close dependencies and compose colliding source IDs s
     assert.equal(composed.some(template => template.id.includes("not-selected")), false);
 
     const output = path.join(root, "selective-build.zip");
-    const build = await buildStarter({ profile: loaded, outputZip: output, bootstrapFile: path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), builderVersion: "test" });
+    const build = await buildStarter({ profile: loaded, outputZip: output, bootstrapFile: path.join(repoRoot, "wordpress/bootstrap/site-starter-bootstrap.php"), builderVersion: "test",
+      compatibilityMatrix: {
+        schemaVersion: 1, generatedAt: "2026-09-13T00:00:00Z",
+        entries: [{ id: "synthetic-templates", status: "known-good", php: "8.3",
+          wordpress: { version: "7.1", variant: "en_US" },
+          theme: { slug: "hello-elementor", version: "3.4.9" },
+          plugins: { elementor: "4.0.8" } }]
+      }
+    });
     assert.deepEqual(build.manifest.elementorTemplates.map(template => [template.snapshotId, template.templateId]), document.elementorTemplates.map(template => [template.snapshotId, template.templateId]));
     const unpacked = path.join(root, "unpacked");
     await extractZip(output, unpacked);
