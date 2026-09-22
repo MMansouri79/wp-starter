@@ -4,6 +4,19 @@ A self-contained WordPress starter build system for offline or restricted hostin
 
 Current version: **0.1.0-alpha.32** (Builder, CLI, GUI, and Bootstrap ship together from the repository version). The Starter Exporter is versioned independently — see `wordpress/exporter/VERSION.txt`.
 
+## Stable baseline
+
+The last verified stable release is **0.1.0-alpha.32**. It is recorded here so later work always has an unambiguous reference point to compare against or return to.
+
+- Release commit: `345e9a7eb2f18cb0407e551d334d3342534ddb83` (`345e9a7`) on branch `feat/sample-content-library`; not yet merged to `main`, which is still at `0.1.0-alpha.31`.
+- Builder artifact: `wp-starter-builder-v0.1.0-alpha.32.zip` (77 files)
+- Exporter artifact: `wp-starter-exporter-v0.2.0-alpha.9.zip` (5 files)
+- Schemas: build profile v9, build manifest v4, vNext design-system schema 1, bootstrap configuration revision 12
+- Exporter version: `0.2.0-alpha.9` (versioned independently of the Builder)
+- Verification: `npm run check` — strict builder-core type checking, 62 tests passing, PHP lint clean
+
+Artifacts are not committed (see `.gitignore`). Rebuild and re-verify them from the release commit with `npm run package:builder`, `npm run package:exporter`, and `npm run verify:artifacts`.
+
 The project is intentionally split into three responsibilities:
 
 1. **Starter Exporter** runs on the reference WordPress site and exports only approved portable configuration. The Exporter is versioned independently from the Builder. Exporter 0.2 adds strict Elementor general-settings allowlists and Code Snippets support.

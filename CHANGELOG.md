@@ -7,6 +7,11 @@
 - Added build profile schema v9 (`sampleContentIds`) with linked-product dependency closure; sample products require an explicitly selected WooCommerce version. Bundles `starter-sample-content.json` plus only selected assets with an optional `sampleContentPayload` manifest entry including the installer checksum.
 - Added resumable sample provisioning to the bootstrap installer in separate attribute, term, asset, content, relationship, publish, and verify phases with an installation lock, ownership-based recovery, exact-slug verification, and payload cleanup only after verification; incompatible destination terms, slugs, SKUs, or unsupported WooCommerce capabilities fail with actionable messages.
 - Extended the GUI with Sample Content authoring screens, media metadata, and a searchable profile selection that keeps required linked products visible. All new behavior is covered by builder-core and GUI tests plus executable PHP contract fixtures driving the real bootstrap entry point.
+- Enabled strict builder-core type checking and corrected the contracts it exposed.
+- Enforced compatibility before the core build API creates its workspace or output; package-only builds now validate declared dependencies and explicit WordPress locale consistency.
+- Added optional explicit compatibility matrices for programmatic builds and synthetic fixtures; dependency checks still apply.
+- Read the GUI version from its packaged workspace metadata instead of a stale constant.
+- Read the CLI version from its packaged workspace metadata, so `--help` output and the `builderVersion` recorded in build manifests no longer report a stale release.
 
 ## 0.1.0-alpha.31
 
@@ -43,15 +48,7 @@
 
 - Fixed the Exporter treating empty Elementor `template_id` fields as missing templates, automatically includes real template dependencies, excludes the structural Default Kit, and bumped the paired Exporter release to `0.2.0-alpha.8`.
 
-## Unreleased
-
-### Stabilization fixes
-
-- Enabled strict builder-core type checking and corrected the contracts it exposed.
-- Enforced compatibility before the core build API creates its workspace or output; package-only builds now validate declared dependencies and explicit WordPress locale consistency.
-- Added optional explicit compatibility matrices for programmatic builds and synthetic fixtures; dependency checks still apply.
-- Read the GUI version from its packaged workspace metadata instead of a stale constant.
-- Read the CLI version from its packaged workspace metadata, so `--help` output and the `builderVersion` recorded in build manifests no longer report a stale release.
+## Consolidated feature notes (shipped in releases before 0.1.0-alpha.32)
 
 ### Elementor design systems
 
