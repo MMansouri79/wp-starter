@@ -2,6 +2,8 @@
 
 A self-contained WordPress starter build system for offline or restricted hosting.
 
+Current version: **0.1.0-alpha.32** (Builder, CLI, GUI, and Bootstrap ship together from the repository version). The Starter Exporter is versioned independently — see `wordpress/exporter/VERSION.txt`.
+
 The project is intentionally split into three responsibilities:
 
 1. **Starter Exporter** runs on the reference WordPress site and exports only approved portable configuration. The Exporter is versioned independently from the Builder. Exporter 0.2 adds strict Elementor general-settings allowlists and Code Snippets support.
@@ -32,7 +34,7 @@ The Phase 1 build pipeline provides:
 
 ## Phase 2 status
 
-**Phase 2 is in progress as of v0.1.0-alpha.26.** Configuration inspection/comparison, security hardening, explicit starter targeting, Code Snippets restoration, reusable Font Systems, source-aware Elementor template composition, and Elementor Theme Style design-system application are now implemented.
+**Phase 2 is in progress as of v0.1.0-alpha.32.** Configuration inspection/comparison, security hardening, explicit starter targeting, Code Snippets restoration, reusable Font Systems, source-aware Elementor template composition, Elementor Theme Style design-system application, and the reusable Sample Content library are now implemented.
 
 In the GUI, open **Configurations → Inspect** to review a snapshot through Overview, Packages, WordPress, Structures, Adapters, and Safety tabs. Use **Configurations → Compare Snapshots** to compare a baseline export against a target export. The diff keeps software/package changes separate from portable setting changes and object/structure changes.
 

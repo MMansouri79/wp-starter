@@ -51,6 +51,7 @@
 - Enforced compatibility before the core build API creates its workspace or output; package-only builds now validate declared dependencies and explicit WordPress locale consistency.
 - Added optional explicit compatibility matrices for programmatic builds and synthetic fixtures; dependency checks still apply.
 - Read the GUI version from its packaged workspace metadata instead of a stale constant.
+- Read the CLI version from its packaged workspace metadata, so `--help` output and the `builderVersion` recorded in build manifests no longer report a stale release.
 
 ### Elementor design systems
 
