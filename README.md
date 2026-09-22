@@ -14,6 +14,7 @@ The last verified stable release is **0.1.0-alpha.32**. It is recorded here so l
 - Schemas: build profile v9, build manifest v4, vNext design-system schema 1, bootstrap configuration revision 12
 - Exporter version: `0.2.0-alpha.9` (versioned independently of the Builder)
 - Verification: `npm run check` — strict builder-core type checking, 62 tests passing, PHP lint clean
+- Next release: **`0.2.0-alpha.1`**. The 0.1.0 line ends at `0.1.0-alpha.32`; the jump is applied when that release is cut, not before, so the working tree keeps reporting `0.1.0-alpha.32` in the meantime. No tag is created for the 0.1.0 line.
 
 Artifacts are not committed (see `.gitignore`). Rebuild and re-verify them from the release commit with `npm run package:builder`, `npm run package:exporter`, and `npm run verify:artifacts`.
 
