@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Administration · WP Starter</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="ws-admin">
+  <header class="ws-admin-header">
+    <div>
+      <h1>Administration</h1>
+      <p id="signed-in-as">Loading…</p>
+    </div>
+    <nav>
+      <a href="/">Back to Builder</a>
+      <button class="ws-button ws-secondary" type="button" id="sign-out">Sign out</button>
+    </nav>
+  </header>
+
+  <main>
+    <div class="ws-message ws-hidden" id="message" role="status"></div>
+
+    <section class="ws-stats" id="stats"></section>
+
+    <section class="ws-panel">
+      <h2>Invite a client</h2>
+      <p>
+        Only invited accounts can sign in. The code is shown once; the server stores only a digest of it.
+        A client can read the whole shared library and edit only what that account creates.
+      </p>
+      <div class="ws-form-row">
+        <label>
+          Email (optional)
+          <input id="invite-email" type="email" placeholder="client@example.com">
+        </label>
+        <label>
+          Role
+          <select id="invite-role">
+            <option value="client">Client</option>
+            <option value="member">Member</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </label>
+        <label>
+          Expires in (days)
+          <input id="invite-days" type="number" min="1" max="365" value="14">
+        </label>
+        <button class="ws-button" type="button" id="create-invite">Create invitation</button>
+      </div>
+      <div class="ws-invite-code ws-hidden" id="invite-result">
+        <span>Share this code:</span>
+        <code id="invite-code"></code>
+        <button class="ws-button ws-secondary" type="button" id="copy-invite">Copy</button>
+      </div>
+    </section>
+
+    <section class="ws-panel">
+      <h2>Pending invitations</h2>
+      <p>Unused, unexpired codes. Revoke any code you no longer want to hand out.</p>
+      <div id="invites"><div class="ws-empty">Loading…</div></div>
+    </section>
+
+    <section class="ws-panel">
+      <h2>Create an account directly</h2>
+      <p>Use this when you would rather set the initial password yourself.</p>
+      <div class="ws-form-row">
+        <label>
+          Email
+          <input id="user-email" type="email" placeholder="teammate@example.com">
+        </label>
+        <label>
+          Display name
+          <input id="user-name" type="text" placeholder="Optional">
+        </label>
+        <label>
+          Role
+          <select id="user-role">
+            <option value="member">Member</option>
+            <option value="client">Client</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </label>
+        <label>
+          Initial password
+          <input id="user-password" type="password" minlength="10" placeholder="At least 10 characters">
+        </label>
+        <button class="ws-button" type="button" id="create-user">Create account</button>
+      </div>
+    </section>
+
+    <section class="ws-panel">
+      <h2>Accounts</h2>
+      <p>
+        Administrators manage accounts and invitations. They do not gain edit rights over items another
+        account created; those stay read-only for everyone except their owner.
+      </p>
+      <div id="users"><div class="ws-empty">Loading…</div></div>
+    </section>
+  </main>
+
+  <script src="/admin.js"></script>
+</body>
+</html>

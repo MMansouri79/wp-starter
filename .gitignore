@@ -10,5 +10,10 @@ builds/
 private-packages/
 *.local.json
 
+# Server configuration holds the session secret and the database password.
+.env
+.env.*
+!.env.example
+
 *.tsbuildinfo
 apps/desktop/assets/icon.ico

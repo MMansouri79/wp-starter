@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign in · WP Starter</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="ws-auth">
+  <main class="ws-auth-card">
+    <div class="ws-auth-brand">
+      <span class="ws-auth-mark">W</span>
+      <h1>WP Starter</h1>
+    </div>
+    <p class="ws-auth-sub" id="subtitle">Sign in to the shared starter library.</p>
+
+    <div class="ws-auth-error ws-hidden" id="error" role="alert"></div>
+    <div class="ws-auth-notice ws-hidden" id="notice" role="status"></div>
+
+    <form id="form" autocomplete="on">
+      <label class="ws-field" id="name-field" style="display:none">
+        <span>Your name</span>
+        <input id="displayName" name="displayName" type="text" autocomplete="name">
+      </label>
+
+      <label class="ws-field">
+        <span>Email</span>
+        <input id="email" name="email" type="email" autocomplete="username" required>
+      </label>
+
+      <label class="ws-field">
+        <span>Password</span>
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="10">
+      </label>
+
+      <label class="ws-field ws-hidden" id="invite-field">
+        <span>Invitation code</span>
+        <input id="inviteCode" name="inviteCode" type="text" autocomplete="off" placeholder="XXXX-XXXX-XXXX">
+      </label>
+
+      <button class="ws-auth-submit" id="submit" type="submit">Sign in</button>
+    </form>
+
+    <p class="ws-auth-toggle">
+      <span id="toggle-prompt">Have an invitation code?</span>
+      <button type="button" id="toggle">Create an account</button>
+    </p>
+  </main>
+
+  <script src="/login.js"></script>
+</body>
+</html>

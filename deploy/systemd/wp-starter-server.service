@@ -1,0 +1,47 @@
+# WP Starter shared builder server — systemd unit
+#
+# Install:
+#   sudo useradd --system --home /var/lib/wp-starter --shell /usr/sbin/nologin wpstarter
+#   sudo install -d -o wpstarter -g wpstarter /var/lib/wp-starter
+#   sudo install -d -o root -g root /etc/wp-starter
+#   sudo install -m 640 -o root -g wpstarter apps/server/.env.example /etc/wp-starter/server.env
+#   # edit /etc/wp-starter/server.env, then:
+#   sudo cp deploy/systemd/wp-starter-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now wp-starter-server
+#
+# The unit expects the repository at /opt/wp-starter-system with a built
+# `apps/server/dist` and installed node_modules. Run `npm ci && npm run build`
+# as the deploy user before enabling the service.
+
+[Unit]
+Description=WP Starter shared builder server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wpstarter
+Group=wpstarter
+WorkingDirectory=/opt/wp-starter-system
+
+# Every setting (database, session secret, data dir, base URL) lives here.
+# Keep the file mode at 640: it holds the session secret and the DB password.
+EnvironmentFile=/etc/wp-starter/server.env
+ExecStart=/usr/bin/node apps/server/dist/index.js
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# The Node process only needs to write the shared file store.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/wp-starter
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

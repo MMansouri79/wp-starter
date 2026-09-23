@@ -1,0 +1,20 @@
+{
+  "name": "@wp-starter/server",
+  "private": true,
+  "version": "0.1.0-alpha.32",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "wp-starter-server": "dist/index.js"
+  },
+  "scripts": {
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.2.1",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0-alpha.1 — unreleased
+
+The version jump to `0.2.0-alpha.1` is applied when this release is cut; the working tree still reports `0.1.0-alpha.32` until then.
+
+- Added `apps/server/`: a hosted, multi-user version of the Builder that serves one canonical shared library directory plus a database for accounts, ownership, and item metadata. Everyone signed in reads the whole shared library; only the creator of an item may edit, replace, or delete it, and administrators gain no rights over another account's items.
+- Added session authentication with Argon2id passwords (OWASP parameters), HTTP-only cookies, a session-bound CSRF token required for every non-GET API call, and invite-only registration by default. `admin`, `member`, and `client` roles; administrators issue invite codes or create accounts directly.
+- Added ownership-aware services for packages, configuration snapshots, build profiles, design-system resources, portable templates, and sample content, mirroring builder-core's file registries into the database and reconciling CLI-imported items as unowned.
+- Added an asynchronous server-side build queue with 1–2 workers, staged progress, artifact checksums, shared build history, per-account storage quotas, and upload size limits. Interrupted builds are marked failed with an actionable message instead of being resumed.
+- Added the web client: a login page, an account panel with role badge and quota bar, "Shared by" owner badges, read-only controls for other accounts' items, and an admin screen for users and invitations. The Builder UI is reused byte-for-byte through a request-time overlay, so the local single-user GUI keeps its behavior.
+- Added deployment assets and documentation: systemd unit, nginx server block, Let's Encrypt HTTPS steps, `pg_dump` backup script with retention, disk-space monitoring, and `docs/SERVER-DEPLOYMENT.md`.
+- Added a free-space guard: uploads and builds are refused with `507 disk_full` once the shared file store falls below `WP_STARTER_MIN_FREE_BYTES`, and `/api/health` reports disk pressure as `degraded` before writes start failing.
+- Added 50 server tests covering authentication, the invite flow, permission denials, cross-user read-only sharing, quotas, upload limits, the build queue, and disk pressure. `npm run build` and `npm test` now include `apps/server`.
+- Made `WP_STARTER_TRUST_PROXY` meaningful: the recorded session IP only trusts `X-Forwarded-For` when a reverse proxy is declared.
+- Stripped internal library paths (`filePath`, `zip`) from every API response, including upload results and `/api/state`.
+
 ## 0.1.0-alpha.32
 
 - Added a reusable Sample Content library in the Builder with classic-editor posts and WooCommerce simple, variable, grouped, and external products: title, editable Unicode slugs, content/excerpt or short description, categories, tags, brands, featured image and gallery, attributes with global terms, variations with generated combinations (max 200), inventory, shipping, tax, linked products, downloads, and catalog settings. Draft is the default status; validation returns field-addressed errors.

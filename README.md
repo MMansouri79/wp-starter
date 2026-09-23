@@ -14,7 +14,7 @@ The last verified stable release is **0.1.0-alpha.32**. It is recorded here so l
 - Schemas: build profile v9, build manifest v4, vNext design-system schema 1, bootstrap configuration revision 12
 - Exporter version: `0.2.0-alpha.9` (versioned independently of the Builder)
 - Verification: `npm run check` — strict builder-core type checking, 62 tests passing, PHP lint clean
-- Next release: **`0.2.0-alpha.1`**. The 0.1.0 line ends at `0.1.0-alpha.32`; the jump is applied when that release is cut, not before, so the working tree keeps reporting `0.1.0-alpha.32` in the meantime. No tag is created for the 0.1.0 line.
+- Next release: **`0.2.0-alpha.1`**. The 0.1.0 line ends at `0.1.0-alpha.32`; the jump is applied when that release is cut, not before, so the working tree keeps reporting `0.1.0-alpha.32` in the meantime. No tag is created for the 0.1.0 line. The headline of the 0.2.0 line is the shared hosted web app described below.
 
 Artifacts are not committed (see `.gitignore`). Rebuild and re-verify them from the release commit with `npm run package:builder`, `npm run package:exporter`, and `npm run verify:artifacts`.
 
@@ -67,6 +67,25 @@ On fresh package installations that include Elementor, Bootstrap sets Elementor'
 The Builder includes a reusable Sample Content library for authoring classic WordPress posts and WooCommerce products (simple, variable, grouped, and external) with the standard fields: titles, editable Unicode slugs, content and excerpt/short description, categories, tags, brands, images, attributes with global terms, variations, inventory, shipping, tax, linked products, and downloads. Content defaults to draft; field-addressed validation explains anything an editor still needs.
 
 Sample posts and products are selected per build profile (schema v9, `sampleContentIds`). Required linked products are closed automatically, products require an explicitly selected WooCommerce version, and builds bundle only the selected content plus its verified local assets (`starter-sample-content.json`). Bootstrap installs samples in resumable stages with real taxonomy terms (exact taxonomy, slug, and hierarchy), real media attachments, protected download files, and verification of persisted slugs, statuses, and term assignments. Unrelated destination content is never overwritten; conflicts stop with an explanation. Sample assets are imported deliberately in the Builder — real stores' products, customers, orders, and uploads stay outside generated builds.
+
+## Shared hosted web app (`apps/server`)
+
+`apps/server/` hosts the same Builder for a whole team and its invited clients. It serves one canonical shared library directory plus a database for accounts, ownership, and item metadata, and it reuses the Builder UI assets from `apps/gui/public/` unchanged — the server injects an overlay at request time for the account panel, owner badges, and read-only controls.
+
+- **Sharing model**: everyone signed in reads the whole library; only the creator of an item may edit, replace, or delete it. Administrators manage people and invitations and gain no rights over another account's items. Items imported through the CLI have no owner and can only be cleaned up by an administrator.
+- **Accounts**: `admin`, `member`, and `client` roles. Registration is invite-only by default; administrators issue invite codes or create team accounts directly from the Admin screen. Passwords use Argon2id with OWASP parameters, and session and invite secrets are stored only as SHA-256 digests.
+- **Shared items**: packages, configuration snapshots, build profiles, design-system resources, portable templates, sample content, and built starter ZIPs.
+- **Builds**: asynchronous server-side jobs (1–2 workers) with staged progress, artifact checksums, build history, per-account storage quotas, upload size limits, and a free-space guard.
+- **Storage**: PostgreSQL in production, SQLite (Node's built-in `node:sqlite`) for local development and the test suite. Large payloads stay in the shared file store; the database holds identity, ownership, and item metadata.
+
+Run it locally:
+
+```bash
+cp apps/server/.env.example apps/server/.env   # set WP_STARTER_SESSION_SECRET and WP_STARTER_ADMIN_EMAIL/PASSWORD
+npm run start:server                          # builds, then serves on http://127.0.0.1:47900
+```
+
+Deployment (systemd, nginx, Let's Encrypt, `pg_dump` backups, disk checks) is documented step by step in [docs/SERVER-DEPLOYMENT.md](docs/SERVER-DEPLOYMENT.md), with ready-to-install files under `deploy/`.
 
 ## Quick start
 

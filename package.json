@@ -7,8 +7,9 @@
   "type": "module",
   "main": "apps/desktop/main.mjs",
   "scripts": {
-    "build": "tsc -b packages/builder-core apps/cli",
-    "test": "npm run build && node --test packages/builder-core/tests/*.test.mjs apps/gui/tests/*.test.mjs",
+    "build": "tsc -b packages/builder-core apps/cli apps/server",
+    "test": "npm run build && node --test packages/builder-core/tests/*.test.mjs apps/gui/tests/*.test.mjs apps/server/tests/*.test.mjs",
+    "start:server": "npm run build && node apps/server/dist/index.js",
     "lint:php": "php scripts/lint-php.php",
     "check": "npm run build && npm run test && npm run lint:php",
     "package:builder": "npm run build && node scripts/package-builder.mjs",
