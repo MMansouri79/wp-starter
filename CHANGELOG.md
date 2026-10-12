@@ -2,6 +2,8 @@
 
 ## 0.2.0-alpha.1 — unreleased
 
+- Added an optional Docker HTTPS listener on port 2053, private HTTP health monitoring, secure-page redirects, and a scoped certificate reload hook.
+
 - Redesigned the shared local, desktop, and hosted workspace with light/dark/system themes, grouped navigation, searchable libraries, a five-step profile editor, focused builds with persistent progress, compact typography editors, accessible dialogs, and reduced-motion-aware transitions. Login, registration, and administration share the same offline design assets.
 
 The version jump to `0.2.0-alpha.1` is applied when this release is cut; the working tree still reports `0.1.0-alpha.32` until then.

@@ -5,8 +5,8 @@ server hardening changes. The Windows checkout remains staging; production is
 the independent Ubuntu deployment. No Git release or version bump was made.
 
 - SSH: `adminuser@192.168.100.140` using the separately authorized deployment key.
-- Application: `http://192.168.100.140:47901` (LAN only).
-- Future domain: `wp.mediasanat.ir`; DNS, public routing and HTTPS are pending.
+- Application: `https://wp.mediasanat.ir:2053` (HTTPS configured; public forwarding verification pending).
+- DNS: `wp.mediasanat.ir` resolves to `37.255.254.229`.
 - Administrator: `admin@mediasanat.ir`. Retrieve the initial password in your own
   SSH terminal with `sudo cat /etc/wp-starter/initial-admin.txt`, then change it
   through the application. The file is root-readable only; bootstrap variables
@@ -16,7 +16,8 @@ the independent Ubuntu deployment. No Git release or version bump was made.
 - Protected configuration: `/etc/wp-starter/compose.env` and `server.env`.
 - Compose project: `wp-starter`, separate from `mediasanat-crm`.
 - Restart after reboot: Docker is enabled; all three services use `unless-stopped`.
-- Database/app ports are unpublished; nginx binds only `192.168.100.140:47901`.
+- Database/app ports are unpublished; nginx binds `192.168.100.140:2053` for TLS
+  and `192.168.100.140:47901` for HTTP health checks and HTTPS redirects.
 - Node 22.23.3, PostgreSQL 15, nginx; app limited to 2 GiB / two CPUs with one worker.
 - Upload limit 1 GiB; per-account quota 20 GiB; writes stop below 5 GiB free.
 
@@ -79,12 +80,22 @@ through the hosted editor; do not silently replace their intended configuration.
 
 ## Public launch
 
-Before using `https://wp.mediasanat.ir`, configure the domain's DNS record to
-the public static IP, router forwarding to the existing edge proxy, and a separate
-HTTPS virtual host with a certificate for WP Starter. Update the app's base URL
-and secure cookies. Integrate the proxy routing with the CRM; port 443 already
-belongs to its nginx container. Verify trusted forwarding headers and HTTPS
-session behavior before opening access. The LAN listener is plain HTTP.
+On 2026-10-12, configured the separate WP Starter proxy with TLS on host port
+2053, leaving CRM's 80/443 listeners unchanged. A Let's Encrypt certificate for
+`wp.mediasanat.ir` expires 2027-01-10. The application base URL includes `:2053`
+and secure cookies are enabled. LAN HTTP pages redirect to that URL; the private
+HTTP health endpoint remains available to monitoring. TLS certificate validation,
+security headers, login page and database health passed direct-origin checks.
+Public port 2053 refused connections at activation; router forwarding remains
+to be verified. Forward public TCP 2053 to `192.168.100.140:2053`.
+
+The certificate uses manual DNS validation and requires renewal before expiry
+using the command in `SERVER-DEPLOYMENT.md`. The scoped Certbot deploy hook
+reloads WP Starter nginx when the certificate renews. It does not automate DNS
+validation. Keep DNS only during initial public verification; when proxying with
+Cloudflare, use Full (strict). Configuration rollback files are protected under
+`/var/backups/wp-starter/https-20261012T094819Z`. Compose operations that recreate
+the proxy must include `deploy/docker/compose.https.yaml` after the base file.
 
 Future staging changes require an explicit build/deploy; they do not automatically
 alter production. Keep production library/database state out of source archives.

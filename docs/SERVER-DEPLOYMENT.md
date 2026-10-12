@@ -321,6 +321,41 @@ CRM proxy must preserve the visitor's forwarding headers through a trusted priva
 connection; the LAN proxy currently replaces them with its direct caller's address.
 Do not point public port 443 directly at the plain HTTP LAN listener.
 
+## Dedicated HTTPS port with Docker
+
+When another service owns 443, WP Starter can publish TLS on 2053 without changing
+that service. Point `wp.mediasanat.ir` to the public IP and forward public TCP
+2053 to `192.168.100.140:2053`. Obtain a certificate on the server first:
+
+```bash
+sudo certbot certonly --manual --preferred-challenges dns --cert-name wp.mediasanat.ir -d wp.mediasanat.ir
+```
+
+Publish the requested TXT value at `_acme-challenge.wp.mediasanat.ir` and verify
+its public resolution before continuing. Manual DNS certificates require manual
+renewal unless a DNS authentication plugin/hook is configured; the deploy hook
+below reloads certificates but does not automate validation.
+
+Set `WP_STARTER_BASE_URL=https://wp.mediasanat.ir:2053` and
+`WP_STARTER_SECURE_COOKIES=true` in the protected server environment. Add
+`COMPOSE_FILE=/opt/wp-starter-system/deploy/docker/compose.yaml:/opt/wp-starter-system/deploy/docker/compose.https.yaml`
+to `/etc/wp-starter/compose.env` so operational Compose commands retain the TLS
+listener, then recreate app and proxy with both files:
+
+```bash
+sudo docker compose --env-file /etc/wp-starter/compose.env -f deploy/docker/compose.yaml -f deploy/docker/compose.https.yaml up -d --no-deps app proxy
+sudo install -m 750 deploy/scripts/reload-https.sh /etc/letsencrypt/renewal-hooks/deploy/wp-starter-https
+curl --resolve wp.mediasanat.ir:2053:192.168.100.140 https://wp.mediasanat.ir:2053/api/health
+```
+
+Update any scripts that explicitly pass only `-f compose.yaml` to include the
+HTTPS override: explicit file arguments supersede `COMPOSE_FILE`. The private
+HTTP health endpoint remains available; other HTTP requests redirect to HTTPS.
+Only WP Starter's certificate directories are mounted into its proxy. The URL
+must include `:2053`. Verify TLS and secure session cookies before enabling
+Cloudflare proxy mode with Full (strict). Keep certificate expiry monitoring
+enabled and renew with the same manual DNS command before expiry.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |

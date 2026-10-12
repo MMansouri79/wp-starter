@@ -1,0 +1,9 @@
+# Add after compose.yaml only once the domain certificate exists.
+services:
+  proxy:
+    ports:
+      - ${WP_STARTER_LAN_IP:-127.0.0.1}:2053:443
+    volumes:
+      - ./nginx.https.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt/live/wp.mediasanat.ir:/etc/letsencrypt/live/wp.mediasanat.ir:ro
+      - /etc/letsencrypt/archive/wp.mediasanat.ir:/etc/letsencrypt/archive/wp.mediasanat.ir:ro
