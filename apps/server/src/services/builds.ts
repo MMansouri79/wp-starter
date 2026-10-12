@@ -7,6 +7,7 @@ import { BuildRepository } from "../repositories/builds.js";
 import { ProfileItemRepository } from "../repositories/profiles.js";
 import { safeFileName } from "../http/body.js";
 import { SharedLibrary } from "./library.js";
+import { publicErrorMessage } from "../http/public-data.js";
 import { QuotaService } from "./quota.js";
 import type { Logger } from "../log.js";
 
@@ -27,12 +28,11 @@ export const DEFAULT_BUILD_OPTIONS: Omit<BuildServiceOptions, "builderVersion" |
   maxActiveBuilds: 4
 };
 
+/** Expired builds are swept once at startup and then on this interval. */
+const RETENTION_SWEEP_INTERVAL_MS = 3600_000;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function timestampSuffix(): string {
-  return new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
 }
 
 /**
@@ -47,6 +47,8 @@ export class BuildService {
   private running = false;
   private workerLoops: Promise<void>[] = [];
   private claimChain: Promise<unknown> = Promise.resolve();
+  private retentionTimer: NodeJS.Timeout | null = null;
+  private retentionSweep: Promise<void> | null = null;
 
   constructor(
     private readonly library: SharedLibrary,
@@ -61,16 +63,29 @@ export class BuildService {
     const interrupted = await this.builds.failInterrupted();
     if (interrupted > 0) this.log.warn(`Marked ${interrupted} interrupted build(s) as failed.`);
 
+    // Retention is enforced by this service because it owns the artifacts.
+    await this.sweepExpired();
+
     this.running = true;
     for (let index = 0; index < this.options.workers; index += 1) {
       this.workerLoops.push(this.loop(index + 1));
     }
+
+    this.retentionTimer = setInterval(() => void this.sweepExpired(), RETENTION_SWEEP_INTERVAL_MS);
+    // Never keep the process alive for a retention sweep.
+    this.retentionTimer.unref();
+
     this.log.info(`Build queue started with ${this.options.workers} worker(s).`);
   }
 
   async stop(): Promise<void> {
     this.running = false;
+    if (this.retentionTimer) {
+      clearInterval(this.retentionTimer);
+      this.retentionTimer = null;
+    }
     await Promise.allSettled(this.workerLoops);
+    await this.retentionSweep;
     this.workerLoops = [];
   }
 
@@ -136,8 +151,12 @@ export class BuildService {
 
   /** Deletes finished builds (and their artifacts) past the retention window. */
   async pruneExpired(): Promise<number> {
+    return this.library.mutate(() => this.pruneExpiredLocked());
+  }
+
+  private async pruneExpiredLocked(): Promise<number> {
     const cutoff = new Date(Date.now() - this.options.retentionHours * 3600_000).toISOString();
-    const rows = await this.builds.list(1000);
+    const rows = await this.builds.expired(cutoff);
     let removed = 0;
 
     for (const build of rows) {
@@ -156,6 +175,17 @@ export class BuildService {
 
     if (removed > 0) this.log.info(`Pruned ${removed} expired build(s).`);
     return removed;
+  }
+
+  /** Runs a sweep, logging instead of throwing so the interval keeps firing. */
+  private async sweepExpired(): Promise<void> {
+    if (this.retentionSweep) return this.retentionSweep;
+    this.retentionSweep = this.pruneExpired().then(() => undefined).catch((error) => {
+      this.log.error(`Build retention sweep failed: ${describe(error)}`);
+    });
+    try {
+      await this.retentionSweep;
+    } finally { this.retentionSweep = null; }
   }
 
   private async loop(worker: number): Promise<void> {
@@ -192,6 +222,7 @@ export class BuildService {
   private async execute(build: BuildRecord): Promise<void> {
     let lastPercent = -1;
     let lastStage = "";
+    let outputZip: string | null = null;
 
     try {
       await this.builds.update(build.id, { stage: "loading", message: "Resolving the build profile.", percent: 1 });
@@ -204,8 +235,8 @@ export class BuildService {
       }
 
       await mkdir(this.library.buildsDir, { recursive: true });
-      const outputName = `${safeFileName(profile.name, "starter")}-${timestampSuffix()}.zip`;
-      const outputZip = path.join(this.library.buildsDir, outputName);
+      const outputName = `${safeFileName(profile.name, "starter")}-${build.id}.zip`;
+      outputZip = path.join(this.library.buildsDir, outputName);
 
       const result = await buildStarter({
         profile,
@@ -235,36 +266,36 @@ export class BuildService {
         createdBy: build.createdBy
       });
 
-      if (build.createdBy) {
-        const usage = await this.quota.usage(build.createdBy);
-        if (usage.usedBytes > usage.limitBytes) {
-          await rm(outputZip, { force: true });
-          await rm(`${outputZip}.json`, { force: true });
-          throw new HttpError(
-            413,
-            "quota_exceeded",
-            "This build would exceed your storage quota, so its artifact was discarded. Remove unused items and build again."
-          );
-        }
-      }
-
-      await this.builds.update(build.id, {
-        status: "complete",
-        stage: "complete",
-        percent: 100,
-        message: "Build complete.",
-        artifactFile: outputName,
-        artifactPath: outputZip,
-        sha256: result.sha256,
-        sizeBytes,
-        manifest: result.manifest,
-        completedAt: new Date().toISOString()
+      await this.library.mutate(async () => {
+        if (build.createdBy) await this.quota.assertWithinQuota(build.createdBy, sizeBytes);
+        await this.builds.update(build.id, {
+          status: "complete",
+          stage: "complete",
+          percent: 100,
+          message: "Build complete.",
+          artifactFile: outputName,
+          artifactPath: outputZip,
+          sha256: result.sha256,
+          sizeBytes,
+          manifest: result.manifest,
+          completedAt: new Date().toISOString()
+        });
       });
 
       this.log.info(`Build ${build.id} complete (${outputName}, ${sizeBytes} bytes).`);
     } catch (error) {
+      if (outputZip) {
+        try {
+          await rm(outputZip, { force: true });
+          await rm(`${outputZip}.json`, { force: true });
+        } catch (cleanupError) {
+          this.log.error(`Build ${build.id} cleanup failed: ${describe(cleanupError)}`);
+        }
+      }
       const code = error instanceof BuilderError || error instanceof HttpError ? error.code : "internal_error";
-      const message = describe(error);
+      const message = error instanceof BuilderError || error instanceof HttpError
+        ? publicErrorMessage(describe(error), this.library.root)
+        : "Build failed unexpectedly. Consult the server log.";
       await this.builds.update(build.id, {
         status: "failed",
         stage: "failed",
@@ -273,7 +304,7 @@ export class BuildService {
         errorMessage: message,
         completedAt: new Date().toISOString()
       });
-      this.log.error(`Build ${build.id} failed: ${message}`);
+      this.log.error(`Build ${build.id} failed: ${describe(error)}`);
     }
   }
 }

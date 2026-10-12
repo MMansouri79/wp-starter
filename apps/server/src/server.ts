@@ -5,6 +5,7 @@ import { appendSetCookie, parseCookies } from "./http/cookies.js";
 import { readJsonBody } from "./http/body.js";
 import { Router, type RequestContext } from "./http/router.js";
 import { securityHeaders, sendBytes, sendJson, sendText } from "./http/response.js";
+import { publicErrorMessage } from "./http/public-data.js";
 import { serveStatic, staticNotFound } from "./http/static.js";
 import { HttpError, notFound } from "./errors.js";
 import { BuilderError } from "./core.js";
@@ -21,7 +22,7 @@ export interface WebServerOptions {
 }
 
 /** Paths served without a session. Everything else in the UI requires sign-in. */
-const PUBLIC_PAGES = new Set(["/login.html", "/login", "/app.css", "/login.js"]);
+const PUBLIC_PAGES = new Set(["/login.html", "/login", "/app.css", "/login.js", "/ui.js", "/design.css"]);
 
 /**
  * Adds the server overlay to the reused Builder UI: account panel, CSRF header
@@ -31,7 +32,9 @@ const PUBLIC_PAGES = new Set(["/login.html", "/login", "/app.css", "/login.js"])
 function injectServerOverlay(html: string): string {
   const withStyles = html.includes('href="/app.css"')
     ? html
-    : html.replace("</head>", '  <link rel="stylesheet" href="/app.css">\n</head>');
+    : html.includes('href="/design.css"')
+      ? html.replace('<link rel="stylesheet" href="/design.css">', '<link rel="stylesheet" href="/app.css">\n  <link rel="stylesheet" href="/design.css">')
+      : html.replace("</head>", '<link rel="stylesheet" href="/app.css">\n</head>');
   if (withStyles.includes('src="/shell.js"')) return withStyles;
   return withStyles.replace("</body>", '  <script src="/shell.js"></script>\n</body>');
 }
@@ -115,7 +118,15 @@ async function dispatchApi(
     query: (name) => url.searchParams.get(name)
   };
 
-  await match.handler(context);
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method ?? "GET")) {
+    await match.handler(context);
+  } else {
+    await app.library.mutate(async () => {
+      // A queued write may outlive account disabling, logout or a role change.
+      context.auth = await app.auth.resolveSession(cookies[SESSION_COOKIE] ?? null);
+      await match.handler(context);
+    });
+  }
 }
 
 async function dispatchPage(app: AppContext, req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> {
@@ -147,7 +158,7 @@ async function dispatchPage(app: AppContext, req: IncomingMessage, res: ServerRe
     return;
   }
 
-  const served = await serveStatic(res, [app.config.clientDir, app.config.guiPublicDir], normalized, { securityHeaders: {} });
+  const served = await serveStatic(res, [app.config.clientDir, app.config.guiPublicDir], normalized === "/login" ? "/login.html" : normalized, { securityHeaders: {} });
   if (served) return;
 
   // Unknown non-API paths fall back to the app shell so client-side navigation works.
@@ -162,7 +173,7 @@ function handleError(app: AppContext, res: ServerResponse, error: unknown): void
 
   if (error instanceof HttpError) {
     if (error.status >= 500) app.log.error(`${error.code}: ${error.message}`);
-    sendJson(res, error.status, { error: { code: error.code, message: error.message, details: error.details ?? null } });
+    sendJson(res, error.status, { error: { code: error.code, message: publicErrorMessage(error.message, app.library.root), details: error.details ?? null } });
     return;
   }
 
@@ -171,7 +182,7 @@ function handleError(app: AppContext, res: ServerResponse, error: unknown): void
   // so they are reported with their own code instead of a generic 500.
   if (error instanceof BuilderError) {
     const status = error.code.endsWith("not_found") ? 404 : 400;
-    sendJson(res, status, { error: { code: error.code, message: error.message, details: null } });
+    sendJson(res, status, { error: { code: error.code, message: publicErrorMessage(error.message, app.library.root), details: null } });
     return;
   }
 

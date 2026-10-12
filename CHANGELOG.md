@@ -2,7 +2,20 @@
 
 ## 0.2.0-alpha.1 — unreleased
 
+- Redesigned the shared local, desktop, and hosted workspace with light/dark/system themes, grouped navigation, searchable libraries, a five-step profile editor, focused builds with persistent progress, compact typography editors, accessible dialogs, and reduced-motion-aware transitions. Login, registration, and administration share the same offline design assets.
+
 The version jump to `0.2.0-alpha.1` is applied when this release is cut; the working tree still reports `0.1.0-alpha.32` until then.
+
+- Added an isolated Docker production deployment with PostgreSQL, a dedicated LAN proxy port, resource limits, persistent library storage, and coordinated database/library backups for servers already hosting another application.
+- Corrected the deployment health monitor to accept pretty-printed JSON health responses.
+
+- Hardened shared imports: duplicate packages/snapshots preserve owners; foreign replacements, font ID collisions, and snapshot-derived Elementor overwrites return `403 read_only` before changing files. CLI-created unowned resources remain administrator-managed.
+- Added bounded single-process login/invite throttling per IP and normalized email, configurable attempt/window limits, and atomic invitation consumption.
+- Isolated PostgreSQL transaction clients and serialized SQLite operations and hosted library mutations to prevent concurrent writes from sharing transactions or quota headroom.
+- Counted fonts and sample assets in account storage, checked upload quotas before canonical storage changes, and included new build artifacts in final quota checks; rejected builds clean their ZIPs and sidecars.
+- Gave each build artifact its job UUID, wired startup/hourly retention with shutdown cleanup and uncapped expired-job selection, and reconciled changed/deleted file registries without changing their owners.
+- Removed nested storage coordinates and internal error paths from hosted API responses, updated the Node requirement to 22.13+, and added Node 22/24 CI plus real PostgreSQL integration coverage.
+- Added coordinated database/file-store backups with private permissions, restore instructions, and tests for restore and restart after backup failure. Deployment acceptance remains a separate environment-dependent phase.
 
 - Added `apps/server/`: a hosted, multi-user version of the Builder that serves one canonical shared library directory plus a database for accounts, ownership, and item metadata. Everyone signed in reads the whole shared library; only the creator of an item may edit, replace, or delete it, and administrators gain no rights over another account's items.
 - Added session authentication with Argon2id passwords (OWASP parameters), HTTP-only cookies, a session-bound CSRF token required for every non-GET API call, and invite-only registration by default. `admin`, `member`, and `client` roles; administrators issue invite codes or create accounts directly.

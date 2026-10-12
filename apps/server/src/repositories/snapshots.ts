@@ -53,7 +53,7 @@ export class SnapshotItemRepository {
 
     if (existing) {
       await this.db.run(
-        `UPDATE snapshots SET name = ?, sha256 = ?, file_path = ?, size_bytes = ?, wordpress_version = ?, locale = ?, generated_at = ?, document_json = ?, uploaded_by = ?, created_at = ?
+        `UPDATE snapshots SET name = ?, sha256 = ?, file_path = ?, size_bytes = ?, wordpress_version = ?, locale = ?, generated_at = ?, document_json = ?
          WHERE id = ?`,
         [
           record.name,
@@ -64,8 +64,6 @@ export class SnapshotItemRepository {
           record.locale,
           record.generatedAt,
           JSON.stringify(record),
-          uploadedBy,
-          now,
           record.id
         ]
       );

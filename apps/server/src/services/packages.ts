@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
-import type { PackageRecord } from "../core.js";
+import { exists, inspectPackage, sha256File, type PackageRecord } from "../core.js";
 import type { User } from "../types.js";
 import { PackageItemRepository, variantOf, type PackageItem } from "../repositories/packages.js";
 import { SharedLibrary } from "./library.js";
@@ -40,15 +40,28 @@ export class PackageService {
   }
 
   async add(uploadedFile: string, options: { replace?: boolean }, user: User): Promise<AddPackageResult> {
+    return this.library.mutate(() => this.addLocked(uploadedFile, options, user));
+  }
+
+  private async addLocked(uploadedFile: string, options: { replace?: boolean }, user: User): Promise<AddPackageResult> {
+    const inspection = await inspectPackage(uploadedFile);
+    const variant = variantOf(inspection);
+    const existing = await this.items.findByCoordinate(inspection.kind, inspection.slug, inspection.version, variant);
+    const stored = (await this.library.packages().list()).find((row) =>
+      row.kind === inspection.kind && row.slug === inspection.slug && row.version === inspection.version && variantOf(row) === variant);
+    if (stored && stored.sha256 === await sha256File(uploadedFile) && await exists(path.join(this.library.root, stored.zip))) {
+      const item = existing ?? await this.items.upsert({ record: stored, sizeBytes: await fileSize(path.join(this.library.root, stored.zip)), uploadedBy: null });
+      return { item, added: false, replaced: false };
+    }
+    if (stored || existing) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
+    await this.quota.assertWithinQuota(user.id, Math.max(0, (await fileSize(uploadedFile)) - (existing?.sizeBytes ?? 0)));
     const result = await this.library.packages().add(uploadedFile, { replace: options.replace === true });
     const sizeBytes = await fileSize(path.join(this.library.root, result.record.zip));
-
-    if (result.added) await this.quota.assertWithinQuota(user.id, sizeBytes);
 
     const item = await this.items.upsert({
       record: result.record,
       sizeBytes,
-      uploadedBy: user.id
+      uploadedBy: existing ? existing.createdBy : stored ? null : user.id
     });
 
     return { item, added: result.added, replaced: result.replaced };

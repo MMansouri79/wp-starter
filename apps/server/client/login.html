@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Sign in · WP Starter</title>
+  <script src="/ui.js"></script>
   <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/design.css">
 </head>
 <body class="ws-auth">
   <main class="ws-auth-card">
@@ -18,7 +20,7 @@
     <div class="ws-auth-notice ws-hidden" id="notice" role="status"></div>
 
     <form id="form" autocomplete="on">
-      <label class="ws-field" id="name-field" style="display:none">
+      <label class="ws-field" id="name-field" hidden>
         <span>Your name</span>
         <input id="displayName" name="displayName" type="text" autocomplete="name">
       </label>

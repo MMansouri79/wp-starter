@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { exists, sha256File } from "../core.js";
-import type { FontSystemRecord, PackageRecord } from "../core.js";
+import type { ElementorTemplateLibraryRecord } from "../core.js";
 import { PackageItemRepository } from "../repositories/packages.js";
 import { ProfileItemRepository, type ProfileDocument } from "../repositories/profiles.js";
 import { ResourceRepository, SampleContentRepository, RESOURCE_KINDS } from "../repositories/resources.js";
@@ -52,26 +52,32 @@ export class LibrarySyncService {
 
   private async syncPackages(): Promise<number> {
     let imported = 0;
+    const keep = new Set<string>();
     for (const record of await this.library.packages().list()) {
       const variant = record.variant || record.locale || (record.kind === "wordpress" ? "en_US" : "default");
-      if (await this.packages.findByCoordinate(record.kind, record.slug, record.version, variant)) continue;
-      await this.packages.upsert({
+      const existing = await this.packages.findByCoordinate(record.kind, record.slug, record.version, variant);
+      const item = await this.packages.upsert({
         record,
         sizeBytes: await sizeOf(path.join(this.library.root, record.zip)),
-        uploadedBy: null
+        uploadedBy: existing?.createdBy ?? null
       });
-      imported += 1;
+      keep.add(item.id);
+      if (!existing) imported += 1;
     }
+    for (const item of await this.packages.list()) if (!keep.has(item.id)) await this.packages.remove(item.id);
     return imported;
   }
 
   private async syncSnapshots(): Promise<number> {
     let imported = 0;
+    const keep = new Set<string>();
     for (const record of await this.library.snapshots().list()) {
-      if (await this.snapshots.findById(record.id)) continue;
-      await this.snapshots.upsert(record, await sizeOf(path.join(this.library.root, record.zip)), null);
-      imported += 1;
+      const existing = await this.snapshots.findById(record.id);
+      await this.snapshots.upsert(record, await sizeOf(path.join(this.library.root, record.zip)), existing?.createdBy ?? null);
+      keep.add(record.id);
+      if (!existing) imported += 1;
     }
+    for (const item of await this.snapshots.list()) if (!keep.has(item.id)) await this.snapshots.remove(item.id);
     return imported;
   }
 
@@ -79,26 +85,30 @@ export class LibrarySyncService {
     let imported = 0;
     const directory = this.library.profilesDir;
     if (!(await exists(directory))) return 0;
+    const keep = new Set<string>();
 
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-      if (await this.profiles.findByFileName(entry.name)) continue;
+      const existing = await this.profiles.findByFileName(entry.name);
+      if (existing) keep.add(existing.id);
 
       const target = path.join(directory, entry.name);
       try {
         const document = JSON.parse(await readFile(target, "utf8")) as ProfileDocument;
-        await this.profiles.save({
+        const item = await this.profiles.save({
           fileName: entry.name,
           name: String(document.name || entry.name.replace(/\.json$/i, "")),
           sha256: await sha256File(target),
           document,
-          createdBy: null
+          createdBy: existing?.createdBy ?? null
         });
-        imported += 1;
+        keep.add(item.id);
+        if (!existing) imported += 1;
       } catch (error) {
         this.log.warn(`Skipped unreadable profile ${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    for (const item of await this.profiles.list()) if (!keep.has(item.id)) await this.profiles.remove(item.id);
     return imported;
   }
 
@@ -120,15 +130,19 @@ export class LibrarySyncService {
       const ids: string[] = [];
       for (const document of documents as Array<{ id: string; name?: string }>) {
         ids.push(document.id);
-        if (await repository.findById(document.id)) continue;
+        const existing = await repository.findById(document.id);
+        const snapshot = kind === "elementor" ? await this.snapshots.findById((document as ElementorTemplateLibraryRecord).snapshotId) : null;
+        if (kind === "elementor" && existing?.createdBy === null && snapshot?.createdBy) {
+          await repository.assignUnowned(document.id, snapshot.createdBy);
+        }
         await repository.save({
           id: document.id,
           name: String(document.name ?? document.id),
           sha256: "",
           document,
-          createdBy: null
+          createdBy: existing?.createdBy ?? snapshot?.createdBy ?? null
         });
-        imported += 1;
+        if (!existing) imported += 1;
       }
 
       await repository.pruneMissing(ids);
@@ -148,15 +162,15 @@ export class LibrarySyncService {
 
     let imported = 0;
     for (const row of rows) {
-      if (await this.sampleContent.findById(row.resource, row.id)) continue;
+      const existing = await this.sampleContent.findById(row.resource, row.id);
       await this.sampleContent.save(row.resource, {
         id: row.id,
         name: row.name,
         sha256: "",
         document: row.document,
-        createdBy: null
+        createdBy: existing?.createdBy ?? null
       });
-      imported += 1;
+      if (!existing) imported += 1;
     }
 
     await this.sampleContent.pruneMissing(rows.map((row) => row.id));

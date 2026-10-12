@@ -2,11 +2,11 @@
    The Builder stylesheet stays untouched so the local GUI keeps its look. */
 
 :root {
-  --ws-accent: #2563eb;
-  --ws-accent-soft: #dbeafe;
-  --ws-danger: #b91c1c;
-  --ws-border: #d8dee9;
-  --ws-muted: #5b6472;
+  --ws-accent: var(--primary);
+  --ws-accent-soft: var(--accent-soft);
+  --ws-danger: var(--danger);
+  --ws-border: var(--border);
+  --ws-muted: var(--muted);
 }
 
 .ws-account {
@@ -37,7 +37,7 @@
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--ws-accent-soft);
-  color: #1e3a8a;
+  color: var(--accent-text);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -50,8 +50,8 @@
 }
 
 .ws-role-badge.ws-role-client {
-  background: #e5e7eb;
-  color: #374151;
+  background: var(--surface-alt);
+  color: var(--text);
 }
 
 .ws-account-actions {
@@ -66,7 +66,7 @@
   padding: 6px 8px;
   border: 1px solid var(--ws-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
   color: inherit;
   font: inherit;
   text-align: center;
@@ -89,7 +89,7 @@
   height: 4px;
   margin-top: 4px;
   border-radius: 999px;
-  background: #e5e7eb;
+  background: var(--surface-alt);
   overflow: hidden;
 }
 
@@ -112,8 +112,8 @@
   margin: 2px 0 0 6px;
   padding: 1px 7px;
   border-radius: 999px;
-  background: #eef2ff;
-  color: #3730a3;
+  background: var(--accent-soft);
+  color: var(--accent-text);
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
@@ -121,7 +121,7 @@
 
 .ws-readonly-badge {
   background: #fef3c7;
-  color: #92400e;
+  color: var(--warning);
 }
 
 .ws-control-readonly {
@@ -148,7 +148,7 @@ body.ws-auth {
   margin: 0;
   background: #0f172a;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  color: #e2e8f0;
+  color: var(--divider);
 }
 
 .ws-auth-card {
@@ -173,7 +173,7 @@ body.ws-auth {
   height: 38px;
   border-radius: 10px;
   background: var(--ws-accent);
-  color: #fff;
+  color: var(--surface);
   font-weight: 700;
 }
 
@@ -184,7 +184,7 @@ body.ws-auth {
 
 .ws-auth-card p.ws-auth-sub {
   margin: 4px 0 20px;
-  color: #94a3b8;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -196,7 +196,7 @@ body.ws-auth {
 .ws-field span {
   display: block;
   margin-bottom: 5px;
-  color: #cbd5e1;
+  color: var(--border);
   font-size: 12px;
   font-weight: 600;
 }
@@ -204,10 +204,10 @@ body.ws-auth {
 .ws-field input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #334155;
+  border: 1px solid var(--text);
   border-radius: 8px;
   background: #0f172a;
-  color: #e2e8f0;
+  color: var(--divider);
   font: inherit;
   box-sizing: border-box;
 }
@@ -224,7 +224,7 @@ body.ws-auth {
   border: 0;
   border-radius: 8px;
   background: var(--ws-accent);
-  color: #fff;
+  color: var(--surface);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -237,7 +237,7 @@ body.ws-auth {
 
 .ws-auth-toggle {
   margin-top: 16px;
-  color: #94a3b8;
+  color: var(--muted);
   font-size: 12px;
   text-align: center;
 }
@@ -264,8 +264,8 @@ body.ws-auth {
   margin-bottom: 14px;
   padding: 9px 11px;
   border-radius: 8px;
-  background: #1e3a8a;
-  color: #dbeafe;
+  background: var(--accent-text);
+  color: var(--accent-soft);
   font-size: 13px;
 }
 
@@ -278,7 +278,7 @@ body.ws-auth {
 body.ws-admin {
   margin: 0;
   background: #f6f7f9;
-  color: #111827;
+  color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -288,7 +288,7 @@ body.ws-admin {
   justify-content: space-between;
   gap: 16px;
   padding: 16px 28px;
-  background: #fff;
+  background: var(--surface);
   border-bottom: 1px solid var(--ws-border);
 }
 
@@ -326,7 +326,7 @@ body.ws-admin {
   padding: 20px;
   border: 1px solid var(--ws-border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .ws-panel h2 {
@@ -351,7 +351,7 @@ body.ws-admin {
   padding: 14px 16px;
   border: 1px solid var(--ws-border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .ws-stat span {
@@ -379,7 +379,7 @@ body.ws-admin {
   gap: 5px;
   font-size: 12px;
   font-weight: 600;
-  color: #374151;
+  color: var(--text);
 }
 
 .ws-form-row input,
@@ -396,20 +396,20 @@ body.ws-admin {
   border: 0;
   border-radius: 8px;
   background: var(--ws-accent);
-  color: #fff;
+  color: var(--surface);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
 }
 
 .ws-button.ws-secondary {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--ws-border);
-  color: #111827;
+  color: var(--text);
 }
 
 .ws-button.ws-danger {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid #fecaca;
   color: var(--ws-danger);
 }
@@ -428,7 +428,7 @@ body.ws-admin {
 .ws-table th,
 .ws-table td {
   padding: 9px 10px;
-  border-bottom: 1px solid #eef1f5;
+  border-bottom: 1px solid var(--divider);
   text-align: left;
   vertical-align: middle;
 }
@@ -458,12 +458,12 @@ body.ws-admin {
 
 .ws-chip.ws-active {
   background: #dcfce7;
-  color: #166534;
+  color: var(--success);
 }
 
 .ws-chip.ws-disabled {
   background: #fee2e2;
-  color: #991b1b;
+  color: var(--danger);
 }
 
 .ws-invite-code {
@@ -474,7 +474,7 @@ body.ws-admin {
   padding: 12px;
   border: 1px dashed #93c5fd;
   border-radius: 10px;
-  background: #eff6ff;
+  background: var(--accent-soft);
 }
 
 .ws-invite-code code {
@@ -493,12 +493,12 @@ body.ws-admin {
 
 .ws-message.ws-error {
   background: #fee2e2;
-  color: #991b1b;
+  color: var(--danger);
 }
 
 .ws-message.ws-ok {
   background: #dcfce7;
-  color: #166534;
+  color: var(--success);
 }
 
 .ws-empty {

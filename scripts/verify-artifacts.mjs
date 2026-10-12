@@ -32,6 +32,7 @@ for (const name of names) {
     const forbidden = entries.filter((entry) => /(^|\/)(node_modules|\.git|private-packages)(\/|$)|\.local\.json$/i.test(entry));
     if (forbidden.length) throw new Error(`${name} contains forbidden entries: ${forbidden.join(", ")}`);
     if (name.includes("builder") && !hasEntry("wordpress/bootstrap/site-starter-bootstrap.php")) throw new Error("Builder artifact is missing the bootstrap runtime.");
+    if (name.includes("builder")) for (const asset of ["ui.js", "workspace.js", "design.css"]) if (!hasEntry(`apps/gui/public/${asset}`)) throw new Error(`Builder artifact is missing ${asset}.`);
     if (name.includes("exporter") && !hasEntry("starter-exporter.php")) throw new Error("Exporter artifact is missing the plugin entrypoint.");
     console.log(`Verified ${name} (${entries.length} files).`);
   } finally {

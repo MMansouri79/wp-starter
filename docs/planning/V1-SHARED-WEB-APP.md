@@ -1,6 +1,6 @@
 # Planning: v1 — Stabilization + Shared Hosted Web App
 
-Status: draft for approval (not yet approved for implementation).
+Status: server implementation committed at `d3312ae`; hardening follows in `V1-SERVER-HARDENING.md`. Deployment acceptance and release remain outstanding. The earlier starting-state notes below are historical.
 
 This document captures the complete planning discussion for the first stable version of WP Starter System. The goal is one combined release: stabilize the existing build pipeline and add a hosted web app on our own VPS, backed by PostgreSQL, where team members and invited clients can browse and build from each other's shared items. Others can view and use any shared item; only the owner edits or deletes their own items.
 
@@ -82,7 +82,7 @@ The server runs the existing builder-core APIs against one canonical shared libr
 7. **Builds** — server-side async job queue (1–2 workers), staged progress, artifact storage, build history; disk quotas and upload size limits.
 8. **Web client** — reuse `apps/gui/public/` front-end assets; add login page, current-user context, owner badges, "Shared by" labels, read-only controls for others' items, and an admin screen (users + invites).
 9. **Deployment** — systemd unit, nginx server block, Let's Encrypt HTTPS, `pg_dump` backup cron, disk-space checks. Works whether the VPS is the Plesk machine (own server block/port) or a standalone server; own subdomain recommended (e.g. `builder.yourdomain.com`).
-10. **v1 release** — version bump to `1.0.0`, README + `CHANGELOG.md`, new `docs/SERVER-DEPLOYMENT.md`, updated agent guide.
+10. **Release** — the current release decision is `0.2.0-alpha.1`, superseding the original `1.0.0` proposal. Apply the version jump when cutting the release, as recorded in README and CHANGELOG.
 
 ## Verification / definition of done
 

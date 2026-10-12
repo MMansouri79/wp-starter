@@ -2,6 +2,11 @@ import { HttpError } from "../errors.js";
 import { BuildRepository } from "../repositories/builds.js";
 import { PackageItemRepository } from "../repositories/packages.js";
 import { SnapshotItemRepository } from "../repositories/snapshots.js";
+import { ResourceRepository, SampleContentRepository } from "../repositories/resources.js";
+import { SharedLibrary } from "./library.js";
+import { stat } from "node:fs/promises";
+import path from "node:path";
+import type { FontSystemRecord, SampleAsset } from "../core.js";
 
 export interface QuotaUsage {
   usedBytes: number;
@@ -18,7 +23,10 @@ export class QuotaService {
     private readonly packages: PackageItemRepository,
     private readonly snapshots: SnapshotItemRepository,
     private readonly builds: BuildRepository,
-    private readonly limitBytes: number
+    private readonly limitBytes: number,
+    private readonly library: SharedLibrary,
+    private readonly fonts: ResourceRepository,
+    private readonly samples: SampleContentRepository
   ) {}
 
   async usage(userId: string): Promise<QuotaUsage> {
@@ -27,7 +35,19 @@ export class QuotaService {
       this.snapshots.bytesForUser(userId),
       this.builds.bytesForUser(userId)
     ]);
-    const usedBytes = packages + snapshots + builds;
+    const files = new Set<string>();
+    for (const item of await this.fonts.list<FontSystemRecord>()) {
+      if (item.createdBy === userId) item.document.faces.forEach((face) => files.add(face.file));
+    }
+    for (const item of await this.samples.list<SampleAsset>()) {
+      if (item.resource === "assets" && item.createdBy === userId) files.add(item.document.file);
+    }
+    let assets = 0;
+    for (const file of files) {
+      try { assets += (await stat(path.join(this.library.root, file))).size; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    }
+    const usedBytes = packages + snapshots + builds + assets;
     return { usedBytes, limitBytes: this.limitBytes, remainingBytes: Math.max(0, this.limitBytes - usedBytes) };
   }
 

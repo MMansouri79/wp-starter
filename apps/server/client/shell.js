@@ -86,6 +86,8 @@
     if (!foot || document.getElementById("ws-account")) return;
 
     var user = session.user;
+    var brandSubtitle = document.querySelector(".brand small");
+    if (brandSubtitle) brandSubtitle.textContent = "Shared workspace";
     var quota = session.quota || { usedBytes: 0, limitBytes: 1 };
     var percent = Math.min(100, Math.round((quota.usedBytes / Math.max(1, quota.limitBytes)) * 100));
 
@@ -222,7 +224,7 @@
 
   function containerOf(control) {
     return (
-      control.closest("tr, .card, .profile-card, .sample-card, li, .ws-panel") ||
+      control.closest("tr, .card, .profile-card, .build-card, .sample-card, .sample-repeat, li, .ws-panel") ||
       control.parentElement ||
       control
     );
@@ -266,13 +268,14 @@
 
     var controls = document.querySelectorAll(MUTATING_SELECTOR);
     var readOnlyCount = 0;
+    var activeView = document.querySelector(".view.active");
 
     Array.prototype.forEach.call(controls, function (control) {
       var record = lookup(control, index);
       if (!record) return;
 
       if (record.canEdit === false) {
-        readOnlyCount += 1;
+        if (control.closest(".view") === activeView) readOnlyCount += 1;
         markReadOnly(control, record);
         applyBadge(containerOf(control), record);
         return;

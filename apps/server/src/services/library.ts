@@ -1,5 +1,6 @@
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
+import { MutationLock } from "./mutex.js";
 import {
   ConfigSnapshotRegistry,
   DesignSystemResourceService,
@@ -28,6 +29,11 @@ export function isVNextKind(value: string): value is VNextKind {
  * file registries here; the database mirrors ownership metadata for the web app.
  */
 export class SharedLibrary {
+  private readonly mutations = new MutationLock();
+
+  mutate<T>(work: () => Promise<T>): Promise<T> {
+    return this.mutations.run(work);
+  }
   public readonly root: string;
   public readonly profilesDir: string;
   public readonly buildsDir: string;

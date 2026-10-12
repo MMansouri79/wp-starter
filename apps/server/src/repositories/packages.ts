@@ -69,9 +69,9 @@ export class PackageItemRepository {
 
     if (existing) {
       await this.db.run(
-        `UPDATE packages SET name = ?, sha256 = ?, file_path = ?, size_bytes = ?, document_json = ?, uploaded_by = ?, created_at = ?
+        `UPDATE packages SET name = ?, sha256 = ?, file_path = ?, size_bytes = ?, document_json = ?
          WHERE id = ?`,
-        [record.name, record.sha256, record.zip, input.sizeBytes, JSON.stringify(record), input.uploadedBy, now, existing.id]
+        [record.name, record.sha256, record.zip, input.sizeBytes, JSON.stringify(record), existing.id]
       );
       return (await this.findById(existing.id)) as PackageItem;
     }

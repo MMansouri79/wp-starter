@@ -5,6 +5,7 @@ import { loadConfig, appRoot, type ConfigOverrides, type ServerConfig } from "./
 import { openDatabase } from "./db/index.js";
 import { createLogger, type Logger } from "./log.js";
 import { AuthService } from "./auth/service.js";
+import { LoginRateLimiter } from "./auth/rate-limit.js";
 import { BuildRepository } from "./repositories/builds.js";
 import { PackageItemRepository } from "./repositories/packages.js";
 import { ProfileItemRepository } from "./repositories/profiles.js";
@@ -68,7 +69,8 @@ export async function createApplication(overrides: StartOptions = {}): Promise<A
 
   const auth = new AuthService(db, {
     sessionTtlHours: config.sessionTtlHours,
-    allowOpenRegistration: config.allowOpenRegistration
+    allowOpenRegistration: config.allowOpenRegistration,
+    rateLimiter: new LoginRateLimiter({ maxAttempts: config.loginMaxAttempts, lockoutSeconds: config.loginLockoutSeconds })
   });
   await auth.ensureBootstrapAdmin(config.bootstrapAdmin);
 
@@ -87,7 +89,7 @@ export async function createApplication(overrides: StartOptions = {}): Promise<A
   const fontsRepository = new ResourceRepository(db, "fonts");
   const elementorRepository = new ResourceRepository(db, "elementor");
 
-  const quota = new QuotaService(packageItems, snapshotItems, buildItems, config.accountQuotaBytes);
+  const quota = new QuotaService(packageItems, snapshotItems, buildItems, config.accountQuotaBytes, library, fontsRepository, sampleItems);
   const disk = new DiskGuard(library.root, config.minimumFreeBytes);
 
   const app: AppContext = {
@@ -100,7 +102,7 @@ export async function createApplication(overrides: StartOptions = {}): Promise<A
     quota,
     disk,
     packages: new PackageService(library, packageItems, quota),
-    snapshots: new SnapshotService(library, snapshotItems, quota),
+    snapshots: new SnapshotService(library, snapshotItems, quota, elementorRepository),
     profiles: new ProfileService(library, profileItems),
     vnext: new VNextResourceService(library, resourceItems),
     fonts: new FontProfileService(library, fontsRepository, quota),

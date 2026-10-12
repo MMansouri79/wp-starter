@@ -135,12 +135,13 @@ export function registerAuthRoutes(router: Router, app: AppContext): void {
     const disk = await app.disk.status();
     const healthy = database === "ok" && disk.ok;
 
+    // Health stays unauthenticated for monitoring, so it never exposes the
+    // shared library path.
     sendJson(context.res, healthy ? 200 : 503, {
       status: healthy ? "ok" : "degraded",
       version: app.version,
       database,
       dialect: app.db.dialect,
-      library: app.library.root,
       disk: { freeBytes: disk.freeBytes, usedPercent: disk.usedPercent, ok: disk.ok }
     });
   });

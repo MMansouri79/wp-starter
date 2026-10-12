@@ -8,6 +8,7 @@ import {
   loadProfile,
   sha256File,
   writeJson,
+  exists,
   type CompatibilityReport
 } from "../core.js";
 import type { ProfileDocumentV7, ProfileDocumentV8, ProfileDocumentV9 } from "../core.js";
@@ -108,11 +109,17 @@ export class ProfileService {
     const sourceFile = path.basename(String(body.sourceFile || ""));
 
     const existing = await this.items.findByFileName(fileName);
-    if (existing) assertCanWrite(existing, user, "replace");
+    const stored = await exists(path.join(this.library.profilesDir, fileName));
+    if (existing || stored) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
+    let createdBy = existing ? existing.createdBy : stored ? null : user.id;
 
     if (sourceFile && sourceFile.endsWith(".json") && sourceFile !== fileName) {
       const previous = await this.items.findByFileName(sourceFile);
-      if (previous) assertCanWrite(previous, user, "rename");
+      const sourceStored = await exists(path.join(this.library.profilesDir, sourceFile));
+      if (previous || sourceStored) {
+        assertCanWrite(previous ?? { createdBy: null }, user, "rename");
+        if (!existing) createdBy = previous?.createdBy ?? null;
+      }
     }
 
     await mkdir(this.library.profilesDir, { recursive: true });
@@ -129,7 +136,7 @@ export class ProfileService {
       name,
       sha256: await sha256File(target),
       document,
-      createdBy: user.id
+      createdBy
     });
 
     return { item, profile: document, file: fileName, compatibility: await this.reportForDocument(document) };

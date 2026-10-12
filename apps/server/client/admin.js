@@ -17,23 +17,19 @@
     return "";
   }
 
-  function message(text, isError) {
-    var box = el("message");
-    box.textContent = text;
-    box.className = "ws-message " + (isError ? "ws-error" : "ws-ok");
-    if (!text) box.classList.add("ws-hidden");
-    if (text) setTimeout(function () {
-      box.classList.add("ws-hidden");
-    }, 6000);
-  }
-
+  function message(text, isError) { WPUI.notify(text, isError); }
+  var pendingWrites = new Map();
   function api(path, options) {
     var init = options ? Object.assign({}, options) : {};
     init.headers = Object.assign({ "Content-Type": "application/json" }, init.headers || {});
     if (init.method && init.method !== "GET") init.headers["X-CSRF-Token"] = readCookie("wp_starter_csrf");
     init.credentials = "same-origin";
 
-    return fetch(path, init).then(function (response) {
+    var key = (init.method || "GET") + path + (init.body || "");
+    if (init.method && pendingWrites.has(key)) return pendingWrites.get(key);
+    var button = document.activeElement && document.activeElement.tagName === "BUTTON" ? document.activeElement : null;
+    if (button && init.method) button.disabled = true;
+    var operation = fetch(path, init).then(function (response) {
       if (response.status === 401) {
         window.location.replace("/login.html");
         throw new Error("Not signed in.");
@@ -42,11 +38,13 @@
         if (!response.ok) throw new Error((data.error && data.error.message) || "Request failed.");
         return data;
       });
-    });
+    }).finally(function () { pendingWrites.delete(key); if (button && init.method) button.disabled = false; });
+    if (init.method) pendingWrites.set(key, operation);
+    return operation;
   }
 
   function text(value) {
-    return String(value === null || value === undefined ? "" : value);
+    return String(value === null || value === undefined ? "" : value).replace(/[&<>"']/g, function(c) { return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#039;"}[c]; });
   }
 
   function renderStats(overview) {
@@ -109,8 +107,8 @@
       "</tbody></table>";
 
     Array.prototype.forEach.call(el("invites").querySelectorAll("[data-revoke]"), function (button) {
-      button.addEventListener("click", function () {
-        if (!window.confirm("Revoke this invitation code?")) return;
+      button.addEventListener("click", async function () {
+        if (!await WPUI.confirm("Revoke this invitation code?")) return;
         api("/api/admin/invites/" + encodeURIComponent(button.getAttribute("data-revoke")), { method: "DELETE" })
           .then(function () {
             message("Invitation revoked.");
@@ -188,7 +186,7 @@
       "</tbody></table>";
 
     Array.prototype.forEach.call(el("users").querySelectorAll("[data-role]"), function (button) {
-      button.addEventListener("click", function () {
+      button.addEventListener("click", async function () {
         api("/api/admin/users/" + encodeURIComponent(button.getAttribute("data-role")) + "/role", {
           method: "POST",
           body: JSON.stringify({ role: button.getAttribute("data-next-role") })
@@ -204,7 +202,7 @@
     });
 
     Array.prototype.forEach.call(el("users").querySelectorAll("[data-status]"), function (button) {
-      button.addEventListener("click", function () {
+      button.addEventListener("click", async function () {
         api("/api/admin/users/" + encodeURIComponent(button.getAttribute("data-status")) + "/status", {
           method: "POST",
           body: JSON.stringify({ status: button.getAttribute("data-next-status") })
@@ -220,8 +218,8 @@
     });
 
     Array.prototype.forEach.call(el("users").querySelectorAll("[data-reset]"), function (button) {
-      button.addEventListener("click", function () {
-        var password = window.prompt("New password (at least 10 characters):");
+      button.addEventListener("click", async function () {
+        var password = await WPUI.dialog({title:"Reset password",message:"Enter a new password with at least 10 characters.",input:true,secret:true,label:"New password",accept:"Reset password"});
         if (!password) return;
         api("/api/admin/users/" + encodeURIComponent(button.getAttribute("data-reset")) + "/password", {
           method: "POST",
@@ -237,9 +235,9 @@
     });
 
     Array.prototype.forEach.call(el("users").querySelectorAll("[data-remove]"), function (button) {
-      button.addEventListener("click", function () {
+      button.addEventListener("click", async function () {
         var email = button.getAttribute("data-email");
-        if (!window.confirm("Delete " + email + "? Items they created stay in the shared library as unowned.")) return;
+        if (!await WPUI.confirm("Delete " + email + "? Items they created stay in the shared library as unowned.")) return;
         api("/api/admin/users/" + encodeURIComponent(button.getAttribute("data-remove")), { method: "DELETE" })
           .then(function () {
             message("Account deleted.");

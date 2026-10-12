@@ -17,7 +17,7 @@ WP Starter System is an offline-first WordPress starter build system. It has the
 
 ## Development conventions
 
-- Use Node.js 20 or newer and npm. The repository is an npm workspace with `apps/*` and `packages/*` workspaces.
+- Use Node.js 22.13 or newer and npm. The repository is an npm workspace with `apps/*` and `packages/*` workspaces. The server needs 22.13+ because it imports the built-in `node:sqlite` module.
 - TypeScript uses strict mode, ES modules, NodeNext resolution, and declaration/source-map output. Keep imports compatible with NodeNext.
 - Keep builder behavior shared in `packages/builder-core`; do not duplicate build logic in the CLI or GUI.
 - Preserve schema and manifest compatibility unless the change explicitly updates the relevant documentation, fixtures, and tests.
@@ -50,6 +50,8 @@ The CLI entry point after compilation is `apps/cli/dist/index.js`. The GUI launc
 Server tests boot an isolated application per test (`apps/server/tests/harness.mjs`): a temporary library directory, in-memory SQLite, and an ephemeral port. Run them with `npx tsc -b apps/server && node --test apps/server/tests/*.test.mjs`; they execute against `apps/server/dist`, so the TypeScript build must run first.
 
 ## Server conventions
+
+- The hosted server targets one process. API writes and build finalization share an in-process mutation lock; login/invite rate-limit counters expire in-process and reset on restart. Do not run replicas or concurrent CLI writes against the live shared library.
 
 - Keep `builder-core` permission-agnostic. Ownership, roles, and CSRF checks live in `apps/server/src/api/` and `apps/server/src/services/ownership.ts`; every write path calls `assertCanWrite`.
 - Anyone signed in reads the whole shared library; only the creator may edit or delete. Administrators manage people and invitations and get no rights over another account's items. Items with no owner (imported by the CLI) are manageable by administrators only.

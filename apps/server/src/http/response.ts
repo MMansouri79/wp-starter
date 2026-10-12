@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import { publicData } from "./public-data.js";
 
 export interface SecurityOptions {
   secureCookies: boolean;
@@ -38,7 +39,7 @@ export function sendJson(
   value: unknown,
   options: { headers?: Record<string, string> } = {}
 ): void {
-  const body = JSON.stringify(value, null, 2);
+  const body = JSON.stringify(publicData(value), null, 2);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),

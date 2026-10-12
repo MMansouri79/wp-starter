@@ -24,18 +24,12 @@ const titles = {
   builds: ["Build History", "Review, download, rebuild, or remove generated distributions."]
 };
 
-function flash(message, error = false) {
-  const el = $("#flash");
-  el.textContent = message;
-  el.className = `flash${error ? " error" : ""}`;
-  clearTimeout(flash.timer);
-  flash.timer = setTimeout(() => el.classList.add("hidden"), 5500);
-}
+function flash(message, error = false) { WPUI.notify(message, error); }
 async function request(url, options = {}) {
   const res = await fetch(url, options);
   let data;
   try { data = await res.json(); } catch { data = { message: await res.text() }; }
-  if (!res.ok) throw new Error(data.message || `Request failed (${res.status})`);
+  if (!res.ok) { const error = new Error(data.message || data.error?.message || `Request failed (${res.status})`); error.issues = data.issues; throw error; }
   return data;
 }
 function fmtBytes(n) { if (n < 1024) return `${n} B`; if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`; return `${(n / 1024 ** 2).toFixed(1)} MB`; }
@@ -183,8 +177,8 @@ function legacyEditResource(kind, id, duplicate) {
   if (kind === "colors") { semanticDraft = structuredClone(item.semantic || {}); $("#color-id").value = duplicate ? `${item.id}-copy` : item.id; $("#color-name").value = duplicate ? `${item.name} Copy` : item.name; for (const role of ["primary", "secondary", "text", "accent"]) $(`#color-${role}`).value = item.elementor[role]; goView("colors"); renderSemanticDraft(); }
   if (kind === "designSystems") { bindingDraft = structuredClone(item.fontBindings || {}); $("#ds-id").value = duplicate ? `${item.id}-copy` : item.id; $("#ds-name").value = duplicate ? `${item.name} Copy` : item.name; $("#ds-typography").value = item.typographyProfileId; $("#ds-colors").value = item.colorProfileId; goView("design-systems"); renderBindingDraft(); }
 }
-async function saveResource(kind, value) { try { const saved=await request(`/api/vnext/${kind}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) }); flash(`Saved ${value.name}.`); await refresh(); return saved; } catch (error) { flash(error.message, true); return null; } }
-async function deleteResource(kind, id) { if (!confirm(`Delete resource ${id}?`)) return; try { await request(`/api/vnext/${kind}/${encodeURIComponent(id)}`, { method: "DELETE" }); flash(`Deleted ${id}.`); await refresh(); } catch (error) { flash(error.message, true); } }
+async function saveResource(kind, value) { try { const saved=await request(`/api/vnext/${kind}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) }); flash(`Saved ${value.name}.`); await refresh(); document.dispatchEvent(new CustomEvent("wpstarter:saved", { detail: { typography:"typography", colors:"colors", designSystems:"design-systems" }[kind] })); return saved; } catch (error) { flash(error.message, true); return null; } }
+async function deleteResource(kind, id) { if (!await WPUI.confirm(`Delete resource ${id}?`)) return; try { await request(`/api/vnext/${kind}/${encodeURIComponent(id)}`, { method: "DELETE" }); flash(`Deleted ${id}.`); await refresh(); } catch (error) { flash(error.message, true); } }
 
 function legacyTemplateKey(template) { return `${template.snapshotId}\u0000${template.templateId}`; }
 function legacyTemplateSelectionFromDom() {
@@ -296,8 +290,8 @@ function renderTypographyDraft() {
   document.querySelectorAll(".remove-custom-type").forEach(button=>button.onclick=()=>{delete typographyDraft.custom[button.dataset.role];delete typographyDraft.customRoleNames[button.dataset.role];saveTypeDraft();renderTypographyDraft();});
   renderGlobalFontsDraft();
 }
-function updateTypographyDraftField(input){const id=input.dataset.role;if(!id)return;const scope=input.dataset.scope||"type",token=typographyTokenFor(scope,id);if(!token)return;if(input.dataset.shared){if(input.dataset.shared==="fontRole"&&input.value==="__add"){const label=prompt("Name this font slot (for example, Display font):");if(!label)return renderTypographyDraft();const slotId=`slot-${Date.now().toString(36)}`;typographyDraft.fontSlots[slotId]={name:label.trim()};token.fontRole=slotId;renderTypographyDraft();return;}token[input.dataset.shared]=input.dataset.shared==="weight"?Number(input.value):input.value;}if(input.dataset.dimension){token[input.dataset.dimension]||={};const unit=document.querySelector(`[data-scope="${scope}"][data-role="${CSS.escape(id)}"][data-unit="${input.dataset.dimension}"]`).value;if(input.value==="")delete token[input.dataset.dimension][activeTypeDevice];else token[input.dataset.dimension][activeTypeDevice]={value:Number(input.value),unit};}if(input.dataset.unit){const number=document.querySelector(`[data-scope="${scope}"][data-role="${CSS.escape(id)}"][data-dimension="${input.dataset.unit}"]`);if(number.value!==""){token[input.dataset.unit]||={};token[input.dataset.unit][activeTypeDevice]={value:Number(number.value),unit:input.value};}}if(input.dataset.roleName)typographyDraft.customRoleNames[id]=input.value;saveTypeDraft();}
-function renderGlobalFontsDraft(){restoreTypeDraft();const slots=Object.entries(typographyDraft.fontSlots||{}).map(([id,slot])=>`<option value="${escAttr(id)}">${esc(slot.name)}</option>`).join("");const aliases=[["primary","Primary"],["secondary","Secondary"],["text","Text"],["accent","Accent"]];const rows=[...aliases.map(([id,label])=>({id,label,token:typographyDraft.globalTypography[id],custom:false})),...(typographyDraft.globalCustomTypography||[]).map(item=>({id:item.id,label:item.name,token:item.token,custom:true}))];$("#global-font-rows").innerHTML=rows.map(({id,label,token,custom})=>`<tr><td>${custom?`<input data-global-name="${escAttr(id)}" value="${escAttr(label)}" aria-label="Custom Global Font name">`:`<strong>${label} Global Font</strong>`}</td><td><select data-scope="global" data-role="${escAttr(id)}" data-shared="fontRole">${slots}<option value="__add">+ Add slot…</option></select></td><td><select data-scope="global" data-role="${escAttr(id)}" data-shared="weight">${[100,200,300,400,500,600,700,800,900].map(w=>`<option ${Number(token.weight)===w?"selected":""}>${w}</option>`).join("")}</select></td><td><select data-scope="global" data-role="${escAttr(id)}" data-shared="style">${["normal","italic","oblique"].map(v=>`<option ${token.style===v?"selected":""}>${v}</option>`).join("")}</select></td>${TYPE_DIMENSIONS.map(([property,,units])=>`<td>${dimensionControl(id,property,units,token,"global")}</td>`).join("")}<td><select data-scope="global" data-role="${escAttr(id)}" data-shared="textTransform">${["none","uppercase","lowercase","capitalize"].map(v=>`<option ${token.textTransform===v?"selected":""}>${v}</option>`).join("")}</select></td><td><select data-scope="global" data-role="${escAttr(id)}" data-shared="textDecoration">${["none","underline","overline","line-through"].map(v=>`<option ${token.textDecoration===v?"selected":""}>${v}</option>`).join("")}</select></td><td>${custom?`<button class="tiny danger remove-global-font" data-id="${escAttr(id)}">Remove</button>`:""}</td></tr>`).join("");for(const row of rows){const select=document.querySelector(`#global-font-rows [data-role="${CSS.escape(row.id)}"][data-shared="fontRole"]`);if(select)select.value=row.token.fontRole;}document.querySelectorAll("#global-font-rows input,#global-font-rows select").forEach(input=>input.oninput=()=>{if(input.dataset.globalName){const item=typographyDraft.globalCustomTypography.find(x=>x.id===input.dataset.globalName);if(item)item.name=input.value;}else updateTypographyDraftField(input);saveTypeDraft();});document.querySelectorAll(".remove-global-font").forEach(button=>button.onclick=()=>{typographyDraft.globalCustomTypography=typographyDraft.globalCustomTypography.filter(item=>item.id!==button.dataset.id);renderGlobalFontsDraft();saveTypeDraft();});$("#global-font-fallback").value=typographyDraft.fallbackFontFamily||"sans-serif";$("#global-font-fallback").oninput=event=>{typographyDraft.fallbackFontFamily=event.target.value;saveTypeDraft();};}
+async function updateTypographyDraftField(input){const id=input.dataset.role;if(!id)return;const scope=input.dataset.scope||"type",token=typographyTokenFor(scope,id);if(!token)return;if(input.dataset.shared){if(input.dataset.shared==="fontRole"&&input.value==="__add"){const label=await WPUI.prompt("Name this font slot (for example, Display font):");if(!label)return renderTypographyDraft();const slotId=`slot-${Date.now().toString(36)}`;typographyDraft.fontSlots[slotId]={name:label.trim()};token.fontRole=slotId;renderTypographyDraft();return;}token[input.dataset.shared]=input.dataset.shared==="weight"?Number(input.value):input.value;}if(input.dataset.dimension){token[input.dataset.dimension]||={};const unit=document.querySelector(`[data-scope="${scope}"][data-role="${CSS.escape(id)}"][data-unit="${input.dataset.dimension}"]`).value;if(input.value==="")delete token[input.dataset.dimension][activeTypeDevice];else token[input.dataset.dimension][activeTypeDevice]={value:Number(input.value),unit};}if(input.dataset.unit){const number=document.querySelector(`[data-scope="${scope}"][data-role="${CSS.escape(id)}"][data-dimension="${input.dataset.unit}"]`);if(number.value!==""){token[input.dataset.unit]||={};token[input.dataset.unit][activeTypeDevice]={value:Number(number.value),unit:input.value};}}if(input.dataset.roleName)typographyDraft.customRoleNames[id]=input.value;saveTypeDraft();}
+function renderGlobalFontsDraft(){restoreTypeDraft();const slots=Object.entries(typographyDraft.fontSlots||{}).map(([id,slot])=>`<option value="${escAttr(id)}">${esc(slot.name)}</option>`).join("");const aliases=[["primary","Primary"],["secondary","Secondary"],["text","Text"],["accent","Accent"]];const rows=[...aliases.map(([id,label])=>({id,label,token:typographyDraft.globalTypography[id],custom:false})),...(typographyDraft.globalCustomTypography||[]).map(item=>({id:item.id,label:item.name,token:item.token,custom:true}))];$("#global-font-rows").innerHTML=rows.map(({id,label,token,custom})=>`<tr><td>${custom?`<input data-global-name="${escAttr(id)}" value="${escAttr(label)}" aria-label="Custom Global Font name">`:`<strong>${label} Global Font</strong>`}</td><td><select data-scope="global" data-role="${escAttr(id)}" data-shared="fontRole">${slots}<option value="__add">+ Add slot…</option></select></td><td><select data-scope="global" data-role="${escAttr(id)}" data-shared="weight">${[100,200,300,400,500,600,700,800,900].map(w=>`<option ${Number(token.weight)===w?"selected":""}>${w}</option>`).join("")}</select></td><td><select data-scope="global" data-role="${escAttr(id)}" data-shared="style">${["normal","italic","oblique"].map(v=>`<option ${token.style===v?"selected":""}>${v}</option>`).join("")}</select></td>${TYPE_DIMENSIONS.map(([property,,units])=>`<td>${dimensionControl(id,property,units,token,"global")}</td>`).join("")}<td><select data-scope="global" data-role="${escAttr(id)}" data-shared="textTransform">${["none","uppercase","lowercase","capitalize"].map(v=>`<option ${token.textTransform===v?"selected":""}>${v}</option>`).join("")}</select></td><td><select data-scope="global" data-role="${escAttr(id)}" data-shared="textDecoration">${["none","underline","overline","line-through"].map(v=>`<option ${token.textDecoration===v?"selected":""}>${v}</option>`).join("")}</select></td><td>${custom?`<button class="tiny danger remove-global-font" data-id="${escAttr(id)}">Remove</button>`:""}</td></tr>`).join("");for(const row of rows){const select=document.querySelector(`#global-font-rows [data-role="${CSS.escape(row.id)}"][data-shared="fontRole"]`);if(select)select.value=row.token.fontRole;}document.querySelectorAll("#global-font-rows input,#global-font-rows select").forEach(input=>input.oninput=async()=>{if(input.dataset.globalName){const item=typographyDraft.globalCustomTypography.find(x=>x.id===input.dataset.globalName);if(item)item.name=input.value;}else await updateTypographyDraftField(input);saveTypeDraft();});document.querySelectorAll(".remove-global-font").forEach(button=>button.onclick=()=>{typographyDraft.globalCustomTypography=typographyDraft.globalCustomTypography.filter(item=>item.id!==button.dataset.id);renderGlobalFontsDraft();saveTypeDraft();});$("#global-font-fallback").value=typographyDraft.fallbackFontFamily||"sans-serif";$("#global-font-fallback").oninput=event=>{typographyDraft.fallbackFontFamily=event.target.value;saveTypeDraft();};}
 function freshColorDraft(){return {elementor:{primary:"#4054b2",secondary:"#54595f",text:"#7a7a7a",accent:"#61ce70"},custom:[]};}
 function renderColorDraft(){ colorDraft ||= freshColorDraft(); const rows=[...["primary","secondary","text","accent"].map(id=>({id,name:id[0].toUpperCase()+id.slice(1),value:colorDraft.elementor[id],fixed:true})),...(colorDraft.custom||[])]; $("#color-rows").innerHTML=rows.map(row=>`<div class="color-row" data-color-row="${escAttr(row.id)}">${row.fixed?`<strong>${esc(row.name)}</strong>`:`<input data-color-name="${escAttr(row.id)}" value="${escAttr(row.name)}" aria-label="Custom color name">`}<input type="color" data-color-picker="${escAttr(row.id)}" value="${/^#[0-9a-f]{6}$/i.test(row.value)?row.value:"#000000"}"><input class="hex-input" data-color-hex="${escAttr(row.id)}" value="${escAttr(row.value)}" pattern="#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?" aria-label="Hexadecimal color">${row.fixed?"":`<button class="tiny danger remove-custom-color" data-id="${escAttr(row.id)}">Remove</button>`}</div>`).join("");
   const find=(id)=>colorDraft.elementor[id]!==undefined?{get:()=>colorDraft.elementor[id],set:v=>colorDraft.elementor[id]=v}:{get:()=>colorDraft.custom.find(x=>x.id===id)?.value,set:v=>colorDraft.custom.find(x=>x.id===id).value=v};
@@ -309,8 +303,8 @@ function renderColorDraft(){ colorDraft ||= freshColorDraft(); const rows=[...["
 function renderBindingDraft(){ const type=(state.vnext?.typography||[]).find(item=>item.id===$("#ds-typography").value); const entries=[...Object.entries(type?.roles||{}),...Object.entries(type?.custom||{}),...Object.entries(type?.globalTypography||{}).map(([id,token])=>[`global-${id}`,token]),...(type?.globalCustomTypography||[]).map(item=>[`global-${item.id}`,item.token])]; const tokens=entries.map(([,token])=>token); const slots=[...new Set(tokens.map(token=>token.fontRole).filter(Boolean))]; let hasFaceErrors=false; $("#ds-binding-list").innerHTML=slots.map(slot=>{const label=type?.fontSlots?.[slot]?.name||slot.replace(/[-_]/g," "),current=bindingDraft[slot]||"",font=(state.fonts||[]).find(item=>item.id===current),faces=new Set((font?.faces||[]).map(face=>`${face.weight}:${face.style}`)),missing=entries.filter(([,token])=>token.fontRole===slot&&!faces.has(`${token.weight}:${token.style||"normal"}`)).map(([role,token])=>`${TYPE_ROLES.find(x=>x[0]===role)?.[1]||type?.customRoleNames?.[role]||((role.startsWith("global-")?"Global "+role.slice(7):role).replace(/[-_]/g," "))} needs ${token.weight} ${token.style||"normal"}`);if(current&&missing.length)hasFaceErrors=true;return `<div class="font-assignment"><label><strong>${esc(label)}</strong><select data-slot="${escAttr(slot)}"><option value="">Choose a Font Profile…</option>${(state.fonts||[]).map(fontOption=>`<option value="${escAttr(fontOption.id)}" ${fontOption.id===current?"selected":""}>${esc(fontOption.name)}</option>`).join("")}</select></label><small class="${missing.length&&current?"status-missing":""}">${!current?"Required":missing.length?esc(missing.join(" · ")):esc((font.faces||[]).map(face=>`${face.weight} ${face.style}`).join(" · "))}</small></div>`;}).join("")||`<div class="empty">Select a Typography Profile first.</div>`;
   document.querySelectorAll("#ds-binding-list select").forEach(select=>select.onchange=()=>{if(select.value)bindingDraft[select.dataset.slot]=select.value;else delete bindingDraft[select.dataset.slot];renderBindingDraft();}); const ready=slots.length>0&&slots.every(slot=>bindingDraft[slot])&&!hasFaceErrors; $("#ds-readiness").className=`readiness ${ready?"ready":""}`;$("#ds-readiness").textContent=ready?"Ready to save. Every requested weight and style is available offline.":hasFaceErrors?"Some typography rows request font faces that the selected Font Profile does not contain.":`${slots.filter(slot=>!bindingDraft[slot]).length} font assignment(s) still required.`; }
 function renderVNext(){const resources=state.vnext||{typography:[],colors:[],designSystems:[]};const cards=(items,kind,empty)=>items.length?items.map(item=>`<div class="card"><div><strong>${esc(item.name)}</strong><details class="resource-details"><summary>Details</summary><code>${esc(item.id)}</code></details></div><div class="action-list"><button class="tiny edit-resource" data-kind="${kind}" data-id="${escAttr(item.id)}">Edit</button><button class="tiny duplicate-resource" data-kind="${kind}" data-id="${escAttr(item.id)}">Duplicate</button><button class="tiny danger delete-resource" data-kind="${kind}" data-id="${escAttr(item.id)}">Delete</button></div></div>`).join(""):`<div class="empty">${empty}</div>`;$("#typography-list").innerHTML=cards(resources.typography,"typography","No typography profiles yet.");$("#colors-list").innerHTML=cards(resources.colors,"colors","No color profiles yet.");$("#design-systems-list").innerHTML=cards(resources.designSystems,"designSystems","No design systems yet.");const oldType=$("#ds-typography").value,oldColor=$("#ds-colors").value;$("#ds-typography").innerHTML=`<option value="">Choose typography…</option>`+resources.typography.map(x=>`<option value="${escAttr(x.id)}">${esc(x.name)}</option>`).join("");$("#ds-colors").innerHTML=`<option value="">Choose colors…</option>`+resources.colors.map(x=>`<option value="${escAttr(x.id)}">${esc(x.name)}</option>`).join("");if(resources.typography.some(x=>x.id===oldType))$("#ds-typography").value=oldType;if(resources.colors.some(x=>x.id===oldColor))$("#ds-colors").value=oldColor;renderTypographyDraft();renderColorDraft();renderBindingDraft();document.querySelectorAll(".edit-resource").forEach(b=>b.onclick=()=>editResource(b.dataset.kind,b.dataset.id,false));document.querySelectorAll(".duplicate-resource").forEach(b=>b.onclick=()=>editResource(b.dataset.kind,b.dataset.id,true));document.querySelectorAll(".delete-resource").forEach(b=>b.onclick=()=>deleteResource(b.dataset.kind,b.dataset.id));}
-function resetTypographyEditor(force=false){if(!force&&!confirm("Reset the entire typography draft?"))return;typographyDraft=freshTypographyDraft();$("#type-id").value="";$("#type-name").value="";sessionStorage.removeItem("wpstarter.typographyDraft");renderTypographyDraft();}
-function resetColorEditor(){if(!confirm("Reset this color profile?"))return;colorDraft=freshColorDraft();$("#color-id").value="";$("#color-name").value="";renderColorDraft();}
+async function resetTypographyEditor(force=false){if(!force&&!await WPUI.confirm("Reset the entire typography draft?"))return;typographyDraft=freshTypographyDraft();$("#type-id").value="";$("#type-name").value="";sessionStorage.removeItem("wpstarter.typographyDraft");renderTypographyDraft();return true;}
+async function resetColorEditor(){if(!await WPUI.confirm("Reset this color profile?"))return;colorDraft=freshColorDraft();$("#color-id").value="";$("#color-name").value="";renderColorDraft();return true;}
 function resetDesignEditor(){bindingDraft={};$("#ds-id").value="";$("#ds-name").value="";$("#ds-typography").value="";$("#ds-colors").value="";renderBindingDraft();}
 function editResource(kind,id,duplicate){const item=(state.vnext?.[kind]||[]).find(x=>x.id===id);if(!item)return;if(kind==="typography"){typographyDraft=structuredClone({roles:item.roles||{},custom:item.custom||{},fontSlots:item.fontSlots||{},customRoleNames:item.customRoleNames||{},globalTypography:item.globalTypography||{},globalCustomTypography:item.globalCustomTypography||[],fallbackFontFamily:item.fallbackFontFamily||"sans-serif"});$("#type-id").value=duplicate?"":item.id;$("#type-name").value=duplicate?`${item.name} Copy`:item.name;saveTypeDraft();goView("typography");renderTypographyDraft();}if(kind==="colors"){colorDraft=structuredClone({elementor:item.elementor,custom:item.custom||Object.entries(item.semantic||{}).map(([id,value])=>({id,name:id.replace(/[-_]/g," "),value}))});$("#color-id").value=duplicate?"":item.id;$("#color-name").value=duplicate?`${item.name} Copy`:item.name;goView("colors");renderColorDraft();}if(kind==="designSystems"){bindingDraft=structuredClone(item.fontBindings||{});$("#ds-id").value=duplicate?"":item.id;$("#ds-name").value=duplicate?`${item.name} Copy`:item.name;$("#ds-typography").value=item.typographyProfileId;$("#ds-colors").value=item.colorProfileId;goView("design-systems");renderBindingDraft();}}
 function templateKey(template){return template.id;} function templateSelectionFromDom(){return [...document.querySelectorAll("#build-elementor-templates input.elementor-template")].filter(x=>x.checked).map(x=>x.dataset.id);} function elementorTemplatesForBuild(){return Array.isArray(state.elementorTemplates)?state.elementorTemplates:[];}
@@ -320,7 +314,7 @@ function normalizedName(value){return String(value).toLowerCase().replace(/[^a-z
 function mappingTargets(){const system=(state.vnext?.designSystems||[]).find(x=>x.id===$("#build-design-system").value),type=(state.vnext?.typography||[]).find(x=>x.id===system?.typographyProfileId),colors=(state.vnext?.colors||[]).find(x=>x.id===system?.colorProfileId);const targets=[];for(const id of Object.keys(colors?.elementor||{}))targets.push({value:`color:${id}`,label:`${id[0].toUpperCase()+id.slice(1)} — selected Design System`});for(const token of colors?.custom||[])targets.push({value:`color:${token.id}`,label:`${token.name} — selected Design System`});for(const [id] of Object.entries(colors?.semantic||{}))targets.push({value:`color:${id}`,label:`${id.replace(/[-_]/g," ")} — selected Design System`});for(const [id] of Object.entries(type?.roles||{}))targets.push({value:`typography:${id}`,label:`${TYPE_ROLES.find(x=>x[0]===id)?.[1]||id} — selected Design System`});for(const [id] of Object.entries(type?.custom||{}))targets.push({value:`typography:${id}`,label:`${type.customRoleNames?.[id]||id} — selected Design System`});for(const token of type?.globalCustomTypography||[])targets.push({value:`typography:${token.id}`,label:`${token.name} — custom Global Font`});for(const id of ["primary","secondary","text","accent"]){targets.push({value:`elementor:color:${id}`,label:`Elementor default color ${id}`});targets.push({value:`elementor:typography:${id}`,label:`Elementor default typography ${id}`});}return targets;}
 function renderTemplateMappings(){const selected=new Set(currentElementorSelection||[]),templates=elementorTemplatesForBuild().filter(t=>selected.has(t.id)),targets=mappingTargets(),targetByName=new Map(targets.map(t=>[normalizedName(t.label.split(" — ")[0]),t.value]));const refs=new Map();for(const t of templates)for(const ref of t.globalReferences||[]){if(!refs.has(ref.reference))refs.set(ref.reference,{...ref,templates:[]});refs.get(ref.reference).templates.push(t.name);}const unresolved=[...refs.values()].filter(ref=>{const suffix=ref.reference.split(":").pop();const dsTarget=`${ref.kind}:${suffix}`,defaultTarget=`elementor:${ref.kind}:${suffix}`,automatic=(["primary","secondary","text","accent"].includes(suffix)?(targets.some(t=>t.value===dsTarget)?dsTarget:defaultTarget):targetByName.get(normalizedName(ref.name)));if(automatic&&!templateMappingDraft[ref.reference])templateMappingDraft[ref.reference]=automatic;return !templateMappingDraft[ref.reference];});$("#template-mappings").classList.toggle("hidden",unresolved.length===0);$("#template-mapping-rows").innerHTML=unresolved.map(ref=>`<label class="mapping-row"><span><strong>${esc(ref.name)}</strong><small>${esc(ref.kind)} · used by ${esc(ref.templates.join(", "))}</small></span><select data-reference="${escAttr(ref.reference)}"><option value="">Choose a destination…</option>${targets.filter(t=>t.value.startsWith(ref.kind+":")||t.value.startsWith(`elementor:${ref.kind}:`)).map(t=>`<option value="${escAttr(t.value)}">${esc(t.label)}</option>`).join("")}</select></label>`).join("");document.querySelectorAll("[data-reference]").forEach(select=>select.onchange=()=>{if(select.value)templateMappingDraft[select.dataset.reference]=select.value;else delete templateMappingDraft[select.dataset.reference];renderTemplateMappings();});}
 function syncElementorRequirement(){const required=(currentElementorSelection||[]).length>0;document.querySelectorAll("#build-plugins input.plugin-selection").forEach(input=>{if(input.dataset.slug!=="elementor")return;input.disabled=required||input.dataset.available!=="1";if(required)input.checked=true;});}
-function renderElementorLibrary(){const rows=elementorTemplatesForBuild();$("#elementor-templates-body").innerHTML=rows.map(t=>`<tr><td><strong>${esc(t.name)}</strong><br><details class="resource-details"><summary>Details</summary><code>${esc(t.id)}</code></details></td><td>${esc(t.type)}</td><td>${esc(t.sourceDomain)}</td><td>${esc(t.snapshotName)}</td><td>${esc(new Date(t.importedAt).toLocaleString())}</td><td><button class="tiny danger delete-template" data-id="${escAttr(t.id)}">Delete</button></td></tr>`).join("")||`<tr><td colspan="6" class="empty">No templates in the independent library.</td></tr>`;document.querySelectorAll(".delete-template").forEach(b=>b.onclick=async()=>{if(!confirm("Delete this template from the library?"))return;try{await request(`/api/elementor-templates/${encodeURIComponent(b.dataset.id)}`,{method:"DELETE"});await refresh();}catch(e){flash(e.message,true);}});const sources=[...new Set(rows.map(t=>t.sourceDomain))],types=[...new Set(rows.map(t=>t.type))];$("#template-source").innerHTML=`<option value="">All source sites</option>`+sources.map(x=>`<option>${esc(x)}</option>`).join("");$("#template-type").innerHTML=`<option value="">All types</option>`+types.map(x=>`<option>${esc(x)}</option>`).join("");}
+function renderElementorLibrary(){const rows=elementorTemplatesForBuild();$("#elementor-templates-body").innerHTML=rows.map(t=>`<tr><td><strong>${esc(t.name)}</strong><br><details class="resource-details"><summary>Details</summary><code>${esc(t.id)}</code></details></td><td>${esc(t.type)}</td><td>${esc(t.sourceDomain)}</td><td>${esc(t.snapshotName)}</td><td>${esc(new Date(t.importedAt).toLocaleString())}</td><td><button class="tiny danger delete-template" data-id="${escAttr(t.id)}">Delete</button></td></tr>`).join("")||`<tr><td colspan="6" class="empty">No templates in the independent library.</td></tr>`;document.querySelectorAll(".delete-template").forEach(b=>b.onclick=async()=>{if(!await WPUI.confirm("Delete this template from the library?"))return;try{await request(`/api/elementor-templates/${encodeURIComponent(b.dataset.id)}`,{method:"DELETE"});await refresh();}catch(e){flash(e.message,true);}});const sources=[...new Set(rows.map(t=>t.sourceDomain))],types=[...new Set(rows.map(t=>t.type))];$("#template-source").innerHTML=`<option value="">All source sites</option>`+sources.map(x=>`<option>${esc(x)}</option>`).join("");$("#template-type").innerHTML=`<option value="">All types</option>`+types.map(x=>`<option>${esc(x)}</option>`).join("");}
 
 function render() {
   const previousConfig = $("#build-config")?.value ?? "";
@@ -330,7 +324,8 @@ function render() {
   const previousCompareLeft = $("#compare-left")?.value ?? "";
   const previousCompareRight = $("#compare-right")?.value ?? "";
   $("#version").textContent = `GUI ${state.version}`;
-  $("#library").textContent = state.library;
+  // The hosted server never reports its library path, so an absent value stays blank.
+  $("#library").textContent = state.library ?? "";
   $("#stat-packages").textContent = state.packages.length;
   $("#stat-configs").textContent = state.configs.length;
   $("#stat-profiles").textContent = state.profiles.length;
@@ -365,7 +360,7 @@ function render() {
   $("#profile-select").innerHTML = profileOpts || `<option value="">No profiles created</option>`;
   if (state.profiles.some(p => p.file === previousProfile)) $("#profile-select").value = previousProfile;
 
-  $("#profiles-manager").innerHTML = state.profiles.map(p => { const fontNames = profileFontNames(p); return `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.elementorTemplates ? ` · ${p.elementorTemplates} Elementor templates` : ""}${fontNames ? ` · Fonts: ${esc(fontNames)}` : ""}${p.designSystem ? ` · Design: ${esc(p.designSystem)}` : ""}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`; }).join("") || `<div class="empty">No profiles yet. Create one from the Build page.</div>`;
+  $("#profiles-manager").innerHTML = state.profiles.map(p => { const fontNames = profileFontNames(p); return `<div class="profile-card"><div class="profile-main"><strong>${esc(p.name)}</strong><small>${esc(p.locale)} · WP ${esc(p.wordpress)} · ${esc(p.theme)} · ${p.plugins} plugins</small><small>${p.config ? `Snapshot: ${esc(p.config)}` : "Packages only"}${p.elementorTemplates ? ` · ${p.elementorTemplates} Elementor templates` : ""}${fontNames ? ` · Fonts: ${esc(fontNames)}` : ""}${p.designSystem ? ` · Design: ${esc(p.designSystem)}` : ""}${p.updatedAt ? ` · Updated ${new Date(p.updatedAt).toLocaleString()}` : ""}</small></div><div class="profile-card-actions"><button class="tiny edit-profile" data-file="${escAttr(p.file)}">Edit</button><button class="tiny duplicate-profile" data-file="${escAttr(p.file)}">Duplicate</button><button class="tiny primary-ish build-profile-now" data-file="${escAttr(p.file)}">Build</button><button class="tiny danger delete-profile" data-file="${escAttr(p.file)}">Delete</button></div></div>`; }).join("") || `<div class="empty">No profiles yet. Create a profile to choose your packages and optional resources.</div>`;
 
   const buildCard = (b, compact = false) => `<div class="build-card"><div><strong>${esc(b.file)}</strong><small>${b.profile ? `Profile: ${esc(b.profile)} · ` : ""}${b.locale ? `${esc(b.locale)} · ` : ""}${b.configurationEnabled ? "Snapshot" : "Packages only"} · ${fmtBytes(b.size)} · ${new Date(b.modifiedAt).toLocaleString()}</small>${b.compatibility?.status === "upgrade-warning" ? `<small class="compatibility-inline">Upgrade warning: ${esc(b.compatibility.warnings.map(w => `${w.slug} ${w.exportedVersion} → ${w.selectedVersion}`).join(", "))}</small>` : ""}${!compact && b.sha256 ? `<code class="hash">${esc(b.sha256)}</code>` : ""}</div><div class="build-card-actions"><a class="tiny primary-ish" href="/download/${encodeURIComponent(b.file)}">Download</a>${b.profileFile ? `<button class="tiny rebuild" data-profile="${escAttr(b.profileFile)}">Build again</button>` : ""}${compact ? "" : `<button class="tiny danger delete-build" data-file="${escAttr(b.file)}">Delete</button>`}</div></div>`;
   $("#recent-builds").innerHTML = state.builds.slice(0, 5).map(b => buildCard(b, true)).join("") || `<div class="empty">No builds yet.</div>`;
@@ -384,16 +379,26 @@ function render() {
 }
 
 async function uploadFiles(files, kind) {
-  for (const file of files) {
-    flash(`Importing ${file.name}…`);
-    await request(`/api/${kind}?filename=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: file });
-  }
-  flash(`${files.length} file${files.length === 1 ? "" : "s"} imported.`);
-  await refresh();
+  if (!files.length) return;
+  if (document.body.dataset.uploading) return flash("An import is already running. Wait for it to finish, then try again.", true);
+  document.body.dataset.uploading = "1";
+  const inputs=[...document.querySelectorAll("#package-file,#font-file,#config-file")];
+  inputs.forEach(input=>input.disabled=true);
+  const failures=[];
+  let imported=0;
+  try {
+    for (const [index,file] of files.entries()) {
+      flash(`Importing ${index+1} of ${files.length}: ${file.name}…`);
+      try { await request(`/api/${kind}?filename=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "Content-Type": "application/zip" }, body: file }); imported++; }
+      catch(error){failures.push(`${file.name}: ${error.message}`);}
+    }
+    await refresh();
+    flash(`${imported} file${imported === 1 ? "" : "s"} imported.${failures.length?" "+failures.join("; "):""}`, failures.length>0);
+  } finally { delete document.body.dataset.uploading; inputs.forEach(input=>{input.disabled=false;input.value="";}); }
 }
 async function removePackage(btn) {
   const label = `${btn.dataset.slug}@${btn.dataset.version}${btn.dataset.variant ? ` (${btn.dataset.variant})` : ""}`;
-  if (!confirm(`Remove ${label} from the local package library? Existing profiles pinned to it will stop resolving.`)) return;
+  if (!await WPUI.confirm(`Remove ${label} from the local package library? Existing profiles pinned to it will stop resolving.`)) return;
   try {
     const q = new URLSearchParams({ kind: btn.dataset.kind, slug: btn.dataset.slug, version: btn.dataset.version });
     if (btn.dataset.variant) q.set("variant", btn.dataset.variant);
@@ -405,7 +410,7 @@ async function removePackage(btn) {
 
 async function removeFontSystem(id) {
   const system = (state.fonts || []).find(item => item.id === id);
-  if (!confirm(`Remove font profile ${system?.name || id}? Build profiles using it will stop resolving until another font profile is selected.`)) return;
+  if (!await WPUI.confirm(`Remove font profile ${system?.name || id}? Build profiles using it will stop resolving until another font profile is selected.`)) return;
   try {
     await request(`/api/fonts?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     flash(`Removed font profile ${system?.name || id}.`);
@@ -452,13 +457,24 @@ function safetyState(key, value) {
 function bindInspectTabs(root) {
   const buttons = root.querySelectorAll(".inspect-tab");
   const panels = root.querySelectorAll(".inspect-tab-panel");
-  buttons.forEach(button => {
-    button.onclick = () => {
-      const target = button.dataset.tab;
-      buttons.forEach(item => item.classList.toggle("active", item === button));
-      panels.forEach(panel => panel.classList.toggle("active", panel.dataset.tab === target));
+  function select(button) {
+    buttons.forEach(item => { item.classList.toggle("active", item === button); item.setAttribute("aria-selected", String(item === button)); item.tabIndex = item === button ? 0 : -1; });
+    panels.forEach(panel => { panel.classList.toggle("active", panel.dataset.tab === button.dataset.tab); });
+  }
+  buttons.forEach((button, index) => {
+    button.id = `${root.id}-tab-${index}`;
+    button.setAttribute("role", "tab");
+    const panel = [...panels].find(panel => panel.dataset.tab === button.dataset.tab);
+    if (panel) { panel.id = `${root.id}-panel-${index}`; panel.setAttribute("role", "tabpanel"); panel.setAttribute("aria-labelledby", button.id); button.setAttribute("aria-controls", panel.id); }
+    button.onclick = () => { select(button); WPUI.animate(panel); };
+    button.onkeydown = event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowRight" ? 1 : buttons.length - 1)) % buttons.length;
+      select(buttons[next]); buttons[next].focus();
     };
   });
+  if (buttons.length) select([...buttons].find(button => button.classList.contains("active")) || buttons[0]);
 }
 
 function changeChip(kind) {
@@ -833,6 +849,7 @@ async function createProfile() {
     } else {
       flash(`Profile ${data.profile.name} saved${configId ? "." : " without a configuration snapshot."}`);
     }
+    document.dispatchEvent(new CustomEvent("wpstarter:saved", { detail: "profiles" }));
     currentEditingProfileFile = "";
     $("#cancel-profile-edit").classList.add("hidden");
     $("#create-profile").textContent = "Save Profile";
@@ -894,7 +911,7 @@ async function loadProfileIntoEditor(file, duplicate = false, { notify = true } 
 
     $("#cancel-profile-edit").classList.toggle("hidden", duplicate);
     $("#create-profile").textContent = duplicate ? "Save Copy" : "Save Changes";
-    goView("build");
+    goView("profiles");
     if (notify) flash(duplicate ? `Duplicating ${profile.name}. Choose a new name and save.` : `Editing ${profile.name}.`);
   } catch (e) { flash(e.message, true); }
 }
@@ -917,7 +934,7 @@ function resetProfileEditor() {
 
 async function deleteProfile(file) {
   const profile = state.profiles.find(p => p.file === file);
-  if (!confirm(`Delete profile ${profile?.name || file}? Generated build ZIPs will not be deleted.`)) return;
+  if (!await WPUI.confirm(`Delete profile ${profile?.name || file}? Generated build ZIPs will not be deleted.`)) return;
   try {
     await request(`/api/profiles/${encodeURIComponent(file)}`, { method: "DELETE" });
     if (currentEditingProfileFile === file) resetProfileEditor();
@@ -928,7 +945,7 @@ async function deleteProfile(file) {
 
 async function deleteConfig(id) {
   const config = state.configs.find(item => item.id === id);
-  if (!confirm(`Delete configuration snapshot ${config?.name || id}? Imported Elementor templates will remain in the template library.`)) return;
+  if (!await WPUI.confirm(`Delete configuration snapshot ${config?.name || id}? Imported Elementor templates will remain in the template library.`)) return;
   try {
     await request(`/api/configs/${encodeURIComponent(id)}`, { method: "DELETE" });
     flash(`Deleted configuration snapshot ${config?.name || id}.`);
@@ -937,7 +954,7 @@ async function deleteConfig(id) {
 }
 
 async function deleteBuild(file) {
-  if (!confirm(`Delete generated build ${file}?`)) return;
+  if (!await WPUI.confirm(`Delete generated build ${file}?`)) return;
   try {
     await request(`/api/builds?file=${encodeURIComponent(file)}`, { method: "DELETE" });
     flash(`Deleted ${file}.`);
@@ -961,7 +978,7 @@ function showBuildProgress(percent, message, status = "running", detail = "") {
   $("#build-progress-bar").style.width = `${bounded}%`;
   $("#build-progress-percent").textContent = `${Math.round(bounded)}%`;
   $("#build-progress-label").textContent = message || "Building…";
-  $("#build-progress-detail").textContent = detail || (status === "running" ? "The Builder is working locally. You can keep this window open." : "");
+  $("#build-progress-detail").textContent = detail || (status === "running" ? "The build is running. You can browse the workspace while it finishes." : "");
 }
 
 function formatBuildFailure(message) {
@@ -985,6 +1002,7 @@ async function pollBuildJob(id) {
 }
 
 async function build() {
+  if ($("#build-button").disabled) return;
   const profileFile = $("#profile-select").value;
   if (!profileFile) return flash("Create a profile first.", true);
   try {
@@ -1012,11 +1030,11 @@ async function build() {
 function setBusy(on) { document.body.classList.toggle("busy", on); }
 
 $("#type-devices").onclick = event => { const button=event.target.closest("[data-device]");if(!button)return;activeTypeDevice=button.dataset.device;document.querySelectorAll("#type-devices .device").forEach(item=>item.classList.toggle("active",item===button));renderTypographyDraft(); };
-$("#type-add-custom").onclick = () => {restoreTypeDraft();const name=prompt("Custom typography name (for example, Eyebrow):");if(!name?.trim())return;const id=`custom-${Date.now().toString(36)}`;typographyDraft.custom[id]={fontRole:"accent",weight:600,style:"normal",textTransform:"none",textDecoration:"none",size:{desktop:{value:14,unit:"px"}},lineHeight:{desktop:{value:1.3,unit:""}}};typographyDraft.customRoleNames[id]=name.trim();saveTypeDraft();renderTypographyDraft();};
+$("#type-add-custom").onclick = async () => {restoreTypeDraft();const name=await WPUI.prompt("Custom typography name (for example, Eyebrow):");if(!name?.trim())return;const id=`custom-${Date.now().toString(36)}`;typographyDraft.custom[id]={fontRole:"accent",weight:600,style:"normal",textTransform:"none",textDecoration:"none",size:{desktop:{value:14,unit:"px"}},lineHeight:{desktop:{value:1.3,unit:""}}};typographyDraft.customRoleNames[id]=name.trim();saveTypeDraft();renderTypographyDraft();};
 $("#type-clear-device").onclick = () => {restoreTypeDraft();for(const token of [...Object.values(typographyDraft.roles),...Object.values(typographyDraft.custom)])for(const [property] of TYPE_DIMENSIONS)if(token[property])delete token[property][activeTypeDevice];saveTypeDraft();renderTypographyDraft();};
 $("#type-save").onclick = async () => {restoreTypeDraft();const saved=await saveResource("typography", { schemaVersion: 1, id: $("#type-id").value.trim(), name: $("#type-name").value.trim(), roles: typographyDraft.roles, custom: typographyDraft.custom, fontSlots: typographyDraft.fontSlots, customRoleNames: typographyDraft.customRoleNames, globalTypography: typographyDraft.globalTypography, globalCustomTypography: typographyDraft.globalCustomTypography, fallbackFontFamily: typographyDraft.fallbackFontFamily });if(saved){$("#type-id").value=saved.id;sessionStorage.removeItem("wpstarter.typographyDraft");}};
 $("#type-reset").onclick = resetTypographyEditor;
-$("#global-font-add-custom").onclick = () => {restoreTypeDraft();const name=prompt("Name this Elementor Global Font (for example, Eyebrow):");if(!name?.trim())return;const id=`global-${Date.now().toString(36)}`;typographyDraft.globalCustomTypography.push({id,name:name.trim(),token:structuredClone(typographyDraft.globalTypography.text)});saveTypeDraft();renderGlobalFontsDraft();};
+$("#global-font-add-custom").onclick = async () => {restoreTypeDraft();const name=await WPUI.prompt("Name this Elementor Global Font (for example, Eyebrow):");if(!name?.trim())return;const id=`global-${Date.now().toString(36)}`;typographyDraft.globalCustomTypography.push({id,name:name.trim(),token:structuredClone(typographyDraft.globalTypography.text)});saveTypeDraft();renderGlobalFontsDraft();};
 $("#color-add-custom").onclick = () => {colorDraft ||= freshColorDraft();colorDraft.custom.push({id:`color-${Date.now().toString(36)}`,name:"Custom color",value:"#000000"});renderColorDraft();};
 $("#color-save").onclick = async () => {const saved=await saveResource("colors", { schemaVersion: 1, id: $("#color-id").value.trim(), name: $("#color-name").value.trim(), elementor: colorDraft.elementor, custom: colorDraft.custom });if(saved)$("#color-id").value=saved.id;};
 $("#color-reset").onclick = resetColorEditor;
@@ -1028,7 +1046,7 @@ $("#template-search").oninput = renderElementorChecklist;
 $("#template-source").onchange = renderElementorChecklist;
 $("#template-type").onchange = renderElementorChecklist;
 
-document.querySelectorAll(".nav").forEach(btn => btn.onclick = () => { if (btn.dataset.view !== "sample-content" && !SampleContentUI.confirmLeave()) return; goView(btn.dataset.view); });
+document.querySelectorAll(".nav").forEach(btn => btn.onclick = () => goView(btn.dataset.view));
 $("#refresh").onclick = () => refresh().catch(e => flash(e.message, true));
 $("#package-file").onchange = e => uploadFiles([...e.target.files], "packages").catch(e => flash(e.message, true));
 $("#font-file").onchange = e => uploadFiles([...e.target.files], "fonts").catch(e => flash(e.message, true));
@@ -1061,4 +1079,5 @@ $("#config-inspector").addEventListener("click", e => { if (e.target === $("#con
 $("#compare-configs").onclick = compareConfigs;
 $("#close-comparison").onclick = () => $("#config-comparison").close();
 $("#config-comparison").addEventListener("click", e => { if (e.target === $("#config-comparison")) $("#config-comparison").close(); });
+SampleContentUI.init({ request: (...args) => request(...args), refresh: () => refresh(), flash });
 refresh().catch(e => flash(e.message, true));

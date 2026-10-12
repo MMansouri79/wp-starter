@@ -47,7 +47,8 @@ export class VNextResourceService {
 
     const repository = this.repositories[kind];
     const existing = typeof body.id === "string" && body.id ? await repository.findById(body.id) : null;
-    if (existing) assertCanWrite(existing, user, "replace");
+    const stored = typeof body.id === "string" && (await this.library.vnext(kind).list()).some((row) => row.id === body.id);
+    if (existing || stored) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
 
     const saved = await this.write(kind, body);
     const id = String((saved as { id?: unknown }).id ?? "");
@@ -58,7 +59,7 @@ export class VNextResourceService {
       name: String((saved as { name?: unknown }).name ?? name),
       sha256: resourceHash(saved),
       document: saved,
-      createdBy: existing?.createdBy ?? user.id
+      createdBy: existing ? existing.createdBy : stored ? null : user.id
     });
   }
 

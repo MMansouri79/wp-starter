@@ -40,7 +40,7 @@ if command -v curl >/dev/null 2>&1; then
   if ! health="$(curl --fail --silent --show-error --max-time 10 "$HEALTH_URL")"; then
     echo "check-disk: CRITICAL $HEALTH_URL did not answer" >&2
     status=1
-  elif ! grep -q '"status":"ok"' <<<"$health"; then
+  elif ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health"; then
     echo "check-disk: CRITICAL server reports degraded health: $health" >&2
     status=1
   else

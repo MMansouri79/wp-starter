@@ -1,0 +1,14 @@
+.git
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+.tmp
+artifacts
+builds
+private-packages
+**/*.local.json
+**/.env
+**/.env.*
+apps/server/data
+graphify-out

@@ -117,6 +117,11 @@ export class ResourceRepository {
     await this.db.run(`DELETE FROM ${this.table} WHERE id = ?`, [id]);
   }
 
+  /** Repairs pre-hardening derived-template ownership from its source snapshot. */
+  async assignUnowned(id: string, owner: string): Promise<void> {
+    await this.db.run(`UPDATE ${this.table} SET created_by = ? WHERE id = ? AND created_by IS NULL`, [owner, id]);
+  }
+
   /** Drops rows whose ids are no longer present in the file registry. */
   async pruneMissing(ids: string[]): Promise<number> {
     const rows = await this.db.all<{ id: string }>(`SELECT id FROM ${this.table}`);

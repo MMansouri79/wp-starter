@@ -754,6 +754,11 @@ export function createGuiServer() {
         res.end(data);
         return;
       }
+      const uiAssets = { "/ui.js": "text/javascript; charset=utf-8", "/workspace.js": "text/javascript; charset=utf-8", "/design.css": "text/css; charset=utf-8" };
+      if (req.method === "GET" && Object.hasOwn(uiAssets, url.pathname)) {
+        await serveFile(res, path.join(publicDir, url.pathname.slice(1)), uiAssets[url.pathname]);
+        return;
+      }
       if (req.method === "GET" && url.pathname === "/app.js") {
         await serveFile(res, path.join(publicDir, "app.js"), "text/javascript; charset=utf-8");
         return;

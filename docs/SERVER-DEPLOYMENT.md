@@ -22,7 +22,7 @@ Everyone signed in can read the whole shared library. Only the account that crea
 ## 1. Prerequisites
 
 - A Linux VPS with sudo (Debian/Ubuntu commands below)
-- Node.js 20 or newer
+- Node.js 22.13 or newer (the server imports the built-in `node:sqlite` module, which is unflagged only from 22.13)
 - PostgreSQL 14 or newer
 - nginx
 - A DNS record for the subdomain, e.g. `builder.example.com` → the server IP
@@ -30,7 +30,7 @@ Everyone signed in can read the whole shared library. Only the account that crea
 ```bash
 sudo apt update
 sudo apt install -y postgresql nginx certbot python3-certbot-nginx git curl
-# Install Node 20+ from your distribution or nodesource, then verify:
+# Install Node 22.13+ from your distribution or nodesource, then verify:
 node --version
 ```
 
@@ -89,6 +89,8 @@ Set at minimum:
 `WP_STARTER_BASE_URL` starting with `https://` enables `Secure` cookies and HSTS automatically. Keep `WP_STARTER_SERVER_HOST=127.0.0.1` so only nginx can reach the app.
 
 Registration is invite-only by default (`WP_STARTER_ALLOW_OPEN_REGISTRATION=false`). Leave it that way for a client-facing deployment; open registration only ever grants the least-privileged `client` role.
+
+Failed sign-ins and invitation redemption are limited per client IP and normalized email. `WP_STARTER_LOGIN_MAX_ATTEMPTS` defaults to 10 and `WP_STARTER_LOGIN_LOCKOUT_SECONDS` to 900. Counters are bounded, expire in this process, and reset on restart. Trust forwarded IPs only behind the configured nginx proxy. Run one server process; API mutations and build finalization are serialized in-process. Stop the service before using the CLI to change its library; restart reconciles metadata and preserves owners.
 
 ## 6. systemd
 
@@ -159,7 +161,29 @@ Set `WP_STARTER_BACKUP_DIR` and `WP_STARTER_BACKUP_RETENTION_DAYS` to override t
 zcat /var/backups/wp-starter/wp-starter-*.sql.gz | head -20
 ```
 
-Shared file store (packages, snapshots, build artifacts) — back up `/var/lib/wp-starter` with your usual filesystem snapshot or `rsync` job. `pg_dump` alone is not a complete backup.
+Shared file store (packages, snapshots, fonts, sample assets, profiles, and builds): `pg_dump` alone is not a complete backup. Install the file-store script and the coordinated PostgreSQL backup wrapper:
+
+```bash
+sudo install -m 750 -o root -g root deploy/scripts/backup-file-store.sh /usr/local/bin/wp-starter-backup-files
+sudo install -m 750 -o root -g root deploy/scripts/backup-system.sh /usr/local/bin/wp-starter-backup-system
+sudo systemd-run --wait --pipe --collect --unit=wp-starter-backup \
+  --property=EnvironmentFile=/etc/wp-starter/server.env /usr/local/bin/wp-starter-backup-system
+```
+
+Use this coordinated command in root's cron instead of the database-only job above. It stops the app, dumps PostgreSQL, archives the file store into one `set-*` directory, marks success with `complete`, and restarts the previously running service even on failure. Expect brief downtime; prevent CLI or other writers during the backup. Both scripts inherit the server environment through systemd, including its database URL. Completed sets and incomplete sets older than the configured retention are removed. Archive files use private permissions. PostgreSQL is required by this wrapper; for SQLite, stop the service and archive the entire store, including its database.
+
+Restore only a set with a `complete` marker. Stop the service and restore into a fresh empty data directory and database:
+
+```bash
+sudo systemctl stop wp-starter-server
+# Replace these paths with the selected matching backup set.
+sudo tar -xzf /var/backups/wp-starter/set-TIMESTAMP/wp-starter-files-TIMESTAMP.tar.gz -C /var/lib/wp-starter
+zcat /var/backups/wp-starter/set-TIMESTAMP/wp-starter-TIMESTAMP.sql.gz | psql "$WP_STARTER_DATABASE_URL"
+sudo chown -R wpstarter:wpstarter /var/lib/wp-starter
+sudo systemctl start wp-starter-server
+```
+
+Load the database URL from the protected service environment; never paste credentials into shared logs. Verify accounts, ownership, package checksums, and a downloaded build after restore. The clean-VPS backup/restore rehearsal is tracked separately in `docs/planning/V1-DEPLOYMENT-ACCEPTANCE.md`.
 
 Disk space:
 
@@ -196,6 +220,106 @@ sudo systemctl restart wp-starter-server
 ```
 
 Migrations apply on start. An in-flight build cannot be resumed across a restart, so it is marked failed with an actionable message; re-queue it from the Build History screen.
+
+## Docker deployment alongside an existing application
+
+When another application already owns ports 80/443, use `deploy/docker/compose.yaml`.
+This creates a separate `wp-starter` Compose project, PostgreSQL database and networks.
+Only its proxy publishes a host port; neither the app nor PostgreSQL publishes a port.
+Run exactly one app container. The CRM's Compose project and database remain separate.
+
+Copy the current source tree to `/opt/wp-starter-system` (include uncommitted changes when
+deploying from staging, exclude secrets and Windows `node_modules`/compiled output).
+Copy the existing builder library to `/var/lib/wp-starter` and give UID/GID 1000 ownership,
+which matches the image's `node` user. The original Windows library should remain available
+until migration acceptance. Imported library items appear without an owner and are
+manageable by administrators. Old offline build ZIPs remain files; they do not become
+hosted build-history jobs. Build new artifacts through the hosted UI.
+
+Create root-only `/etc/wp-starter/compose.env`:
+
+```dotenv
+WP_STARTER_DB_PASSWORD=GENERATED_HEX_PASSWORD
+WP_STARTER_LAN_IP=192.168.100.140
+WP_STARTER_LAN_PORT=47901
+WP_STARTER_RELEASE=YOUR_RELEASE_ID
+```
+
+Create root-only `/etc/wp-starter/server.env` with:
+
+```dotenv
+WP_STARTER_SESSION_SECRET=GENERATED_SECRET_AT_LEAST_32_CHARACTERS
+WP_STARTER_BASE_URL=http://192.168.100.140:47901
+WP_STARTER_SECURE_COOKIES=false
+WP_STARTER_DATABASE_SSL=false
+WP_STARTER_ADMIN_EMAIL=admin@mediasanat.ir
+WP_STARTER_ADMIN_PASSWORD=GENERATED_INITIAL_PASSWORD
+WP_STARTER_ALLOW_OPEN_REGISTRATION=false
+WP_STARTER_MAX_UPLOAD_BYTES=1073741824
+WP_STARTER_ACCOUNT_QUOTA_BYTES=21474836480
+WP_STARTER_MIN_FREE_BYTES=5368709120
+WP_STARTER_BUILD_WORKERS=1
+WP_STARTER_BUILD_RETENTION_HOURS=720
+WP_STARTER_LOG_LEVEL=info
+```
+
+Generate fresh secrets on the server; do not copy staging sessions/passwords. The DB
+password should be hex so it is safe in the database URL. Keep both environment files
+mode 600. Remove both bootstrap administrator variables after the administrator exists.
+
+```bash
+cd /opt/wp-starter-system
+sudo docker compose --env-file /etc/wp-starter/compose.env -f deploy/docker/compose.yaml build app
+sudo docker compose --env-file /etc/wp-starter/compose.env -f deploy/docker/compose.yaml up -d
+sudo docker compose --env-file /etc/wp-starter/compose.env -f deploy/docker/compose.yaml ps
+curl -fsS http://192.168.100.140:47901/api/health
+```
+
+Docker's restart policy brings containers back after reboot. The image builds TypeScript
+on Linux and installs only production dependencies in the final image. Its build stage
+has a separate `verification` target with PHP and shell utilities for the full check:
+
+```bash
+sudo docker build --target verification -t wp-starter-verification -f deploy/docker/Dockerfile .
+sudo docker run --rm wp-starter-verification
+```
+
+Use a disposable PostgreSQL database and `WP_STARTER_TEST_PG_URL` to run the optional
+PostgreSQL integration test. Do not target the production database for tests.
+If the Alpine CDN is unreachable, select an accessible official mirror through
+`--build-arg ALPINE_MIRROR=https://dl-4.alpinelinux.org/alpine` for this test-only stage.
+The app has a 2 GiB memory limit and one
+build worker; PostgreSQL has a 1 GiB limit. Raise these only after measuring usage.
+
+For coordinated backups, install `deploy/scripts/backup-docker.sh` as
+`/usr/local/bin/wp-starter-backup-docker` (root-owned, mode 750). Schedule it as root:
+
+```cron
+15 3 * * * root /usr/local/bin/wp-starter-backup-docker >> /var/log/wp-starter-backup-docker.log 2>&1
+```
+
+The script stops the app, archives the library, dumps its isolated database and includes
+protected configuration. It restarts a previously running app on success or failure and
+retains sets for 14 days. Prevent CLI writers during backup. Copies on this VM protect
+against application mistakes; copy complete backup sets to another device for host/disk
+failures. To restore into empty library/database locations, stop the app, extract
+`library.tar.gz` into `/var/lib/wp-starter`, restore UID/GID 1000, then pipe
+`gzip -dc database.sql.gz` into `docker compose ... exec -T database psql -U wp_starter -d wp_starter`.
+Restore environment files as root mode 600 and start the app after verifying contents.
+
+Install `deploy/scripts/check-disk.sh` for this layout with
+`WP_STARTER_HEALTH_URL=http://192.168.100.140:47901/api/health`; use a 10 GiB
+warning threshold if writes stop below 5 GiB. Record output in a root-owned log
+or connect its exit status to your alerting system. The deployed instance's
+details are recorded in `docs/PRODUCTION-LAN.md`.
+
+LAN deployment uses HTTP; keep router forwarding disabled for this port. Public launch
+requires the chosen domain (e.g. `wp.mediasanat.ir`) pointing to the public static IP,
+an HTTPS virtual host on the existing edge proxy, router forwarding to that proxy,
+`WP_STARTER_BASE_URL=https://wp.mediasanat.ir`, and secure cookies enabled. The existing
+CRM proxy must preserve the visitor's forwarding headers through a trusted private
+connection; the LAN proxy currently replaces them with its direct caller's address.
+Do not point public port 443 directly at the plain HTTP LAN listener.
 
 ## Troubleshooting
 

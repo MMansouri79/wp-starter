@@ -29,7 +29,7 @@ function withoutInternalPaths<T extends { filePath?: string; zip?: string }>(ite
 }
 
 export function registerLibraryRoutes(router: Router, app: AppContext): void {
-  const { config, library, log } = app;
+  const { config, log } = app;
 
   const viewerOf = (context: Parameters<typeof requireUser>[0]): User => requireUser(context);
 
@@ -78,7 +78,6 @@ export function registerLibraryRoutes(router: Router, app: AppContext): void {
 
     sendJson(context.res, 200, {
       version: app.version,
-      library: library.root,
       host: config.baseUrl,
       currentUser: publicUser(viewer),
       capabilities: {

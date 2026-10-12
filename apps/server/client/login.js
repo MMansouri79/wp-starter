@@ -18,6 +18,8 @@
     errorBox.textContent = message;
     errorBox.classList.remove("ws-hidden");
     noticeBox.classList.add("ws-hidden");
+    errorBox.tabIndex = -1;
+    errorBox.focus();
   }
 
   function showNotice(message) {
@@ -36,7 +38,7 @@
     var creating = mode === "register";
 
     inviteField.classList.toggle("ws-hidden", !creating);
-    nameField.style.display = creating ? "" : "none";
+    nameField.hidden = !creating;
     submit.textContent = creating ? "Create account" : "Sign in";
     toggle.textContent = creating ? "Sign in instead" : "Create an account";
     togglePrompt.textContent = creating ? "Already have an account?" : "Have an invitation code?";
@@ -44,8 +46,11 @@
       ? "Create your account with the invitation code you received."
       : "Sign in to the shared starter library.";
     passwordInput.setAttribute("autocomplete", creating ? "new-password" : "current-password");
+    passwordInput.minLength = creating ? 10 : 1;
     clearMessages();
   }
+
+  passwordInput.minLength = 1;
 
   toggle.addEventListener("click", function () {
     setMode(state.mode === "login" ? "register" : "login");
@@ -53,6 +58,7 @@
 
   form.addEventListener("submit", function (event) {
     event.preventDefault();
+    if (submit.disabled) return;
     clearMessages();
     submit.disabled = true;
 

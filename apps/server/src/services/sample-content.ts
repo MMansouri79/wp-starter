@@ -57,7 +57,8 @@ export class SampleContentService {
   async save(body: Record<string, unknown>, user: User): Promise<SampleContent> {
     const id = typeof body.id === "string" && body.id ? body.id : undefined;
     const existing = id ? await this.items.findById<SampleContent>("content", id) : null;
-    if (existing) assertCanWrite(existing, user, "replace");
+    const stored = id ? (await this.registry().list()).content.some((row) => row.id === id) : false;
+    if (existing || stored) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
 
     const saved = await this.registry().save(body, id);
     await this.items.save("content", {
@@ -65,7 +66,7 @@ export class SampleContentService {
       name: nameOf("content", saved),
       sha256: "",
       document: saved,
-      createdBy: existing?.createdBy ?? user.id
+      createdBy: existing ? existing.createdBy : stored ? null : user.id
     });
     return saved;
   }
@@ -73,7 +74,8 @@ export class SampleContentService {
   async saveTerm(body: Record<string, unknown>, user: User): Promise<SampleTerm> {
     const id = typeof body.id === "string" && body.id ? body.id : undefined;
     const existing = id ? await this.items.findById<SampleTerm>("terms", id) : null;
-    if (existing) assertCanWrite(existing, user, "replace");
+    const stored = id ? (await this.registry().list()).terms.some((row) => row.id === id) : false;
+    if (existing || stored) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
 
     const saved = await this.registry().saveTerm(body, id);
     await this.items.save("terms", {
@@ -81,7 +83,7 @@ export class SampleContentService {
       name: nameOf("terms", saved),
       sha256: "",
       document: saved,
-      createdBy: existing?.createdBy ?? user.id
+      createdBy: existing ? existing.createdBy : stored ? null : user.id
     });
     return saved;
   }
@@ -89,7 +91,8 @@ export class SampleContentService {
   async saveAttribute(body: Record<string, unknown>, user: User): Promise<SampleGlobalAttribute> {
     const id = typeof body.id === "string" && body.id ? body.id : undefined;
     const existing = id ? await this.items.findById<SampleGlobalAttribute>("attributes", id) : null;
-    if (existing) assertCanWrite(existing, user, "replace");
+    const stored = id ? (await this.registry().list()).attributes.some((row) => row.id === id) : false;
+    if (existing || stored) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
 
     const saved = await this.registry().saveAttribute(body, id);
     await this.items.save("attributes", {
@@ -97,7 +100,7 @@ export class SampleContentService {
       name: nameOf("attributes", saved),
       sha256: "",
       document: saved,
-      createdBy: existing?.createdBy ?? user.id
+      createdBy: existing ? existing.createdBy : stored ? null : user.id
     });
     return saved;
   }
@@ -139,7 +142,8 @@ export class SampleContentService {
 
   async saveAsset(assetId: string, body: Record<string, unknown>, user: User): Promise<SampleAsset> {
     const existing = await this.items.findById<SampleAsset>("assets", assetId);
-    if (existing) assertCanWrite(existing, user, "replace");
+    const stored = (await this.registry().list()).assets.some((row) => row.id === assetId);
+    if (existing || stored) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
 
     const asset = await this.registry().saveAsset(assetId, body);
     await this.items.save("assets", {
@@ -147,7 +151,7 @@ export class SampleContentService {
       name: nameOf("assets", asset),
       sha256: asset.sha256,
       document: asset,
-      createdBy: existing?.createdBy ?? user.id
+      createdBy: existing ? existing.createdBy : null
     });
     return asset;
   }
@@ -158,7 +162,7 @@ export class SampleContentService {
     }
 
     const existing = await this.items.findById(resource, id);
-    if (existing) assertCanWrite(existing, user, "delete");
+    assertCanWrite(existing ?? { createdBy: null }, user, "delete");
 
     await this.registry().remove(resource, id);
     await this.items.remove(resource, id);

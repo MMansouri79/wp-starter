@@ -14,7 +14,7 @@
   const set = (row,path,value) => {const keys=path.split('.');let parent=row;for(const key of keys.slice(0,-1))parent=parent[key] ??= {};parent[keys.at(-1)]=value;};
   function field(label,path,type='text',options={}) {
     const value=get(draft,path);
-    const attr=`data-field="${esc(path)}"`;
+    const attr=`id="sample-field-${esc(path.replaceAll('.','-'))}" data-field="${esc(path)}"`;
     if(type==='checkbox')return `<label class="check"><input type="checkbox" ${attr} ${value?'checked':''}>${esc(label)}</label>`;
     if(type==='select')return `<label>${esc(label)}<select ${attr}>${options.values.map(v=>{const [key,name]=Array.isArray(v)?v:[v,v];return `<option value="${esc(key)}" ${value===key?'selected':''}>${esc(name)}</option>`;}).join('')}</select></label>`;
     if(type==='textarea')return `<label>${esc(label)}<textarea ${attr} rows="${options.rows||4}">${esc(value)}</textarea></label>`;
@@ -37,26 +37,39 @@
     const product=draft.kind==='product', type=draft.productType;
     const terms=taxonomy=>library.terms.filter(t=>t.taxonomy===taxonomy);
     let html=`<h2>${draft.id?'Edit':'Create'} sample ${draft.kind}</h2><p id="sample-errors" role="alert"></p><div class="sample-fields">${field('Title','title')}${field('Slug (blank generates from title)','slug')}${product?field('Product type','productType','select',{values:['simple','variable','grouped','external']}):''}</div><div class="sample-format-toolbar"><button data-format="strong">Bold</button><button data-format="em">Italic</button><button data-format="p">Paragraph</button><button data-format="h2">Heading</button><button data-action="insert-image">Insert local image</button><button data-action="preview">Preview safely</button></div>${field(product?'Description (HTML/source)':'Content (HTML/source)','content','textarea',{rows:10})}${field(product?'Short description':'Excerpt',product?'shortDescription':'excerpt','textarea')}<iframe id="sample-preview" title="Sample preview" sandbox hidden></iframe>`;
-    html+=section('Publish and organization',field('Status','status','select',{values:['draft','pending',['publish','Published'],'private',['future','Scheduled']]})+field('Publish date (ISO with timezone)','publishAt','text',{placeholder:'2030-01-01T09:00:00+03:30'})+multi('Categories','categoryIds',terms(product?'product_cat':'category'))+multi('Tags','tagIds',terms(product?'product_tag':'post_tag'))+(product?multi('Brands','brandIds',terms('product_brand')):'')+imageField('Featured image','featuredImageId'),true);
+    html+=section('Taxonomies and publishing',field('Status','status','select',{values:['draft','pending',['publish','Published'],'private',['future','Scheduled']]})+field('Publish date (ISO with timezone)','publishAt','text',{placeholder:'2030-01-01T09:00:00+03:30'})+multi('Categories','categoryIds',terms(product?'product_cat':'category'))+multi('Tags','tagIds',terms(product?'product_tag':'post_tag'))+(product?multi('Brands','brandIds',terms('product_brand')):'')+imageField('Featured image','featuredImageId'),true);
     if(product){
-      html+=section('General',(type==='simple'||type==='external'?priceFields():'')+field('Tax status','taxStatus','select',{values:['taxable','shipping','none']})+field('Tax class slug (blank = standard)','taxClass')+(type==='external'?field('External product URL','externalUrl','url')+field('Button text','buttonText'):'')+(type==='simple'?downloads():''),true);
+      html+=section('Product settings',(type==='simple'||type==='external'?priceFields():'')+field('Tax status','taxStatus','select',{values:['taxable','shipping','none']})+field('Tax class slug (blank = standard)','taxClass')+(type==='external'?field('External product URL','externalUrl','url')+field('Button text','buttonText'):'')+(type==='simple'?downloads():''),true);
       if(type!=='grouped'&&type!=='external')html+=section('Inventory',invFields())+section('Shipping (destination store units)',shipFields());
       else html+=section('Identifiers',field('SKU','inventory.sku')+field('Global unique ID','inventory.globalUniqueId'));
       html+=section('Attributes',attributesEditor());
       if(type==='variable')html+=section('Variations',variationEditor());
       const products=library.content.filter(c=>c.kind==='product'&&c.id!==draft.id);
       html+=section('Linked products',multi('Upsells','upsellIds',products)+multi('Cross-sells','crossSellIds',products)+(type==='grouped'?multi('Grouped children','childrenIds',products):''));
-      html+=section('Gallery (selection order is display order)',multi('Gallery images','galleryIds',library.assets.filter(a=>a.kind==='image'))+`<p>Order: ${(draft.galleryIds||[]).map(id=>esc(library.assets.find(a=>a.id===id)?.filename||id)).join(' → ')}</p>`);
+      html+=section('Media gallery (selection order is display order)',multi('Gallery images','galleryIds',library.assets.filter(a=>a.kind==='image'))+`<p>Order: ${(draft.galleryIds||[]).map(id=>esc(library.assets.find(a=>a.id===id)?.filename||id)).join(' → ')}</p>`);
       html+=section('Advanced',field('Catalog visibility','catalogVisibility','select',{values:['visible','catalog','search','hidden']})+field('Featured','featured','checkbox')+field('Reviews enabled','reviewsAllowed','checkbox')+field('Purchase note','purchaseNote','textarea')+field('Menu order','menuOrder','integer'));
     }else html+=section('Discussion and format',field('Comments','commentStatus','select',{values:['open','closed']})+field('Pingbacks','pingStatus','select',{values:['open','closed']})+field('Sticky post','sticky','checkbox')+field('Post format (theme dependent)','format','select',{values:['standard','aside','gallery','link','image','quote','status','video','audio','chat']}));
-    box.innerHTML=html+'<div class="profile-actions"><button data-action="save" class="primary">Save sample</button><button data-action="cancel" class="secondary">Close editor</button><small>New content defaults to draft. Author is the destination setup administrator.</small></div>';
+    box.innerHTML=html+'<div class="profile-actions save-actions"><button data-action="save" class="primary">Save sample</button><button data-action="cancel" class="secondary">Close editor</button><small>New content defaults to draft. Author is the destination setup administrator.</small></div>';
+    box.querySelector('h2').after(box.querySelector('.save-actions'));
   }
   function newVariation(values={}) {return {id:uid('variation'),attributes:Object.fromEntries(draft.attributes.filter(a=>a.variation).map(a=>[a.id,values[a.id]||''])),enabled:true,description:'',pricing:pricing(),inventory:inventory(),shipping:shipping(),taxClass:'parent',...downloadFields()};}
   function changeType(type) {const next=fresh('product');next.productType=type;draft.productType=type;for(const key of ['pricing','virtual','downloadable','downloads','downloadLimit','downloadExpiry','externalUrl','buttonText','childrenIds','variations','defaultAttributes'])delete draft[key];if(type==='simple')Object.assign(draft,{pricing:pricing(),...downloadFields()});if(type==='external')Object.assign(draft,{pricing:pricing(),externalUrl:'',buttonText:''});if(type==='grouped')draft.childrenIds=[];if(type==='variable'){draft.variations=[];draft.defaultAttributes={};}else draft.attributes.forEach(a=>a.variation=false);if(['grouped','external'].includes(type)){draft.inventory={...inventory(),sku:draft.inventory.sku,globalUniqueId:draft.inventory.globalUniqueId};draft.shipping=shipping();}}
   async function call(url,method,body){return api(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
-  async function save(){try{const saved=await call(draft.id?`/api/sample-content/${encodeURIComponent(draft.id)}`:'/api/sample-content',draft.id?'PUT':'POST',draft);draft=copy(saved);dirty=false;await refresh();renderEditor();flash('Sample saved. Select it in a build profile to install it.');}catch(e){$('#sample-errors').textContent=e.message;flash(e.message,true);}}
-  function checkLeave(){return !dirty||confirm('Discard unsaved sample-content changes?');}
-  function renderLibrary(){const search=($('#sample-search').value||'').toLowerCase();$('#sample-list').innerHTML=library.content.filter(row=>`${row.title} ${row.slug}`.toLowerCase().includes(search)).map(row=>`<div class="card"><div><strong>${esc(row.title)}</strong><small>${esc(row.kind)} ${esc(row.productType||'')} · ${esc(row.slug)} · ${esc(row.status)}</small></div><div class="action-list"><button data-edit="${row.id}">Edit</button><button data-duplicate="${row.id}" class="secondary">Duplicate</button><button data-delete="content" data-id="${row.id}" class="danger">Delete</button></div></div>`).join('')||'<p>No samples yet.</p>';renderSelection();}
+  let saving=false;
+  async function save(){
+    if(saving)return;
+    const title=$('[data-field="title"]');
+    if(!WPUI.validate($('#sample-editor'),[{input:title,message:!draft.title.trim()?'Enter a title.':null}]))return;
+    saving=true;const button=$('[data-action="save"]');button.disabled=true;
+    try{const saved=await call(draft.id?`/api/sample-content/${encodeURIComponent(draft.id)}`:'/api/sample-content',draft.id?'PUT':'POST',draft);draft=copy(saved);dirty=false;await refresh();renderEditor();flash('Sample saved. Select it in a build profile to install it.');}
+    catch(e){
+      const issues=(e.issues||[]).map(issue=>{const input=[...$('#sample-editor').querySelectorAll('[data-field]')].find(input=>issue.field===input.dataset.field||issue.field.endsWith('.'+input.dataset.field));return input?{input,message:issue.message}:null;}).filter(Boolean);
+      if(issues.length)WPUI.validate($('#sample-editor'),issues);
+      $('#sample-errors').textContent=e.message;flash(e.message,true);
+    }finally{saving=false;if(button.isConnected)button.disabled=false;}
+  }
+  async function checkLeave(){if(!dirty)return true;if(!await WPUI.discard())return false;draft=null;termDraft={};globalDraft={};dirty=false;renderEditor();renderResources();return true;}
+  function renderLibrary(){const search=($('#sample-search').value||'').toLowerCase();$('#sample-list').innerHTML=library.content.filter(row=>(!$('#sample-kind-filter')?.value||row.kind===$('#sample-kind-filter').value)&&`${row.title} ${row.slug}`.toLowerCase().includes(search)).map(row=>`<div class="card"><div><strong>${esc(row.title)}</strong><small>${esc(row.kind)} ${esc(row.productType||'')} · ${esc(row.slug)} · ${esc(row.status)}</small></div><div class="action-list"><button data-edit="${row.id}">Edit</button><button data-duplicate="${row.id}" class="secondary">Duplicate</button><button data-delete="content" data-id="${row.id}" class="danger">Delete</button></div></div>`).join('')||'<p>No samples yet.</p>';renderSelection();}
   function closure(){const selected=new Set(roots),queue=[...roots];for(let i=0;i<queue.length;i++){const r=library.content.find(c=>c.id===queue[i]);if(r?.kind==='product')for(const id of [...r.upsellIds,...r.crossSellIds,...(r.childrenIds||[])])if(!selected.has(id)){selected.add(id);queue.push(id);}}return [...selected];}
   function renderSelection(){const selected=closure();$('#build-sample-content').innerHTML=library.content.map(row=>`<label class="check"><input type="checkbox" data-sample-select="${row.id}" ${selected.includes(row.id)?'checked':''}><span>${esc(row.title)} <small>${row.kind}${selected.includes(row.id)&&!roots.includes(row.id)?' · Required linked product':''}</small></span></label>`).join('')||'<small>Create samples in Sample Content first.</small>';}
   function renderResources(){
@@ -70,26 +83,26 @@
   function renderGlobalEditor(){$('#sample-global-editor').innerHTML=`<form id="sample-global-form"><h3>${globalDraft.id?'Edit':'Add'} global attribute</h3><div class="sample-fields">${resourceInput('Name','name',globalDraft)}${resourceInput('Slug (ASCII, up to 28 characters)','slug',globalDraft)}<label>Sort order<select name="orderBy">${['menu_order','name','name_num','id'].map(v=>`<option ${v===(globalDraft.orderBy||'menu_order')?'selected':''}>${v}</option>`).join('')}</select></label><label class="check"><input name="hasArchives" type="checkbox" ${globalDraft.hasArchives?'checked':''}>Enable archives</label></div><button type="submit">Save attribute</button><button type="button" data-action="new-global" class="secondary">New attribute</button></form>`;}
   async function action(event){const button=event.target.closest('button');if(!button)return;
     try {
-      if(button.dataset.edit){if(!checkLeave())return;draft=copy(library.content.find(c=>c.id===button.dataset.edit));dirty=false;renderEditor();return;}
+      if(button.dataset.edit){if(!await checkLeave())return;draft=copy(library.content.find(c=>c.id===button.dataset.edit));dirty=false;renderEditor();return;}
       if(button.dataset.duplicate){await call(`/api/sample-content/${button.dataset.duplicate}/duplicate`,'POST',{});await refresh();return;}
-      if(button.dataset.delete){if(!confirm('Delete this resource? Referenced resources cannot be removed.'))return;const kind=button.dataset.delete;await api(`/api/sample-content/${kind==='content'?'':kind+'/'}${button.dataset.id}`,{method:'DELETE'});await refresh();return;}
-      if(button.dataset.editTerm){termDraft=copy(library.terms.find(t=>t.id===button.dataset.editTerm));renderTermEditor();return;}
-      if(button.dataset.editGlobal){globalDraft=copy(library.attributes.find(a=>a.id===button.dataset.editGlobal));renderGlobalEditor();return;}
+      if(button.dataset.delete){if(!await WPUI.confirm('Delete this resource? Referenced resources cannot be removed.'))return;const kind=button.dataset.delete;await api(`/api/sample-content/${kind==='content'?'':kind+'/'}${button.dataset.id}`,{method:'DELETE'});await refresh();return;}
+      if(button.dataset.editTerm){if(!await checkLeave())return;termDraft=copy(library.terms.find(t=>t.id===button.dataset.editTerm));renderTermEditor();return;}
+      if(button.dataset.editGlobal){if(!await checkLeave())return;globalDraft=copy(library.attributes.find(a=>a.id===button.dataset.editGlobal));renderGlobalEditor();return;}
       if(button.dataset.saveAsset){const body={};document.querySelectorAll(`[data-asset-id="${button.dataset.saveAsset}"]`).forEach(input=>body[input.dataset.assetMeta]=input.value);await call(`/api/sample-content/assets/${button.dataset.saveAsset}`,'PUT',body);dirty=false;flash('Asset metadata saved.');await refresh();return;}
-      if(button.dataset.action==='new-term'){termDraft={};renderTermEditor();return;}
-      if(button.dataset.action==='new-global'){globalDraft={};renderGlobalEditor();return;}
+      if(button.dataset.action==='new-term'){if(!await checkLeave())return;termDraft={};renderTermEditor();return;}
+      if(button.dataset.action==='new-global'){if(!await checkLeave())return;globalDraft={};renderGlobalEditor();return;}
       if(!draft)return;
       if(button.dataset.format){const input=$('[data-field="content"]');const start=input.selectionStart,end=input.selectionEnd,tag=button.dataset.format;draft.content=input.value.slice(0,start)+`<${tag}>`+input.value.slice(start,end)+`</${tag}>`+input.value.slice(end);input.value=draft.content;dirty=true;return;}
       if(button.dataset.removePath){get(draft,button.dataset.removePath).splice(Number(button.dataset.index),1);dirty=true;renderEditor();return;}
       if(button.dataset.addDownload){get(draft,button.dataset.addDownload).push({id:uid('download'),name:'',assetId:''});dirty=true;renderEditor();return;}
       switch(button.dataset.action){
         case 'save':await save();return;
-        case 'cancel':if(checkLeave()){draft=null;dirty=false;renderEditor();}return;
+        case 'cancel':if(await checkLeave()){draft=null;dirty=false;renderEditor();}return;
         case 'preview':{const frame=$('#sample-preview');frame.hidden=false;const sanitized=draft.content.replace(/\{\{sample-asset:([a-z0-9-]+)\}\}/g,'/api/sample-content/assets/$1');frame.srcdoc=`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'none';"><article>${sanitized}</article>`;return;}
-        case 'insert-image':{const images=library.assets.filter(a=>a.kind==='image');if(!images.length){flash('Import an image below first.',true);return;}const index=prompt(images.map((a,i)=>`${i+1}. ${a.filename}`).join('\n')+'\nChoose image number:');const image=images[Number(index)-1];if(image){draft.content+=`<img src="{{sample-asset:${image.id}}}" alt="${esc(image.alt)}">`;dirty=true;renderEditor();}return;}
+        case 'insert-image':{const images=library.assets.filter(a=>a.kind==='image');if(!images.length){flash('Import an image in the Media tab first.',true);return;}const id=await WPUI.pickAsset(images);const image=images.find(asset=>asset.id===id);if(image){draft.content+=`<img src="{{sample-asset:${image.id}}}" alt="${esc(image.alt)}">`;dirty=true;renderEditor();}return;}
         case 'add-attribute':draft.attributes.push({id:uid('attribute'),name:'',options:[],visible:true,variation:false});break;
         case 'add-variation':if(draft.variations.length>=200)throw new Error('At most 200 variations.');draft.variations.push(newVariation());break;
-        case 'generate-variations':{const attrs=draft.attributes.filter(a=>a.variation);const count=attrs.reduce((n,a)=>n*a.options.length,1);if(!attrs.length||!count)throw new Error('Add variation attributes and options first.');if(count>200)throw new Error(`Would generate ${count} variations (maximum 200).`);if(!confirm(`Replace existing variations with ${count} combinations?`))return;let rows=[{}];for(const a of attrs)rows=rows.flatMap(row=>a.options.map(value=>({...row,[a.id]:value})));draft.variations=rows.map(newVariation);break;}
+        case 'generate-variations':{const attrs=draft.attributes.filter(a=>a.variation);const count=attrs.reduce((n,a)=>n*a.options.length,1);if(!attrs.length||!count)throw new Error('Add variation attributes and options first.');if(count>200)throw new Error(`Would generate ${count} variations (maximum 200).`);if(!await WPUI.confirm(`Replace existing variations with ${count} combinations?`))return;let rows=[{}];for(const a of attrs)rows=rows.flatMap(row=>a.options.map(value=>({...row,[a.id]:value})));draft.variations=rows.map(newVariation);break;}
         default:return;
       }
       dirty=true;renderEditor();
@@ -97,13 +110,15 @@
   }
   window.SampleContentUI={
     fresh,
+    isDirty:()=>dirty,
     init(options){api=options.request;refresh=options.refresh;flash=options.flash;
-      $('#sample-new-post').onclick=()=>{if(checkLeave()){draft=fresh('post');dirty=false;renderEditor();}};
-      $('#sample-new-product').onclick=()=>{if(checkLeave()){draft=fresh('product');dirty=false;renderEditor();}};
+      $('#sample-new-post').onclick=async()=>{if(await checkLeave()){draft=fresh('post');dirty=false;renderEditor();}};
+      $('#sample-new-product').onclick=async()=>{if(await checkLeave()){draft=fresh('product');dirty=false;renderEditor();}};
       $('#sample-search').oninput=renderLibrary;
       $('#view-sample-content').addEventListener('click',action);
       $('#sample-editor').addEventListener('input',event=>{const input=event.target;if(input.dataset.field){if(input.dataset.field==='productType')return;const value=input.type==='checkbox'?input.checked:input.dataset.number?(input.value===''?null:Number(input.value)):input.value;set(draft,input.dataset.field,value);dirty=true;}if(input.dataset.lines){set(draft,input.dataset.lines,input.value.split('\n').map(v=>v.trim()).filter(Boolean));dirty=true;}});
-      $('#sample-editor').addEventListener('change',event=>{const input=event.target;if(input.dataset.multi){const values=get(draft,input.dataset.multi)||[];set(draft,input.dataset.multi,input.checked?[...new Set([...values,input.value])]:values.filter(v=>v!==input.value));dirty=true;}if(input.dataset.field==='productType'){if(confirm('Changing product type resets type-specific pricing, downloads and variations. Continue?')){changeType(input.value);dirty=true;}renderEditor();}if(input.dataset.field?.endsWith('.globalId')){const a=get(draft,input.dataset.field.slice(0,-9));a.options=[];const global=library.attributes.find(g=>g.id===input.value);if(global)a.name=global.name;renderEditor();}});
+      $('#sample-editor').addEventListener('reveal-field',event=>{let element=event.target.parentElement;while(element&&element.id!=='sample-editor'){if(element.tagName==='DETAILS')element.open=true;element=element.parentElement;}});
+      $('#sample-editor').addEventListener('change',async event=>{const input=event.target;if(input.dataset.multi){const values=get(draft,input.dataset.multi)||[];set(draft,input.dataset.multi,input.checked?[...new Set([...values,input.value])]:values.filter(v=>v!==input.value));dirty=true;}if(input.dataset.field==='productType'){if(await WPUI.confirm('Changing product type resets type-specific pricing, downloads and variations. Continue?')){changeType(input.value);dirty=true;}renderEditor();}if(input.dataset.field?.endsWith('.globalId')){const a=get(draft,input.dataset.field.slice(0,-9));a.options=[];const global=library.attributes.find(g=>g.id===input.value);if(global)a.name=global.name;renderEditor();}});
       $('#view-sample-content').addEventListener('input',event=>{if(event.target.closest('#sample-term-form,#sample-global-form')||event.target.dataset.assetMeta)dirty=true;});
       $('#view-sample-content').addEventListener('change',event=>{if(event.target.matches('#sample-term-form [name="taxonomy"]')){termDraft={...termDraft,...Object.fromEntries(new FormData($('#sample-term-form'))),parentId:''};renderTermEditor();}});
       $('#view-sample-content').addEventListener('submit',async event=>{event.preventDefault();try{if(event.target.id==='sample-term-form'){const body={...termDraft,...Object.fromEntries(new FormData(event.target))};await call('/api/sample-content/terms','POST',body);termDraft={};}else if(event.target.id==='sample-global-form'){const body={...globalDraft,...Object.fromEntries(new FormData(event.target)),type:'select',hasArchives:event.target.elements.hasArchives.checked};await call('/api/sample-content/attributes','POST',body);globalDraft={};}else return;dirty=false;await refresh();flash('Resource saved.');}catch(e){flash(e.message,true);}});
@@ -112,7 +127,7 @@
       window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
       renderEditor();
     },
-    render(state){library=state.sampleContent||state;renderLibrary();renderResources();},
+    render(state){library=state.sampleContent||state;renderLibrary();if(!dirty)renderResources();},
     selectedIds(){return closure();},
     setSelectedIds(ids){roots=[...(ids||[])];renderSelection();},
     confirmLeave:checkLeave,

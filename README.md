@@ -70,6 +70,8 @@ Sample posts and products are selected per build profile (schema v9, `sampleCont
 
 ## Shared hosted web app (`apps/server`)
 
+The hosted server and its hardening work are implemented; production deployment acceptance remains outstanding. See [the hardening record](docs/planning/V1-SERVER-HARDENING.md) and [deployment acceptance checklist](docs/planning/V1-DEPLOYMENT-ACCEPTANCE.md). Run one server process; stop it before CLI mutations of the shared store. Duplicate imports preserve owners, replacements require write permission, sign-in/invite attempts are throttled, and account quota includes fonts and sample assets as well as archives.
+
 `apps/server/` hosts the same Builder for a whole team and its invited clients. It serves one canonical shared library directory plus a database for accounts, ownership, and item metadata, and it reuses the Builder UI assets from `apps/gui/public/` unchanged — the server injects an overlay at request time for the account panel, owner badges, and read-only controls.
 
 - **Sharing model**: everyone signed in reads the whole library; only the creator of an item may edit, replace, or delete it. Administrators manage people and invitations and gain no rights over another account's items. Items imported through the CLI have no owner and can only be cleaned up by an administrator.

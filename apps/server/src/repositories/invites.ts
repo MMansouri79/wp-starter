@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SqlDatabase } from "../db/driver.js";
-import { notFound } from "../errors.js";
+import { badRequest, notFound } from "../errors.js";
 import type { Invite, Role } from "../types.js";
 
 interface InviteRow {
@@ -94,7 +94,9 @@ export class InviteRepository {
   async consume(id: string, userId: string, at = new Date().toISOString()): Promise<void> {
     const invite = await this.findById(id);
     if (!invite) throw notFound("invite_not_found", "That invitation no longer exists.");
-    await this.db.run("UPDATE invites SET used_at = ?, used_by = ? WHERE id = ?", [at, userId, id]);
+    await this.db.run("UPDATE invites SET used_at = ?, used_by = ? WHERE id = ? AND used_at IS NULL", [at, userId, id]);
+    const consumed = await this.findById(id);
+    if (consumed?.usedBy !== userId) throw badRequest("invite_used", "That invitation code is no longer available.");
   }
 
   async remove(id: string): Promise<void> {

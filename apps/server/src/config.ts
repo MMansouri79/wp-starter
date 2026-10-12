@@ -27,13 +27,15 @@ export interface ServerConfig {
   database: DatabaseConfig;
   sessionSecret: string;
   sessionTtlHours: number;
+  loginMaxAttempts: number;
+  loginLockoutSeconds: number;
   /** `Secure` cookies plus HSTS; enabled automatically for https base URLs. */
   secureCookies: boolean;
   baseUrl: string;
   trustProxy: boolean;
   maxJsonBytes: number;
   maxUploadBytes: number;
-  /** Per-account ceiling on stored bytes across packages, snapshots, and builds. */
+  /** Per-account ceiling on stored package, snapshot, build, font and sample-asset bytes. */
   accountQuotaBytes: number;
   /** Free space the shared file store must keep before writes are refused. */
   minimumFreeBytes: number;
@@ -59,6 +61,9 @@ export interface ConfigOverrides {
   accountQuotaBytes?: number;
   minimumFreeBytes?: number;
   buildWorkers?: number;
+  buildJobRetentionHours?: number;
+  loginMaxAttempts?: number;
+  loginLockoutSeconds?: number;
   allowOpenRegistration?: boolean;
   bootstrapAdmin?: { email: string; password: string } | null;
   logLevel?: "quiet" | "info" | "debug";
@@ -124,6 +129,8 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
     database,
     sessionSecret,
     sessionTtlHours: envInteger("WP_STARTER_SESSION_TTL_HOURS", 24 * 14),
+    loginMaxAttempts: Math.max(1, overrides.loginMaxAttempts ?? envInteger("WP_STARTER_LOGIN_MAX_ATTEMPTS", 10)),
+    loginLockoutSeconds: Math.max(1, overrides.loginLockoutSeconds ?? envInteger("WP_STARTER_LOGIN_LOCKOUT_SECONDS", 900)),
     secureCookies,
     baseUrl: baseUrl.replace(/\/+$/, ""),
     trustProxy: envFlag("WP_STARTER_TRUST_PROXY", false),
@@ -132,7 +139,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
     accountQuotaBytes: overrides.accountQuotaBytes ?? envInteger("WP_STARTER_ACCOUNT_QUOTA_BYTES", 20 * 1024 * MEBIBYTE),
     minimumFreeBytes: overrides.minimumFreeBytes ?? envInteger("WP_STARTER_MIN_FREE_BYTES", 2 * 1024 * MEBIBYTE),
     buildWorkers: overrides.buildWorkers ?? Math.min(Math.max(envInteger("WP_STARTER_BUILD_WORKERS", 2), 1), 2),
-    buildJobRetentionHours: envInteger("WP_STARTER_BUILD_RETENTION_HOURS", 24 * 30),
+    buildJobRetentionHours: overrides.buildJobRetentionHours ?? envInteger("WP_STARTER_BUILD_RETENTION_HOURS", 24 * 30),
     allowOpenRegistration: overrides.allowOpenRegistration ?? envFlag("WP_STARTER_ALLOW_OPEN_REGISTRATION", false),
     bootstrapAdmin: overrides.bootstrapAdmin !== undefined ? overrides.bootstrapAdmin : resolveBootstrapAdmin(),
     logLevel: overrides.logLevel ?? (envString("WP_STARTER_LOG_LEVEL") as ServerConfig["logLevel"] | undefined) ?? "info"

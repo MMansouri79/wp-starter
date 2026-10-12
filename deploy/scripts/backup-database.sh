@@ -13,10 +13,12 @@
 # docs/SERVER-DEPLOYMENT.md).
 
 set -euo pipefail
+umask 077
 
 DATABASE_URL="${WP_STARTER_DATABASE_URL:-${DATABASE_URL:-}}"
 BACKUP_DIR="${WP_STARTER_BACKUP_DIR:-/var/backups/wp-starter}"
 RETENTION_DAYS="${WP_STARTER_BACKUP_RETENTION_DAYS:-14}"
+[[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || { echo "Invalid backup retention" >&2; exit 1; }
 
 if [[ -z "$DATABASE_URL" ]]; then
   echo "backup-database: set WP_STARTER_DATABASE_URL or DATABASE_URL" >&2

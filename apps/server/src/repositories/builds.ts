@@ -151,6 +151,12 @@ export class BuildRepository {
     return row ? toBuild(row) : null;
   }
 
+  async expired(cutoff: string): Promise<BuildRecord[]> {
+    const rows = await this.db.all<BuildRow>(
+      "SELECT * FROM builds WHERE status NOT IN ('queued', 'running') AND COALESCE(completed_at, created_at) < ?", [cutoff]);
+    return rows.map(toBuild);
+  }
+
   async requireById(id: string): Promise<BuildRecord> {
     const record = await this.findById(id);
     if (!record) throw notFound("build_not_found", "That build no longer exists.");

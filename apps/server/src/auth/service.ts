@@ -1,13 +1,24 @@
 import type { SqlDatabase } from "../db/driver.js";
-import { badRequest, conflict, forbidden, notFound, unauthorized } from "../errors.js";
+import { HttpError, badRequest, conflict, forbidden, notFound, unauthorized } from "../errors.js";
 import { InviteRepository } from "../repositories/invites.js";
 import { SessionRepository } from "../repositories/sessions.js";
 import { publicUser, UserRepository, type UserWithSecret } from "../repositories/users.js";
 import type { Invite, PublicUser, Role, SessionRecord, User } from "../types.js";
 import { assertPasswordStrength, hashPassword, verifyPassword } from "./passwords.js";
+import { LoginRateLimiter } from "./rate-limit.js";
 import { generateInviteCode, hashToken, inviteHint, normalizeInviteCode, randomToken } from "./tokens.js";
 
 export const SESSION_COOKIE = "wp_starter_session";
+
+/** Generic answer for a throttled attempt; it never says whether an account exists. */
+function tooManyAttempts(retryAfterSeconds: number): HttpError {
+  return new HttpError(
+    429,
+    "too_many_attempts",
+    "Too many failed attempts. Wait a moment and try again.",
+    { retryAfterSeconds }
+  );
+}
 
 export interface SessionMeta {
   userAgent: string;
@@ -26,6 +37,8 @@ export interface LoginResult extends AuthenticatedSession {
 export interface AuthOptions {
   sessionTtlHours: number;
   allowOpenRegistration: boolean;
+  /** In-process throttling shared by sign-in and invite redemption. */
+  rateLimiter: LoginRateLimiter;
 }
 
 export interface BootstrapAdminInput {
@@ -75,17 +88,36 @@ export class AuthService {
   }
 
   async login(email: string, password: string, meta: SessionMeta): Promise<LoginResult> {
+    const keys = this.attemptKeys(email, meta);
+    this.assertAttemptAllowed(keys);
     const user = await this.users.findByEmail(email);
     // Verify even when the account is unknown so timing does not reveal existence.
     const reference = user?.passwordHash ?? "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const matches = await verifyPassword(reference, password);
 
-    if (!user || !matches) throw unauthorized("Email or password is incorrect.");
+    if (!user || !matches) {
+      this.recordFailedAttempt(keys);
+      throw unauthorized("Email or password is incorrect.");
+    }
     if (user.status !== "active") throw forbidden("account_disabled", "That account has been disabled.");
 
     const created = await this.createSession(user, meta);
     await this.users.recordLogin(user.id);
+    keys.forEach((key) => this.options.rateLimiter.clear(key));
     return created;
+  }
+
+  private attemptKeys(email: string, meta: SessionMeta): string[] {
+    return [`ip:${meta.ipAddress}`, `email:${email.trim().toLowerCase()}`];
+  }
+
+  private assertAttemptAllowed(keys: string[]): void {
+    const delay = Math.max(...keys.map((key) => this.options.rateLimiter.retryAfterSeconds(key)));
+    if (delay > 0) throw tooManyAttempts(delay);
+  }
+
+  private recordFailedAttempt(keys: string[]): void {
+    keys.forEach((key) => this.options.rateLimiter.recordFailure(key));
   }
 
   /**
@@ -98,6 +130,21 @@ export class AuthService {
     displayName?: string;
     inviteCode?: string;
     meta: SessionMeta;
+  }): Promise<LoginResult> {
+    const keys = this.attemptKeys(input.email, input.meta);
+    this.assertAttemptAllowed(keys);
+    try {
+      const result = await this.registerUnchecked(input);
+      keys.forEach((key) => this.options.rateLimiter.clear(key));
+      return result;
+    } catch (error) {
+      if (error instanceof HttpError && error.status < 500) this.recordFailedAttempt(keys);
+      throw error;
+    }
+  }
+
+  private async registerUnchecked(input: {
+    email: string; password: string; displayName?: string; inviteCode?: string; meta: SessionMeta;
   }): Promise<LoginResult> {
     assertPasswordStrength(input.password);
 
@@ -123,6 +170,13 @@ export class AuthService {
       const users = new UserRepository(tx);
       const sessions = new SessionRepository(tx);
       const invites = new InviteRepository(tx);
+
+      if (invite) {
+        const current = await invites.findById(invite.id);
+        if (!current || current.usedAt || Date.parse(current.expiresAt) <= Date.now()) {
+          throw badRequest("invite_used", "That invitation code is no longer available.");
+        }
+      }
 
       const user = await users.create({
         email: input.email,

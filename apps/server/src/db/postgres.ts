@@ -9,11 +9,9 @@ import { normalizeParams, toPostgresPlaceholders, type SqlDatabase, type SqlPara
 export class PostgresDatabase implements SqlDatabase {
   public readonly dialect = "postgres" as const;
   private readonly pool: Pool;
-  private client: PoolClient | null = null;
-  private depth = 0;
   private closed = false;
 
-  private constructor(pool: Pool) {
+  private constructor(pool: Pool, private readonly client: PoolClient | null = null) {
     this.pool = pool;
   }
 
@@ -54,26 +52,23 @@ export class PostgresDatabase implements SqlDatabase {
   }
 
   async transaction<T>(work: (tx: SqlDatabase) => Promise<T>): Promise<T> {
-    if (this.depth > 0) return work(this);
+    if (this.client) return work(this);
     const client = await this.pool.connect();
-    this.client = client;
-    this.depth += 1;
     try {
       await client.query("BEGIN");
-      const result = await work(this);
+      const result = await work(new PostgresDatabase(this.pool, client));
       await client.query("COMMIT");
       return result;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
     } finally {
-      this.depth -= 1;
-      this.client = null;
       client.release();
     }
   }
 
   async close(): Promise<void> {
+    if (this.client) return;
     if (this.closed) return;
     this.closed = true;
     await this.pool.end();
