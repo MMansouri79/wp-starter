@@ -21,6 +21,12 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
+      - name: Setup PHP for executable bootstrap tests
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
       - name: Install Node dependencies
         run: npm ci
 
