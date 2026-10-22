@@ -15,7 +15,7 @@ export interface QuotaUsage {
 }
 
 /**
- * Disk quotas keep one account from filling the shared VPS file store. Uploads
+ * Disk quotas keep one team from filling the VPS file store. Uploads
  * and build artifacts are both counted.
  */
 export class QuotaService {
@@ -29,18 +29,18 @@ export class QuotaService {
     private readonly samples: SampleContentRepository
   ) {}
 
-  async usage(userId: string): Promise<QuotaUsage> {
+  async usage(_userId?: string): Promise<QuotaUsage> {
     const [packages, snapshots, builds] = await Promise.all([
-      this.packages.bytesForUser(userId),
-      this.snapshots.bytesForUser(userId),
-      this.builds.bytesForUser(userId)
+      this.packages.totalBytes(),
+      this.snapshots.totalBytes(),
+      this.builds.totalBytes()
     ]);
     const files = new Set<string>();
     for (const item of await this.fonts.list<FontSystemRecord>()) {
-      if (item.createdBy === userId) item.document.faces.forEach((face) => files.add(face.file));
+      item.document.faces.forEach((face) => files.add(face.file));
     }
     for (const item of await this.samples.list<SampleAsset>()) {
-      if (item.resource === "assets" && item.createdBy === userId) files.add(item.document.file);
+      if (item.resource === "assets") files.add(item.document.file);
     }
     let assets = 0;
     for (const file of files) {

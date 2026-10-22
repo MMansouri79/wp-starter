@@ -82,6 +82,6 @@ export class Router {
   /** True when the path matches some route under a different method. */
   allowsMethod(pathname: string): boolean {
     const requested = pathname.split("/").filter((segment) => segment.length > 0);
-    return this.routes.some((route) => route.segments.length === requested.length);
+    return this.routes.some((route) => route.segments.length === requested.length && route.segments.every((segment, index) => segment.startsWith(":") || segment === decodeURIComponent(requested[index])));
   }
 }

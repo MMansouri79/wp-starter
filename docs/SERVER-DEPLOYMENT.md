@@ -1,6 +1,8 @@
 # Server deployment
 
-`apps/server/` is the hosted, multi-user version of the Builder. It runs one canonical shared library directory plus a database for accounts, ownership, and item metadata, and it serves the same Builder UI the local GUI uses.
+The catalog/setup update must deploy the shared builder-core output, hosted profile/catalog APIs, GUI assets, and both files under `wordpress/bootstrap/` together. `deploy/docker/Dockerfile.catalog-release` builds these against the existing exporter release. `deploy/scripts/prepare-catalog-release.sh` accepts a catalog release ID and patch SHA-256, runs the full checks against disposable PostgreSQL, and builds the runtime image. `activate-catalog-release.sh` accepts the verified release ID and optional expected previous release, requires an idle queue, takes a paired backup, and preserves the previous image/source for rollback. `recover-stopped-catalog-app.sh` is the documented incident recovery: it stops the sole application, verifies it is stopped, preserves the stale lock, and restarts it. These scripts target the documented October 2026 deployment; adjust their pinned paths/base release before using them elsewhere.
+
+`apps/server/` is the hosted, multi-user version of the Builder. It runs private team library directories plus one database for identity, memberships, and team-scoped metadata, and it serves the same Builder UI the local GUI uses.
 
 This document covers a single-VPS deployment: PostgreSQL, the Node server behind nginx with Let's Encrypt HTTPS, systemd supervision, backups, and disk monitoring.
 
@@ -17,7 +19,7 @@ Not changed by hosting:
 - Private production packages, credentials, and non-portable plugin state stay excluded, exactly as in the offline workflow.
 - The CLI and the local GUI are untouched and keep working against a local library.
 
-Everyone signed in can read the whole shared library. Only the account that created an item may edit, replace, or delete it. Administrators manage people and invitations; they gain no rights over another account's items. Items imported through the CLI have no owner and can only be cleaned up by an administrator.
+Only members of a team can read its library. Team owners, admins, and editors can edit any team item; viewers browse and download existing builds. Platform administrators provision teams and manage accounts but need membership to access content. Creator attribution remains after a member leaves. See [team workspaces](TEAM-WORKSPACES.md) for permissions and API contracts.
 
 ## 1. Prerequisites
 
@@ -88,7 +90,7 @@ Set at minimum:
 
 `WP_STARTER_BASE_URL` starting with `https://` enables `Secure` cookies and HSTS automatically. Keep `WP_STARTER_SERVER_HOST=127.0.0.1` so only nginx can reach the app.
 
-Registration is invite-only by default (`WP_STARTER_ALLOW_OPEN_REGISTRATION=false`). Leave it that way for a client-facing deployment; open registration only ever grants the least-privileged `client` role.
+Registration requires an email-bound team invitation. `WP_STARTER_ALLOW_OPEN_REGISTRATION` is ignored by the hosted app. Team invitations never grant platform administration.
 
 Failed sign-ins and invitation redemption are limited per client IP and normalized email. `WP_STARTER_LOGIN_MAX_ATTEMPTS` defaults to 10 and `WP_STARTER_LOGIN_LOCKOUT_SECONDS` to 900. Counters are bounded, expire in this process, and reset on restart. Trust forwarded IPs only behind the configured nginx proxy. Run one server process; API mutations and build finalization are serialized in-process. Stop the service before using the CLI to change its library; restart reconciles metadata and preserves owners.
 
@@ -202,11 +204,11 @@ Build artifacts are pruned automatically after `WP_STARTER_BUILD_RETENTION_HOURS
 
 1. Open `https://builder.example.com` — you are redirected to the login page.
 2. Sign in with `WP_STARTER_ADMIN_EMAIL` / `WP_STARTER_ADMIN_PASSWORD`, then change that password immediately.
-3. Open **Admin** and create an invite code for each client, or create team accounts directly.
-4. Have a client register with the invite code and sign in.
-5. Verify cross-visibility: upload a package as user A, sign in as user B in a second browser, confirm the item is visible with a **Shared by** badge and that its controls are read-only.
-6. Confirm user B cannot delete user A's item (the API answers `403 read_only`).
-7. Queue a build and watch staged progress until the artifact is downloadable.
+3. Open **Platform administration**, create a team with its initial owner's email, and copy the invitation link.
+4. Have the owner register through that link (or sign in to accept it). In **Team settings**, invite colleagues as editors/viewers. Editors collaborate on all team items; viewers receive read-only controls.
+5. Provision a second team. In a second browser, confirm its members cannot see the first team's items or use its direct URLs (`404`), including downloads and build jobs. A platform administrator without membership also gets `404`.
+6. Confirm viewers cannot upload, edit, delete, duplicate, or queue builds (`403 read_only`), while same-team editors can edit each other's items. Removing membership must immediately remove access.
+7. Queue a build, watch staged progress, download it, and verify a member of another team cannot access its artifact. Test the team switcher in two tabs.
 
 ## 10. Upgrade
 
@@ -221,6 +223,40 @@ sudo systemctl restart wp-starter-server
 
 Migrations apply on start. An in-flight build cannot be resumed across a restart, so it is marked failed with an actionable message; re-queue it from the Build History screen.
 
+## Private-team migration
+
+For an installation using the original shared library, complete this upgrade before starting the new server. Startup refuses pending migration or legacy payload files still at the data root. Never run migration while the server is serving requests.
+
+1. Stop the service and take a **coordinated database and full file-store backup** using the existing backup scripts. Preserve the old application release for rollback. Verify the backup's completion marker before upgrading. The file backup covers the entire data root, including all team directories after migration.
+2. Install/build the new release. With the same protected environment and service account, run:
+
+   ```bash
+   cd /opt/wp-starter-system
+   node apps/server/dist/index.js migrate-teams --dry-run
+   node apps/server/dist/index.js migrate-teams
+   ```
+
+   The dry run reports row counts and a checksum inventory without applying schema changes or moving files. It expects an initialized legacy database. If this is a filesystem-only import into a fresh installation, initialize the empty database with `migrate` first.
+3. Migration creates the initial **Our team** workspace. Existing global administrators become its owners and keep platform administration; existing members/clients become editors. All content rows, including unowned imports, are assigned to that team. Portable IDs, attribution, ZIP bytes/checksums, relative registry references, and existing build artifacts remain intact. Legacy account invitations and sessions are revoked.
+4. Only canonical payload entries are moved: registry JSON files, packages, configs, fonts, Elementor templates, sample assets, profiles, builds, and vnext. Database files, operator configuration, logs, and unrelated files stay at the data root. Symbolic links are refused. The initial team directory is `teams/00000000-0000-4000-8000-000000000001/`.
+5. A durable `team-migration.checkpoint.json` records each source checksum before the first move. If interrupted, keep that checkpoint and rerun the same command. Already-moved files are verified; changed, missing, unsafe, or conflicting source/destination files cause refusal. Do not manually edit the checkpoint. The SQL migration is transactional, and startup remains blocked until file verification marks the migration complete. Empty legacy directories are retained.
+6. Start the service. Sign in again, confirm memberships and resource counts, compare package checksums, download an existing artifact, queue a new build, and test isolation with a second team. Reissue invitations through Team settings.
+
+For Docker, stop the `app` service and use the built image with the same mounted data root and database network:
+
+```bash
+docker compose --env-file /etc/wp-starter/compose.env -f deploy/docker/compose.yaml stop app
+# Take and verify the coordinated backup before the following commands.
+docker compose --env-file /etc/wp-starter/compose.env -f deploy/docker/compose.yaml build app
+docker compose --env-file /etc/wp-starter/compose.env -f deploy/docker/compose.yaml run --rm --no-deps app node apps/server/dist/index.js migrate-teams --dry-run
+docker compose --env-file /etc/wp-starter/compose.env -f deploy/docker/compose.yaml run --rm --no-deps app node apps/server/dist/index.js migrate-teams
+docker compose --env-file /etc/wp-starter/compose.env -f deploy/docker/compose.yaml up -d app proxy
+```
+
+`server-running.lock` prevents starting a second server or migrating a running service on the same host. A clean stop removes it. After an unclean stop or a container PID change, verify the old service/container is stopped before removing a stale lock; never remove a lock to bypass a running server. This is an additional guard, not support for replicas or concurrent writers.
+
+If verification fails, keep the service stopped. Recover through the checksum checkpoint, or restore **both** database and file-store from the same backup set and restart the previous application release. Do not run the previous release against the new team schema. A production PostgreSQL restore rehearsal still requires an actual deployment environment; tests use synthetic fixtures and optional `WP_STARTER_TEST_PG_URL`.
+
 ## Docker deployment alongside an existing application
 
 When another application already owns ports 80/443, use `deploy/docker/compose.yaml`.
@@ -231,10 +267,12 @@ Run exactly one app container. The CRM's Compose project and database remain sep
 Copy the current source tree to `/opt/wp-starter-system` (include uncommitted changes when
 deploying from staging, exclude secrets and Windows `node_modules`/compiled output).
 Copy the existing builder library to `/var/lib/wp-starter` and give UID/GID 1000 ownership,
-which matches the image's `node` user. The original Windows library should remain available
-until migration acceptance. Imported library items appear without an owner and are
-manageable by administrators. Old offline build ZIPs remain files; they do not become
-hosted build-history jobs. Build new artifacts through the hosted UI.
+which matches the image's `node` user. Keep the original Windows library until migration
+acceptance. Initialize the database and run the private-team migration above before
+starting the application. Filesystem-only imports have null creator attribution and are
+managed by editors in the initial team. If there were no preexisting hosted accounts,
+provision its first owner through Platform administration. Offline ZIPs without database
+jobs remain files; they are not synthesized into hosted build-history rows.
 
 Create root-only `/etc/wp-starter/compose.env`:
 
@@ -356,6 +394,17 @@ must include `:2053`. Verify TLS and secure session cookies before enabling
 Cloudflare proxy mode with Full (strict). Keep certificate expiry monitoring
 enabled and renew with the same manual DNS command before expiry.
 
+## Public exporter download
+
+Anyone can download the installable exporter from `/downloads/wp-starter-exporter.zip`
+without signing in. The sign-in page and builder account panel link to it. Install
+the ZIP through WordPress **Plugins → Add New → Upload Plugin**, then activate it.
+
+`npm run build` packages the current `wordpress/exporter/` source and copies the ZIP
+to the ignored `apps/server/client/downloads/` directory. The Docker image includes
+this directory with the server client assets. Run the normal build/deploy after
+changing the exporter; no private team files are published by this endpoint.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -367,3 +416,16 @@ enabled and renew with the same manual DNS command before expiry.
 | `403 csrf_failed` on a write | the `wp_starter_csrf` cookie is missing or stale; reload the page to refresh it |
 | Login succeeds but every request redirects to the login page | the session cookie is not being sent; check that `WP_STARTER_BASE_URL` matches the public URL and that `Secure` cookies are not required over plain HTTP |
 | Builds stay queued forever | `WP_STARTER_BUILD_WORKERS` is 0, or the service is not running; check `journalctl -u wp-starter-server` |
+## Optional automatic plugin library updates
+
+For the October 20, 2026 production host, `deploy/docker/Dockerfile.plugin-updates` and the matching `prepare-plugin-updates.sh` / `activate-plugin-updates.sh` scripts build from `catalog-20261014-364d5ae5`, verify against disposable PostgreSQL, require an idle queue, and retain a paired backup and the previous image/source. They use the current `192.168.200.140` health address. Their release names and baseline are deliberately pinned; revise them before reusing for another deployment. The release is a scoped, checksummed source patch from the feature branch, with explicit overlay changes applied only to matching production file hashes. Migration 6 only adds tables, so the previous release can run with those empty, unused tables after an application rollback.
+
+The hosted Packages page has a default-off switch per team. Team owners and administrators must explicitly confirm the WordPress.org source of each eligible existing plugin before enabling it. A matching folder name alone is not treated as evidence of origin. Newly uploaded plugins remain unconfirmed until a manager confirms them. Editors and viewers can inspect status but cannot change this policy.
+
+The server checks due teams at startup and once per minute, and checks each enabled library every twelve hours. Enabling or changing settings makes the library due on the next scheduler pass. The scheduler runs in the existing single server process; no cron service is required. Disabled libraries make no update requests. Normal builds remain offline-capable.
+
+Enabled deployments need outbound HTTPS access to `api.wordpress.org` and `downloads.wordpress.org`. Downloads have a sixty-second timeout and are capped at the smaller of the configured upload limit and 64 MiB to bound background memory use; metadata is limited to 2 MiB. Larger archives require manual import. Redirects are limited and restricted to these HTTPS hosts. Network errors leave existing packages usable and retry after twelve hours. The Packages page shows the last check and per-plugin results. Old versions are retained and count toward the team's quota; remove unused versions manually when appropriate.
+
+Database migration 6 stores team settings, source confirmations, authorization attribution, and the latest check results. Include it in normal database backups; downloaded ZIPs remain in the team's canonical file store and use the existing backup procedure. There is no profile or package manifest migration. Existing installations stay disabled after migration.
+
+Background imports revalidate current team membership, team status, disk space, quota, and the settings revision under the shared mutation lock. Updates pause if the manager who last saved settings is disabled, deleted, removed from the team, or loses their owner/admin role; another current manager can save the settings to reauthorize them. Disabling updates or changing confirmations prevents in-flight downloads from being imported. Turning off the feature retains downloaded versions. Existing builds and deployed WordPress sites are never updated by this feature.

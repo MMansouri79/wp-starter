@@ -1,0 +1,7 @@
+FROM wp-starter-catalog-verification:catalog-20261014-364d5ae5 AS verification
+WORKDIR /app
+COPY . .
+RUN npm run build
+FROM wp-starter-server:catalog-20261014-364d5ae5 AS runtime
+COPY --from=verification /app/apps/server/dist /app/apps/server/dist
+COPY --from=verification /app/apps/server/client /app/apps/server/client

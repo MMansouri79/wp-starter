@@ -35,11 +35,17 @@ final class MMS_WP_Starter_Sample_Content {
         if ( is_array( $lock ) && ( $lock['time'] ?? 0 ) < time() - 900 ) { delete_option( self::LOCK_OPTION ); }
         if ( ! add_option( self::LOCK_OPTION, array( 'owner' => $owner, 'time' => time() ), '', false ) ) { return $this->error( 'busy', 'Another sample installation request is running. Retry after it completes.' ); }
         try {
+            $choice = (array) get_option( 'mms_wp_starter_catalog_choice', array() );
+            $choice_matches = ( $choice['fingerprint'] ?? '' ) === $fingerprint;
+            if ( $choice_matches && ! empty( $choice['stop'] ) ) return true;
             $phases = array( 'attributes', 'terms', 'assets', 'content', 'relationships', 'publish', 'verify' );
             $phase_index = array_search( $state['phase'], $phases, true );
             if ( false === $phase_index ) { return $this->error( 'state', 'Invalid sample installation phase.' ); }
             $rows = 'terms' === $state['phase'] ? $this->ordered_terms() : $this->payload[ in_array( $state['phase'], array( 'attributes', 'assets' ), true ) ? $state['phase'] : 'content' ];
             if ( is_wp_error( $rows ) ) { return $rows; }
+            if ( 'assets' === $state['phase'] && $choice_matches && ! empty( $choice['skipImages'] ) ) {
+                while ( $state['index'] < count( $rows ) && 'image' === $rows[$state['index']]['kind'] ) $state['index']++;
+            }
             if ( $state['index'] < count( $rows ) ) {
                 $row = $rows[$state['index']];
                 switch ( $state['phase'] ) {
@@ -47,7 +53,10 @@ final class MMS_WP_Starter_Sample_Content {
                     case 'terms': $result = $this->install_term( $row ); break;
                     case 'assets': $result = $this->install_asset( $row ); break;
                     case 'content': $result = 'post' === $row['kind'] ? $this->install_post( $row ) : $this->install_product( $row ); break;
-                    case 'relationships': $result = 'product' === $row['kind'] ? $this->link_product( $row ) : true; break;
+                    case 'relationships':
+                        $result = 'product' === $row['kind'] ? $this->link_product( $row ) : true;
+                        if ( ! is_wp_error( $result ) ) { $result = $this->install_acf( $row ); }
+                        break;
                     case 'publish': $result = $this->publish_row( $row ); break;
                     default: $result = $this->verify_row( $row ); break;
                 }
@@ -124,7 +133,11 @@ final class MMS_WP_Starter_Sample_Content {
             return $existing;
         }
         $mime = wp_get_image_mime( $source );
-        if ( ! in_array( $mime, array( 'image/png', 'image/jpeg', 'image/gif', 'image/webp' ), true ) || $mime !== $row['mime'] ) { return $this->error( 'image_type', 'Invalid sample image bytes or MIME type.' ); }
+        if ( 'document' === $row['kind'] ) {
+            $bytes = file_get_contents( $source );
+            $mime = 0 === strpos( $bytes, '%PDF-' ) ? 'application/pdf' : ( false === strpos( $bytes, "\0" ) && preg_match( '//u', $bytes ) ? 'text/plain' : false );
+            if ( ! in_array( $mime, array( 'application/pdf', 'text/plain' ), true ) || $mime !== $row['mime'] ) { return $this->error( 'document_type', 'Invalid ACF document bytes or MIME type.' ); }
+        } elseif ( ! in_array( $mime, array( 'image/png', 'image/jpeg', 'image/gif', 'image/webp' ), true ) || $mime !== $row['mime'] ) { return $this->error( 'image_type', 'Invalid sample image bytes or MIME type.' ); }
         $uploads = wp_upload_dir();
         if ( ! empty( $uploads['error'] ) ) { return $this->error( 'uploads', $uploads['error'] ); }
         $directory = $uploads['basedir'] . '/wp-starter-samples';
@@ -234,7 +247,9 @@ final class MMS_WP_Starter_Sample_Content {
         $product->set_description( $content ); $product->set_short_description( $excerpt );
         $product->set_catalog_visibility( $row['catalogVisibility'] ); $product->set_featured( $row['featured'] );
         $product->set_menu_order( $row['menuOrder'] ); $product->set_reviews_allowed( $row['reviewsAllowed'] );
-        $product->set_purchase_note( wp_kses_post( $row['purchaseNote'] ) ); $product->set_tax_status( $row['taxStatus'] );
+        $note = $this->content_html( $row['purchaseNote'] );
+        if ( is_wp_error( $note ) ) { return $note; }
+        $product->set_purchase_note( $note ); $product->set_tax_status( $row['taxStatus'] );
         $values = $this->product_values( $product, $row ); if ( is_wp_error( $values ) ) { return $values; }
         $categories = $this->resolve_term_ids( $row['categoryIds'], 'product_cat' ); $tags = $this->resolve_term_ids( $row['tagIds'], 'product_tag' );
         if ( is_wp_error( $categories ) ) { return $categories; } if ( is_wp_error( $tags ) ) { return $tags; }
@@ -242,7 +257,7 @@ final class MMS_WP_Starter_Sample_Content {
         $brands = $this->resolve_term_ids( $row['brandIds'], 'product_brand' ); if ( is_wp_error( $brands ) ) { return $brands; }
         if ( $brands && ! taxonomy_exists( 'product_brand' ) ) { return $this->error( 'brands', 'WooCommerce core brands are not available.' ); }
         $image = $this->attachment_id( $row['featuredImageId'] ?? '' ); if ( is_wp_error( $image ) ) { return $image; } $product->set_image_id( $image );
-        $gallery = array(); foreach ( $row['galleryIds'] as $logical ) { $image = $this->attachment_id( $logical ); if ( is_wp_error( $image ) ) { return $image; } $gallery[] = $image; } $product->set_gallery_image_ids( $gallery );
+        $gallery = array(); foreach ( $row['galleryIds'] as $logical ) { $image = $this->attachment_id( $logical ); if ( is_wp_error( $image ) ) { return $image; } if ( $image ) $gallery[] = $image; } $product->set_gallery_image_ids( $gallery );
         $attributes = array();
         foreach ( $row['attributes'] as $source ) {
             $attribute = new WC_Product_Attribute();
@@ -269,7 +284,10 @@ final class MMS_WP_Starter_Sample_Content {
                 $variation = new WC_Product_Variation( $variation_id );
                 if ( $variation_id && (int) $variation->get_parent_id() !== (int) $saved ) { return $this->error( 'variation_parent', 'Existing owned variation belongs to a different parent.' ); }
                 $variation->set_parent_id( $saved ); $variation->set_status( $source['enabled'] ? 'publish' : 'private' );
-                $variation->set_description( wp_kses_post( $source['description'] ) );
+                $variation->set_menu_order( (int) ( $source['menuOrder'] ?? 0 ) );
+                $description = $this->content_html( $source['description'] );
+                if ( is_wp_error( $description ) ) { return $description; }
+                $variation->set_description( $description );
                 $attrs = $this->attribute_values( $row, $source['attributes'] ); if ( is_wp_error( $attrs ) ) { return $attrs; } $variation->set_attributes( $attrs );
                 $image = $this->attachment_id( $source['imageId'] ?? '' ); if ( is_wp_error( $image ) ) { return $image; } $variation->set_image_id( $image );
                 $values = $this->product_values( $variation, $source, true ); if ( is_wp_error( $values ) ) { return $values; }
@@ -349,19 +367,105 @@ final class MMS_WP_Starter_Sample_Content {
         if ( ! $logical_id ) { return 0; }
         $id = $this->owned_post( $logical_id, 'attachment' );
         if ( is_wp_error( $id ) ) { return $id; }
+        $choice = (array) get_option( 'mms_wp_starter_catalog_choice', array() );
+        if ( ! $id && ! empty( $choice['skipImages'] ) && ( $choice['fingerprint'] ?? '' ) === hash( 'sha256', wp_json_encode( $this->payload ) ) ) {
+            foreach ( $this->payload['assets'] as $asset ) if ( $asset['id'] === $logical_id && 'image' === $asset['kind'] ) return 0;
+        }
         return $id ?: $this->error( 'media_reference', 'Sample image has not been installed: ' . $logical_id );
     }
 
     private function content_html( $html ) {
         $error = null;
+        $html = preg_replace_callback( '/"\{\{sample-attachment:([a-z0-9-]+)\}\}"|\{\{sample-attachment:([a-z0-9-]+)\}\}/', function ( $match ) use ( &$error ) {
+            $id = $this->attachment_id( ! empty( $match[1] ) ? $match[1] : $match[2] );
+            if ( is_wp_error( $id ) ) { $error = $id; return '0'; }
+            return (string) $id;
+        }, (string) $html );
         $result = preg_replace_callback( '/\{\{sample-asset:([a-z0-9-]+)\}\}/', function ( $match ) use ( &$error ) {
             $id = $this->attachment_id( $match[1] );
             if ( is_wp_error( $id ) ) { $error = $id; return ''; }
+            if ( ! $id ) return '';
             $url = wp_get_attachment_url( $id );
             if ( ! $url ) { $error = $this->error( 'media_reference', 'Sample attachment URL is unavailable.' ); return ''; }
             return esc_url( $url );
         }, (string) $html );
         return $error ?: wp_kses_post( $result );
+    }
+
+    /** All content/terms/media already exist before the relationships phase. */
+    public function install_acf( array $row ) {
+        if ( empty( $row['acf'] ) ) { return true; }
+        if ( ! function_exists( 'acf_import_field_group' ) || ! function_exists( 'update_field' ) ) { return $this->error( 'acf_missing', 'Install and activate ACF before importing exported fields.' ); }
+        $post_id = $this->owned_post( $row['id'], $row['kind'] );
+        if ( is_wp_error( $post_id ) || ! $post_id ) { return is_wp_error( $post_id ) ? $post_id : $this->error( 'acf_content', 'ACF content has not been installed.' ); }
+        foreach ( $row['acf']['groups'] as $group ) {
+            $hash = hash( 'sha256', wp_json_encode( $group ) );
+            $existing = acf_get_field_group( $group['key'] );
+            if ( $existing ) {
+                $owned = ! empty( $existing['ID'] ) && get_post_meta( $existing['ID'], '_wp_starter_acf_hash', true ) === $hash;
+                if ( ! $owned ) {
+                    $existing['fields'] = function_exists( 'acf_get_fields' ) ? acf_get_fields( $existing ) : array();
+                    if ( ! $this->acf_definition_matches( $group, $existing ) ) { return $this->error( 'acf_conflict', 'An unrelated ACF field group already uses key ' . $group['key'] . '.' ); }
+                }
+            } else {
+                foreach ( $this->acf_field_keys( $group['fields'] ) as $field_key ) {
+                    if ( acf_get_field( $field_key ) ) { return $this->error( 'acf_field_conflict', 'An unrelated ACF field already uses key ' . $field_key . '.' ); }
+                }
+                $saved = acf_import_field_group( $group );
+                if ( ! is_array( $saved ) || empty( $saved['ID'] ) ) { return $this->error( 'acf_import', 'Could not persist ACF group ' . $group['key'] . '.' ); }
+                update_post_meta( $saved['ID'], '_wp_starter_acf_hash', $hash );
+            }
+        }
+        foreach ( $row['acf']['values'] as $key => $value ) {
+            if ( ! preg_match( '/^field_[a-zA-Z0-9_-]+$/D', $key ) || ! acf_get_field( $key ) ) { return $this->error( 'acf_field', 'Missing exported ACF field ' . $key . '.' ); }
+            $resolved = $this->acf_value( $value );
+            if ( is_wp_error( $resolved ) ) { return $resolved; }
+            // update_field returns false when an unchanged value is already saved.
+            update_field( $key, $resolved, $post_id );
+            if ( acf_get_value( $post_id, acf_get_field( $key ) ) != $resolved ) { return $this->error( 'acf_verify', 'ACF did not save field ' . $key . '.' ); }
+        }
+        return true;
+    }
+
+    private function acf_definition_matches( $expected, $actual ) {
+        if ( ! is_array( $expected ) ) { return $expected === $actual; }
+        if ( ! is_array( $actual ) ) { return false; }
+        $list = array_keys( $expected ) === range( 0, count( $expected ) - 1 );
+        if ( $list ) { if ( count( $expected ) !== count( $actual ) ) { return false; } $actual = array_values( $actual ); }
+        foreach ( $expected as $key => $value ) { if ( ! array_key_exists( $key, $actual ) || ! $this->acf_definition_matches( $value, $actual[$key] ) ) { return false; } }
+        return true;
+    }
+
+    private function acf_field_keys( array $fields ) {
+        $keys = array();
+        foreach ( $fields as $field ) {
+            $keys[] = $field['key'];
+            $keys = array_merge( $keys, $this->acf_field_keys( $field['sub_fields'] ?? array() ) );
+            foreach ( $field['layouts'] ?? array() as $layout ) { $keys = array_merge( $keys, $this->acf_field_keys( $layout['sub_fields'] ?? array() ) ); }
+        }
+        return $keys;
+    }
+
+    private function acf_value( $value ) {
+        if ( is_array( $value ) && isset( $value['$siteRef'] ) ) {
+            switch ( $value['$siteRef'] ) {
+                case 'asset': return $this->attachment_id( $value['id'] );
+                case 'content':
+                    foreach ( $this->payload['content'] as $row ) { if ( $row['id'] === $value['id'] ) { $id = $this->owned_post( $row['id'], $row['kind'] ); return $id ?: $this->error( 'acf_reference', 'Missing ACF content reference.' ); } }
+                    break;
+                case 'term':
+                    $term = $this->term_row( $value['id'] );
+                    if ( $term ) { $saved = get_term_by( 'slug', $term['slug'], $term['taxonomy'] ); if ( $saved ) { return (int) $saved->term_id; } }
+                    break;
+            }
+            return $this->error( 'acf_reference', 'Unresolved ACF reference.' );
+        }
+        if ( is_array( $value ) ) {
+            $out = array();
+            foreach ( $value as $key => $entry ) { $resolved = $this->acf_value( $entry ); if ( is_wp_error( $resolved ) ) { return $resolved; } $out[$key] = $resolved; }
+            return $out;
+        }
+        return is_string( $value ) && false !== strpos( $value, '{{sample-' ) ? $this->content_html( $value ) : $value;
     }
 
     public function install_post( array $row ) {

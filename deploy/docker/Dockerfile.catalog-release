@@ -1,0 +1,11 @@
+FROM wp-starter-exporter-verification:exporter-20261013-c3251a57 AS verification
+WORKDIR /app
+COPY . .
+RUN npm run build
+FROM wp-starter-server:exporter-20261013-c3251a57 AS runtime
+COPY --from=verification /app/apps/server/dist /app/apps/server/dist
+COPY --from=verification /app/apps/server/client /app/apps/server/client
+COPY --from=verification /app/packages/builder-core/dist /app/packages/builder-core/dist
+COPY --from=verification /app/apps/cli/dist /app/apps/cli/dist
+COPY --from=verification /app/apps/gui/public /app/apps/gui/public
+COPY --from=verification /app/wordpress/bootstrap /app/wordpress/bootstrap

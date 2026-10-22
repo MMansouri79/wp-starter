@@ -109,7 +109,7 @@
     ["#build-config", "#build-name", "#build-locale"],
     ["#build-wordpress", "#build-theme", "#build-plugins"],
     ["#build-design-system", "#build-font-systems"],
-    ["#build-elementor-templates", "#template-mappings", "#build-sample-content"]
+    ["#build-elementor-templates", "#template-mappings", "#build-site-content", "#build-sample-content"]
   ];
   const sections = names.map((name, index) => {
     const button = make("button", "", `${index + 1}. ${name}`);
@@ -170,7 +170,8 @@
       summaryCell("WordPress", q("#build-wordpress").selectedOptions[0]?.textContent),
       summaryCell("Theme", q("#build-theme").selectedOptions[0]?.textContent),
       summaryCell("Plugins", `${q("#build-plugins").querySelectorAll("input:checked").length} selected`),
-      summaryCell("Design system", q("#build-design-system").selectedOptions[0]?.textContent)
+      summaryCell("Design system", q("#build-design-system").selectedOptions[0]?.textContent),
+      summaryCell("Exported site content", [q("#build-site-posts").checked ? "All posts" : "", q("#build-site-products").checked ? "All products" : ""].filter(Boolean).join(" · "))
     );
     readiness.replaceChildren();
     for (const error of profileErrors()) {

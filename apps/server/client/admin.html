@@ -26,42 +26,15 @@
     <section class="ws-stats" id="stats"></section>
 
     <section class="ws-panel">
-      <h2>Invite a client</h2>
-      <p>
-        Only invited accounts can sign in. The code is shown once; the server stores only a digest of it.
-        A client can read the whole shared library and edit only what that account creates.
-      </p>
-      <div class="ws-form-row">
-        <label>
-          Email (optional)
-          <input id="invite-email" type="email" placeholder="client@example.com">
-        </label>
-        <label>
-          Role
-          <select id="invite-role">
-            <option value="client">Client</option>
-            <option value="member">Member</option>
-            <option value="admin">Administrator</option>
-          </select>
-        </label>
-        <label>
-          Expires in (days)
-          <input id="invite-days" type="number" min="1" max="365" value="14">
-        </label>
-        <button class="ws-button" type="button" id="create-invite">Create invitation</button>
-      </div>
-      <div class="ws-invite-code ws-hidden" id="invite-result">
-        <span>Share this code:</span>
-        <code id="invite-code"></code>
-        <button class="ws-button ws-secondary" type="button" id="copy-invite">Copy</button>
-      </div>
+      <h2>Create a team</h2><p>New teams start with an empty private library. Share the invitation link with the initial owner.</p>
+      <form id="provision-team" class="ws-form-row">
+        <label>Team name<input id="team-name" required maxlength="120"></label>
+        <label>Owner email<input id="invite-email" type="email" required maxlength="254"></label>
+        <button class="ws-button" type="submit" id="create-invite">Create team and owner invitation</button>
+      </form>
+      <div class="ws-invite-code ws-hidden" id="invite-result"><span>Share this link:</span><code id="invite-code"></code><button class="ws-button ws-secondary" type="button" id="copy-invite">Copy</button></div>
     </section>
-
-    <section class="ws-panel">
-      <h2>Pending invitations</h2>
-      <p>Unused, unexpired codes. Revoke any code you no longer want to hand out.</p>
-      <div id="invites"><div class="ws-empty">Loading…</div></div>
-    </section>
+    <section class="ws-panel"><h2>Teams</h2><p>Manage provisioning and suspension. Team content requires membership.</p><div id="invites">Loading…</div></section>
 
     <section class="ws-panel">
       <h2>Create an account directly</h2>

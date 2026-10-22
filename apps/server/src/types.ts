@@ -3,8 +3,14 @@ export type Role = "admin" | "member" | "client";
 export const ROLES: readonly Role[] = ["admin", "member", "client"];
 
 export type UserStatus = "active" | "disabled";
+export type TeamRole = "owner" | "admin" | "editor" | "viewer";
+export interface Team { id: string; name: string; status: "active" | "suspended"; createdBy: string | null; createdAt: string; }
+export interface TeamMembership { teamId: string; userId: string; role: TeamRole; createdAt: string; }
 
 export interface User {
+  /** Present only on a validated, team-bound request actor. */
+  teamRole?: TeamRole;
+  teamId?: string;
   id: string;
   email: string;
   displayName: string;
@@ -54,6 +60,7 @@ export interface Invite {
  * the file store; these rows answer "who owns this and when did it change".
  */
 export interface OwnedItem {
+  teamId: string;
   id: string;
   name: string;
   createdBy: string | null;
@@ -64,6 +71,7 @@ export interface OwnedItem {
 export type BuildStatus = "queued" | "running" | "complete" | "failed";
 
 export interface BuildRecord {
+  teamId: string;
   id: string;
   status: BuildStatus;
   stage: string;

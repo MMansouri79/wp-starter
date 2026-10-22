@@ -106,6 +106,7 @@ export interface ConfigSnapshotRecord {
   sourceDomain?: string;
   /** Lightweight inventory only. Elementor documents are never stored here. */
   elementorTemplates?: ElementorTemplateSummary[];
+  siteContent?: { posts: number; products: number };
 }
 
 export interface ConfigSnapshotFile {
@@ -448,6 +449,8 @@ export interface ProfileDocumentV9 extends Omit<ProfileDocumentV8, "schemaVersio
   schemaVersion: 9;
   /** Builder-owned library roots; referenced products and assets are resolved at build time. */
   sampleContentIds: string[];
+  /** Optional site content from the selected configuration snapshot, off by default. */
+  siteContent?: { posts: boolean; products: boolean };
 }
 
 export interface BuildProfile {
@@ -469,6 +472,7 @@ export interface BuildProfile {
   elementorLibraryTemplates?: ResolvedElementorLibraryTemplate[];
   elementorTemplateMappings?: Record<string, string>;
   sampleContent?: ResolvedSampleContent | null;
+  siteContent?: { posts: boolean; products: boolean };
   configurationSnapshotId?: string;
   /** Export metadata resolved from a configuration snapshot at load time. */
   configurationSource?: {

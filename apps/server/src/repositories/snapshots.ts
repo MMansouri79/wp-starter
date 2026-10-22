@@ -14,6 +14,7 @@ export interface SnapshotItem extends OwnedItem {
 }
 
 interface SnapshotRow {
+  team_id: string;
   id: string;
   name: string;
   sha256: string;
@@ -30,6 +31,7 @@ interface SnapshotRow {
 function toItem(row: SnapshotRow): SnapshotItem {
   return {
     id: row.id,
+    teamId: row.team_id,
     name: row.name,
     sha256: row.sha256,
     filePath: row.file_path,
@@ -45,17 +47,15 @@ function toItem(row: SnapshotRow): SnapshotItem {
 }
 
 export class SnapshotItemRepository {
-  constructor(private readonly db: SqlDatabase) {}
+  constructor(private readonly db: SqlDatabase, public readonly teamId: string) {}
 
   async upsert(record: ConfigSnapshotRecord, sizeBytes: number, uploadedBy: string | null): Promise<SnapshotItem> {
     const existing = await this.findById(record.id);
     const now = new Date().toISOString();
 
     if (existing) {
-      await this.db.run(
-        `UPDATE snapshots SET name = ?, sha256 = ?, file_path = ?, size_bytes = ?, wordpress_version = ?, locale = ?, generated_at = ?, document_json = ?
-         WHERE id = ?`,
-        [
+      await this.db.run(`UPDATE snapshots SET name = ?, sha256 = ?, file_path = ?, size_bytes = ?, wordpress_version = ?, locale = ?, generated_at = ?, document_json = ?
+         WHERE id = ? AND team_id = ?`, [
           record.name,
           record.sha256,
           record.zip,
@@ -65,15 +65,13 @@ export class SnapshotItemRepository {
           record.generatedAt,
           JSON.stringify(record),
           record.id
-        ]
+        , this.teamId]
       );
       return (await this.findById(record.id)) as SnapshotItem;
     }
 
-    await this.db.run(
-      `INSERT INTO snapshots (id, name, sha256, file_path, size_bytes, wordpress_version, locale, generated_at, document_json, uploaded_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
+    await this.db.run(`INSERT INTO snapshots (team_id, id, name, sha256, file_path, size_bytes, wordpress_version, locale, generated_at, document_json, uploaded_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [this.teamId,
         record.id,
         record.name,
         record.sha256,
@@ -92,12 +90,12 @@ export class SnapshotItemRepository {
   }
 
   async list(): Promise<SnapshotItem[]> {
-    const rows = await this.db.all<SnapshotRow>("SELECT * FROM snapshots ORDER BY generated_at DESC, created_at DESC");
+    const rows = await this.db.all<SnapshotRow>("SELECT * FROM snapshots WHERE team_id = ? ORDER BY generated_at DESC, created_at DESC", [this.teamId]);
     return rows.map(toItem);
   }
 
   async findById(id: string): Promise<SnapshotItem | null> {
-    const row = await this.db.get<SnapshotRow>("SELECT * FROM snapshots WHERE id = ?", [id]);
+    const row = await this.db.get<SnapshotRow>("SELECT * FROM snapshots WHERE team_id = ? AND id = ?", [this.teamId, id]);
     return row ? toItem(row) : null;
   }
 
@@ -108,13 +106,11 @@ export class SnapshotItemRepository {
   }
 
   async remove(id: string): Promise<void> {
-    await this.db.run("DELETE FROM snapshots WHERE id = ?", [id]);
+    await this.db.run("DELETE FROM snapshots WHERE team_id = ? AND id = ?", [this.teamId, id]);
   }
 
-  async bytesForUser(userId: string): Promise<number> {
-    const row = await this.db.get<{ total: number }>(
-      "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM snapshots WHERE uploaded_by = ?",
-      [userId]
+  async totalBytes(): Promise<number> {
+    const row = await this.db.get<{ total: number }>("SELECT COALESCE(SUM(size_bytes), 0) AS total FROM snapshots WHERE team_id = ?", [this.teamId]
     );
     return Number(row?.total ?? 0);
   }

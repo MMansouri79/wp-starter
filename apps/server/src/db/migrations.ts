@@ -151,6 +151,46 @@ export const MIGRATIONS: Migration[] = [
   }
 ];
 
+/** Stable seed identity used only when upgrading the original shared library. */
+export const LEGACY_TEAM_ID = "00000000-0000-4000-8000-000000000001";
+export const CONTENT_TABLES = ["packages", "snapshots", "profiles", "typography_profiles", "color_profiles", "design_systems", "font_profiles", "portable_templates", "elementor_templates", "sample_content", "builds"] as const;
+const hasLegacyData = ["users", ...CONTENT_TABLES].map(table => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ");
+const contentStatements: string[] = [];
+for (const table of CONTENT_TABLES) {
+  const create = MIGRATIONS.flatMap(m => m.statements).find(sql => sql.startsWith(`CREATE TABLE IF NOT EXISTS ${table} (`))!;
+  const columns = create.slice(create.indexOf("(") + 1, create.lastIndexOf(")"));
+  const names = columns.split(",").map(column => column.trim().split(/\s+/)[0]);
+  contentStatements.push(
+    `ALTER TABLE ${table} RENAME TO ${table}_legacy`,
+    `CREATE TABLE ${table} (team_id TEXT NOT NULL REFERENCES teams(id), ${columns.replace("id TEXT PRIMARY KEY", "id TEXT NOT NULL")}, PRIMARY KEY (team_id, id))`,
+    `INSERT INTO ${table} (team_id, ${names.join(", ")}) SELECT '${LEGACY_TEAM_ID}', ${names.join(", ")} FROM ${table}_legacy`,
+    `DROP TABLE ${table}_legacy`
+  );
+}
+MIGRATIONS.push({ version: 5, name: "private_team_workspaces", statements: [
+  "CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, created_by TEXT, created_at TEXT NOT NULL)",
+  "CREATE TABLE team_memberships (team_id TEXT NOT NULL REFERENCES teams(id), user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (team_id, user_id))",
+  "CREATE TABLE team_invites (id TEXT PRIMARY KEY, team_id TEXT NOT NULL REFERENCES teams(id), email TEXT NOT NULL, role TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_by TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT, used_by TEXT, revoked_at TEXT)",
+  "CREATE TABLE team_audit (id TEXT PRIMARY KEY, team_id TEXT NOT NULL REFERENCES teams(id), actor_id TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, created_at TEXT NOT NULL)",
+  "CREATE INDEX team_audit_team_index ON team_audit (team_id, created_at)",
+  "CREATE TABLE team_migration (id TEXT PRIMARY KEY, state TEXT NOT NULL)",
+  `INSERT INTO team_migration (id, state) SELECT 'library', CASE WHEN ${hasLegacyData} THEN 'pending' ELSE 'complete' END`,
+  `INSERT INTO teams (id, name, status, created_by, created_at) SELECT '${LEGACY_TEAM_ID}', 'Our team', 'active', NULL, '2026-10-12T00:00:00.000Z' WHERE ${hasLegacyData}`,
+  `INSERT INTO team_memberships (team_id, user_id, role, created_at) SELECT '${LEGACY_TEAM_ID}', id, CASE WHEN role = 'admin' THEN 'owner' ELSE 'editor' END, created_at FROM users`,
+  ...contentStatements,
+  "CREATE UNIQUE INDEX packages_coordinate_unique ON packages (team_id, kind, slug, version, variant)",
+  "CREATE UNIQUE INDEX profiles_file_unique ON profiles (team_id, file_name)",
+  "CREATE INDEX builds_status_index ON builds (status, created_at)",
+  "CREATE INDEX team_memberships_user_index ON team_memberships (user_id)",
+  "DELETE FROM invites",
+  "DELETE FROM sessions"
+] });
+
+MIGRATIONS.push({ version: 6, name: "plugin_library_updates", statements: [
+  "CREATE TABLE plugin_update_settings (team_id TEXT PRIMARY KEY REFERENCES teams(id), enabled INTEGER NOT NULL, authorized_by TEXT NOT NULL, revision TEXT NOT NULL, last_check TEXT, results_json TEXT NOT NULL)",
+  "CREATE TABLE plugin_update_sources (team_id TEXT NOT NULL REFERENCES teams(id), slug TEXT NOT NULL, PRIMARY KEY (team_id, slug))"
+] });
+
 export async function migrate(database: SqlDatabase, log: (message: string) => void = () => undefined): Promise<number[]> {
   await database.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,

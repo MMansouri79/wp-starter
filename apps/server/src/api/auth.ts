@@ -70,7 +70,7 @@ export function registerAuthRoutes(router: Router, app: AppContext): void {
     const result = await auth.login(email, password, sessionMeta(context, config.trustProxy));
     setSessionCookies(context, result.token, result.session.csrfToken, config.sessionTtlHours * 3600);
     log.info(`Signed in ${result.user.email} (${result.user.role}).`);
-    sendJson(context.res, 200, sessionPayload({ ...context, auth: { user: result.user, session: result.session } }, result.user.role === "admin"));
+    sendJson(context.res, 200, { ...sessionPayload({ ...context, auth: { user: result.user, session: result.session } }, result.user.role === "admin"), teams: await app.teams.forUser(result.user.id) });
   });
 
   router.post("/api/auth/register", async (context) => {
@@ -89,11 +89,11 @@ export function registerAuthRoutes(router: Router, app: AppContext): void {
 
     setSessionCookies(context, result.token, result.session.csrfToken, config.sessionTtlHours * 3600);
     log.info(`Registered ${result.user.email} (${result.user.role}).`);
-    sendJson(context.res, 200, sessionPayload({ ...context, auth: { user: result.user, session: result.session } }, result.user.role === "admin"));
+    sendJson(context.res, 200, { ...sessionPayload({ ...context, auth: { user: result.user, session: result.session } }, result.user.role === "admin"), teams: await app.teams.forUser(result.user.id) });
   });
 
   router.get("/api/auth/session", async (context) => {
-    sendJson(context.res, 200, sessionPayload(context, context.auth?.user.role === "admin"));
+    sendJson(context.res, 200, { ...sessionPayload(context, context.auth?.user.role === "admin"), teams: context.auth ? await app.teams.forUser(context.auth.user.id) : [] });
   });
 
   router.post("/api/auth/logout", async (context) => {
@@ -119,8 +119,8 @@ export function registerAuthRoutes(router: Router, app: AppContext): void {
   });
 
   router.get("/api/auth/quota", async (context) => {
-    const user = requireUser(context);
-    sendJson(context.res, 200, await app.quota.usage(user.id));
+    requireUser(context);
+    throw badRequest("team_required", "Use your team's quota endpoint.");
   });
 
   router.get("/api/health", async (context) => {

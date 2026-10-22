@@ -51,6 +51,7 @@ export function normalizeEmail(email: string): string {
 }
 
 export interface CreateUserInput {
+  id?: string;
   email: string;
   displayName: string;
   role: Role;
@@ -91,7 +92,7 @@ export class UserRepository {
     if (existing) throw conflict("email_in_use", `An account already exists for ${input.email}.`);
 
     const user: User = {
-      id: randomUUID(),
+      id: input.id ?? randomUUID(),
       email: input.email.trim(),
       displayName: input.displayName.trim() || input.email.trim(),
       role: input.role,

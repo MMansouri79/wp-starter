@@ -78,7 +78,10 @@ final class Exporter {
             ),
             'safety' => array(
                 'users_exported'                              => false,
-                'uploads_exported'                            => false,
+                'uploads_exported'                            => ! empty( $selection['export_posts'] ) || ! empty( $selection['export_products'] ),
+                'posts_exported'                              => ! empty( $selection['export_posts'] ),
+                'products_exported'                           => ! empty( $selection['export_products'] ),
+                'arbitrary_post_meta_exported'                => false,
                 'arbitrary_options_exported'                  => false,
                 'credentials_exported'                        => false,
                 'raw_database_exported'                       => false,
@@ -95,13 +98,13 @@ final class Exporter {
         );
     }
 
-    public function build_manifest() {
+    public function build_manifest( array $selection = array() ) {
         return array(
             'schema_version'   => 2,
             'exporter_version' => MMS_WP_STARTER_EXPORTER_VERSION,
             'generated_at'     => gmdate( 'c' ),
             'policy'           => 'explicit_allowlists_and_target_selection',
-            'files'            => array( 'starter-config.json', 'export-manifest.json' ),
+            'files'            => ! empty( $selection['export_posts'] ) || ! empty( $selection['export_products'] ) ? array( 'starter-config.json', 'export-manifest.json', 'starter-site-content.json', 'sample-assets/' ) : array( 'starter-config.json', 'export-manifest.json' ),
         );
     }
 

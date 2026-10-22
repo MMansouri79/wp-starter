@@ -13,3 +13,4 @@ export * from "./vnext.js";
 export * from "./template-library.js";
 export * from "./fs-utils.js";
 export * from "./sample-content.js";
+export * from "./site-content.js";

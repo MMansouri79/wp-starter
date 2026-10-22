@@ -94,6 +94,8 @@ Schema v2 references exact versions from the package library:
 
 Exact version pinning is deliberate. Updating a package means adding its new ZIP and changing the profile, not mutating builder code.
 
+The hosted server can optionally download new WordPress.org plugin releases into a team's library. In **Packages → Automatic plugin updates**, a team owner or administrator confirms which existing plugin slugs came from WordPress.org and enables the team-wide switch. It is disabled by default. Private, premium, infrastructure, and unconfirmed plugins are excluded. Only stable numeric releases are compared; unusual local version strings are skipped for manual review. Each release goes through the existing ZIP inspection, package identity checks, checksum registry, and team quota checks. Older versions remain available, and exact profile pins are never changed. Downloading a newer release does not certify compatibility with a profile or snapshot.
+
 Schema v1 path-based profiles remain readable during the Phase 1 transition but are deprecated.
 
 ## Generated distribution metadata
@@ -256,7 +258,7 @@ The design system requires Elementor and Elementor Pro; templates require Elemen
 
 ## Build profile schema v9 — sample content
 
-Schema v9 extends v8 with a reusable sample-content selection. Sample content is Builder-authored; it never comes from exported site data.
+Schema v9 extends v8 with a reusable sample-content selection. Sample content is Builder-authored. Optional reference-site content has a separate source document and selection, described below; importing a snapshot never adds source content to the sample library.
 
 ```json
 {
@@ -293,3 +295,82 @@ Profiles with sample content add `wp-content/<payload>/starter-sample-content.js
 ```
 
 Assets live under `sample-assets/` with generated names and SHA-256 hashes; images are limited to 20 MiB (JPEG/PNG/GIF/WebP) and downloads to 50 MiB (PDF/plain text), 500 MiB selected per build. Bootstrap verifies payload schema and checksums, installs terms with exact taxonomy/slug/hierarchy identity, stores images as real attachments, places downloads under WooCommerce's protected `woocommerce_uploads` area only when direct web access is denied, stages content as drafts, remaps logical references, applies final statuses, and verifies slugs, statuses, and term assignments before completing setup. Interrupted installs resume from saved checkpoints without duplicating records; conflicting slugs, SKUs, or terms stop with an actionable error. Content previews never execute sample HTML, and inline images use logical placeholders remapped to attachment URLs.
+
+## Optional exported posts and products
+
+Exporter v0.2.0-alpha.10 adds independent **Export all posts** and **Export all
+WooCommerce products** checkboxes, both off by default. Enabling either adds
+`starter-site-content.json` (schema v1: `content`, `terms`, `attributes`, `assets`)
+and referenced local assets to the configuration ZIP. Draft, pending, private,
+published and scheduled content is included; trash, revisions, auto-drafts,
+users, comments/reviews, orders and arbitrary post metadata are excluded.
+Password-protected records stop export rather than copying passwords.
+
+Classic posts carry titles, slugs, sanitized body/excerpt, publication date,
+status, comment/ping settings, sticky state, format, categories/tags and featured
+images. WooCommerce simple, variable, grouped and external products carry the
+standard editorial/catalog fields, prices and sale schedules, SKUs/unique IDs,
+stock, tax/shipping fields, visibility, galleries, brands, relationships,
+purchase notes and review settings. Variable products include global/local
+attributes, terms, defaults, and enabled/disabled variations with their own
+prices, stock, dimensions, images and local downloads. Products linked outside
+the export or unsupported extension product types cause validation errors.
+
+Schema v9 profiles may include:
+
+```json
+"siteContent": { "posts": true, "products": false }
+```
+
+Omitting the field includes no source posts/products, even when the snapshot
+contains them. The GUI presents independent switches under **Templates &
+content**. CLI profile creation accepts `--include-posts` and
+`--include-products`. A configuration snapshot is required. Products require a
+selected WooCommerce package for the profile locale. Empty or absent selected
+collections produce an actionable error. Older profile schemas remain unchanged.
+
+The Builder validates content and asset signatures/checksums, selects only the
+enabled collections and their dependencies, and combines them with selected
+samples in the checksum-protected installer payload. Source content IDs use the
+`site-` namespace; source asset IDs use `asset-site-`. Original source numeric IDs
+are never used as destination IDs. Samples and site content share the 500 MiB
+asset limit; each image is limited to 20 MiB, each PDF/plain-text document or
+download to 50 MiB. Only referenced local uploads are copied; no remote download
+occurs. Inline local images, classic gallery IDs and supported image-block IDs
+are remapped. Audio/video media, file blocks and unrecognized inline uploads
+stop export. Existing non-media hyperlinks and shortcodes are preserved;
+plugin-specific shortcode references need their own adapters.
+
+### Setup catalog controls
+
+During catalog provisioning, administrators can skip further image imports or keep current records and finish setup. Choices are nonce protected, serialized with the catalog mutation lock, and scoped to the payload checksum and fingerprint. Required attributes, terms and local download/document assets continue when only images are skipped. Stopping preserves existing records and unfinished drafts, records the checkpoint, and bypasses catalog reentry on later requests. The completion report distinguishes a stopped import from a verified full import.
+
+### ACF adapter
+
+Generated content/term slugs use WordPress's 200-character percent-encoded budget,
+not a 200-character Unicode text limit. CSV catalog compilation reserves the
+source identifier/hash suffix inside that budget. Existing overlong explicit
+slugs must be shortened before packaging; installation still checks exact slug
+identity and refuses destination conflicts.
+
+Applicable ACF field groups with `post_type == post`/`product` locations are
+exported with an allowlist of definitions/settings and their values. Supported
+types: text, textarea, number, range, email, URL, WYSIWYG, select, checkbox, radio,
+button group, true/false, date/time/color pickers, link, image, gallery, file,
+post object, relationship, taxonomy, group, repeater, flexible content and
+tab/accordion/message layout fields. File fields support local images or
+PDF/plain-text attachments; WooCommerce download files remain protected, while
+ACF documents become regular attachments. Taxonomy fields support the standard
+post/product taxonomies. Content relationships support exported posts/products.
+Cross-type relationships require both profile switches. Unsupported field
+types (including password, user, clone and third-party fields), location rules,
+custom taxonomies or references outside the export stop with an explicit error.
+ACF options, user fields and arbitrary metadata are not copied.
+
+Selected ACF content requires ACF in the build; gallery/repeater/flexible fields
+require ACF Pro. The installer persists groups through ACF, reuses matching
+existing definitions, refuses conflicting definitions, remaps IDs after all
+drafts/media/terms exist, and writes values through `update_field()` before
+publication. The installing administrator owns new content; source users are
+not migrated. Field values are content and may include private editorial data;
+only enable source content export when it is intended for the new site.

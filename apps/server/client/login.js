@@ -13,6 +13,19 @@
   var togglePrompt = document.getElementById("toggle-prompt");
   var subtitle = document.getElementById("subtitle");
   var passwordInput = document.getElementById("password");
+  var invitation = new URLSearchParams(window.location.hash.slice(1)).get("invite") || "";
+  if (invitation) document.getElementById("inviteCode").value = invitation;
+  async function finish(data, acceptInvitation) {
+    if (invitation && acceptInvitation) {
+      var response = await fetch("/api/auth/team-invites/accept", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": data.csrfToken }, body: JSON.stringify({ token: invitation }) });
+      var result = await response.json();
+      if (!response.ok) throw new Error(result.error.message);
+      window.location.replace("/?team=" + encodeURIComponent(result.teamId));
+      return;
+    }
+    var teams = data.teams || [];
+    window.location.replace(teams.length === 1 ? "/?team=" + encodeURIComponent(teams[0].id) : "/teams.html");
+  }
 
   function showError(message) {
     errorBox.textContent = message;
@@ -41,10 +54,10 @@
     nameField.hidden = !creating;
     submit.textContent = creating ? "Create account" : "Sign in";
     toggle.textContent = creating ? "Sign in instead" : "Create an account";
-    togglePrompt.textContent = creating ? "Already have an account?" : "Have an invitation code?";
+    togglePrompt.textContent = creating ? "Already have an account?" : "Invited to a team?";
     subtitle.textContent = creating
-      ? "Create your account with the invitation code you received."
-      : "Sign in to the shared starter library.";
+      ? "Create an account to join the team that invited you."
+      : "Sign in to your private team workspaces.";
     passwordInput.setAttribute("autocomplete", creating ? "new-password" : "current-password");
     passwordInput.minLength = creating ? 10 : 1;
     clearMessages();
@@ -90,7 +103,7 @@
         if (!result.ok) {
           throw new Error((result.data.error && result.data.error.message) || "Sign-in failed.");
         }
-        window.location.replace("/");
+        return finish(result.data, state.mode === "login");
       })
       .catch(function (error) {
         showError(error.message);
@@ -104,9 +117,9 @@
       return response.json();
     })
     .then(function (data) {
-      if (data && data.authenticated) window.location.replace("/");
+      if (data && data.authenticated) return finish(data, true);
     })
-    .catch(function () {
-      /* Offline or first load: stay on the form. */
+    .catch(function (error) {
+      if (invitation) showError(error.message);
     });
 })();

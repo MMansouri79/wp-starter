@@ -19,7 +19,7 @@ const DELETABLE_KINDS: readonly VNextResourceKind[] = ["typography", "colors", "
  *
  * Validation, id generation, and dependency protection stay in builder-core's
  * `DesignSystemResourceService`; this service adds the shared-library ownership
- * record and refuses writes from accounts that do not own the resource.
+ * record and enforces the selected team's editing role.
  */
 export class VNextResourceService {
   constructor(

@@ -7,7 +7,7 @@ WP Starter System is an offline-first WordPress starter build system. It has the
 - `packages/builder-core/`: shared TypeScript library for package inspection, registries, profiles, snapshots, compatibility checks, builds, and bootstrap payloads.
 - `apps/cli/`: command-line interface built on `builder-core`.
 - `apps/gui/`: local GUI that calls the same builder-core APIs.
-- `apps/server/`: hosted multi-user server (REST API, sessions, ownership, async build queue) that runs one shared library directory plus a database for accounts and item metadata. It reuses the `apps/gui/public/` assets through a request-time overlay instead of forking them.
+- `apps/server/`: hosted multi-user server with private team libraries, membership roles, sessions, invitations, and one global async build queue. It uses one database for identity and team-scoped metadata and reuses `apps/gui/public/` through a request-time overlay.
 - `deploy/`: systemd unit, nginx server block, and backup/disk-monitoring scripts for the server.
 - `wordpress/exporter/`: PHP exporter plugin that runs on a reference WordPress site.
 - `wordpress/bootstrap/`: PHP MU-plugin shipped in generated distributions.
@@ -54,7 +54,8 @@ Server tests boot an isolated application per test (`apps/server/tests/harness.m
 - The hosted server targets one process. API writes and build finalization share an in-process mutation lock; login/invite rate-limit counters expire in-process and reset on restart. Do not run replicas or concurrent CLI writes against the live shared library.
 
 - Keep `builder-core` permission-agnostic. Ownership, roles, and CSRF checks live in `apps/server/src/api/` and `apps/server/src/services/ownership.ts`; every write path calls `assertCanWrite`.
-- Anyone signed in reads the whole shared library; only the creator may edit or delete. Administrators manage people and invitations and get no rights over another account's items. Items with no owner (imported by the CLI) are manageable by administrators only.
+- Hosted content requires current membership in the selected active team. Owners, team admins, and editors can change any team item; viewers only browse and download existing builds. Platform administrators require membership to access content. Keep `createdBy` as attribution, including after account deletion. Protect the last active owner. See `docs/TEAM-WORKSPACES.md`.
+- Content repositories require a team ID and every lookup/mutation includes it. Portable IDs and package coordinates may repeat across teams. Library files live under `<dataDir>/teams/<team UUID>/`. Never fall back to a global library or resolve a path outside the team root. Queue workers, reconciliation, quotas, and retention must keep the recorded team scope.
 - The database stores identity, ownership, and item metadata. Large payloads stay in the shared file store, and builder-core's file registries remain the on-disk source of truth — the database is a mirror, which is why `LibrarySyncService` reconciles items created outside the web app.
 - SQL must stay portable across SQLite and PostgreSQL: TEXT identifiers and timestamps, INTEGER 0/1 booleans, `?` placeholders that `toPostgresPlaceholders()` rewrites. Never use `SERIAL` or dialect-specific functions.
 - Never leak internal paths to clients: strip `filePath` and `zip` with `withoutInternalPaths` before sending an item, and prefer application-generated UUIDs over database-assigned identifiers.
@@ -67,7 +68,7 @@ Server tests boot an isolated application per test (`apps/server/tests/harness.m
 - Run the narrowest relevant test while iterating, then run `npm run check` before handing off a change that affects runtime behavior, schemas, packaging, or PHP.
 - For changes to generated distributions, run `npm run verify:artifacts` and inspect the resulting verification output.
 - Prefer temporary directories and synthetic package/configuration fixtures used by the existing tests; never use private production packages or real credentials.
-- Server tests must cover the security boundary they touch: permission denials return `403 read_only`, cross-account items stay visible but read-only, and CSRF is required for every non-GET API call.
+- Server tests must cover the security boundary they touch: viewer content writes return `403 read_only`, cross-team endpoints/items return `404`, same-team editors collaborate, platform administration grants no content bypass, and authenticated non-GET API calls require CSRF.
 
 ## Change guidance
 

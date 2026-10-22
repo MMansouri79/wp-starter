@@ -110,25 +110,9 @@ export function registerAdminRoutes(router: Router, app: AppContext): void {
 
   router.post("/api/admin/invites", async (context) => {
     requireCsrf(context);
-    const actor = requireAdmin(context);
-    const body = await context.readJson();
-    const expiresInDays = body.expiresInDays === undefined ? undefined : Number(body.expiresInDays);
-    if (expiresInDays !== undefined && !Number.isFinite(expiresInDays)) {
-      throw badRequest("invalid_request", "expiresInDays must be a number.");
-    }
+    requireAdmin(context);
+    throw badRequest("team_required", "Create a team invitation instead. Legacy account invitations are disabled.");
 
-    const { invite, code } = await auth.createInvite(
-      {
-        email: typeof body.email === "string" ? body.email : null,
-        role: requireRole(body.role, "client"),
-        expiresInDays
-      },
-      actor.id
-    );
-
-    log.info(`${actor.email} created an invite for role ${invite.role}.`);
-    // The plaintext code is returned exactly once; only its digest is stored.
-    sendJson(context.res, 201, { invite: inviteView(invite, await app.users.displayNames()), code });
   });
 
   router.delete("/api/admin/invites/:id", async (context) => {
@@ -148,7 +132,7 @@ export function registerAdminRoutes(router: Router, app: AppContext): void {
       users: users.length,
       byRole,
       active: users.filter((user) => user.status === "active").length,
-      pendingInvites: invites.filter((invite) => invite.usedAt === null && Date.parse(invite.expiresAt) > Date.now()).length,
+      pendingInvites: Number((await app.db.get<{ total: number }>("SELECT COUNT(*) AS total FROM team_invites WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at > ?", [new Date().toISOString()]))?.total ?? 0),
       activeBuilds: await app.buildItems.countActive(),
       accounts: users
     });

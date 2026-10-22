@@ -42,6 +42,16 @@ Build profiles can install Builder-authored sample content through profile schem
 
 ## Next milestones
 
+### Optional reference-site content
+
+Reference posts/products now have a separate opt-in export document and profile
+selection. They remain separate from the Builder-authored Sample Content library.
+Classic-editor content and standard WooCommerce catalog data, including variable
+products and global/local attributes, use the existing resumable installer.
+Supported ACF definitions and values are carried through a dedicated adapter;
+media, taxonomy and relationship IDs are remapped. See `PACKAGE-FORMAT.md` for
+supported fields, asset limits and exclusions.
+
 1. **Adapter contracts and remapping** — formalize export/import/validate/remap hooks for Elementor, WooCommerce, FilterX, and future plugins.
 2. **Portable structures/layouts** — Elementor templates are inventoried per source snapshot, selected across snapshots, dependency-closed, namespaced during composition, and remapped at bootstrap without copying destination-specific database IDs. FilterX definitions remain deferred.
 3. **Larger-site validation** — compare reference and reproduced sites using the inspection/diff engine and turn every unexplained difference into an adapter requirement.

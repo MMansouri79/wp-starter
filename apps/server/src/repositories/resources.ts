@@ -27,6 +27,7 @@ export interface ResourceItem<T = unknown> extends OwnedItem {
 }
 
 interface ResourceRow {
+  team_id: string;
   id: string;
   name: string;
   sha256: string;
@@ -39,6 +40,7 @@ interface ResourceRow {
 function toItem<T>(row: ResourceRow): ResourceItem<T> {
   return {
     id: row.id,
+    teamId: row.team_id,
     name: row.name,
     sha256: row.sha256,
     document: JSON.parse(row.document_json) as T,
@@ -63,7 +65,7 @@ export interface SaveResourceInput<T> {
 export class ResourceRepository {
   private readonly table: string;
 
-  constructor(private readonly db: SqlDatabase, kind: ResourceKind) {
+  constructor(private readonly db: SqlDatabase, kind: ResourceKind, public readonly teamId: string) {
     this.table = RESOURCE_TABLES[kind];
     if (!this.table) throw new Error(`Unsupported resource kind: ${String(kind)}`);
   }
@@ -73,20 +75,17 @@ export class ResourceRepository {
     const now = new Date().toISOString();
 
     if (existing) {
-      await this.db.run(
-        `UPDATE ${this.table} SET name = ?, sha256 = ?, document_json = ?, updated_at = ? WHERE id = ?`,
-        [input.name, input.sha256, JSON.stringify(input.document), now, input.id]
+      await this.db.run(`UPDATE ${this.table} SET name = ?, sha256 = ?, document_json = ?, updated_at = ? WHERE id = ? AND team_id = ?`, [input.name, input.sha256, JSON.stringify(input.document), now, input.id, this.teamId]
       );
       return (await this.findById<T>(input.id)) as ResourceItem<T>;
     }
 
-    await this.db.run(
-      `INSERT INTO ${this.table} (id, name, sha256, document_json, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [input.id, input.name, input.sha256, JSON.stringify(input.document), input.createdBy, now, now]
+    await this.db.run(`INSERT INTO ${this.table} (team_id, id, name, sha256, document_json, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [this.teamId, input.id, input.name, input.sha256, JSON.stringify(input.document), input.createdBy, now, now]
     );
 
     return {
+      teamId: this.teamId,
       id: input.id,
       name: input.name,
       sha256: input.sha256,
@@ -98,12 +97,12 @@ export class ResourceRepository {
   }
 
   async list<T>(): Promise<ResourceItem<T>[]> {
-    const rows = await this.db.all<ResourceRow>(`SELECT * FROM ${this.table} ORDER BY name ASC`);
+    const rows = await this.db.all<ResourceRow>(`SELECT * FROM ${this.table} WHERE team_id = ? ORDER BY name ASC`, [this.teamId]);
     return rows.map((row) => toItem<T>(row));
   }
 
   async findById<T>(id: string): Promise<ResourceItem<T> | null> {
-    const row = await this.db.get<ResourceRow>(`SELECT * FROM ${this.table} WHERE id = ?`, [id]);
+    const row = await this.db.get<ResourceRow>(`SELECT * FROM ${this.table} WHERE team_id = ? AND id = ?`, [this.teamId, id]);
     return row ? toItem<T>(row) : null;
   }
 
@@ -114,20 +113,20 @@ export class ResourceRepository {
   }
 
   async remove(id: string): Promise<void> {
-    await this.db.run(`DELETE FROM ${this.table} WHERE id = ?`, [id]);
+    await this.db.run(`DELETE FROM ${this.table} WHERE team_id = ? AND id = ?`, [this.teamId, id]);
   }
 
   /** Repairs pre-hardening derived-template ownership from its source snapshot. */
   async assignUnowned(id: string, owner: string): Promise<void> {
-    await this.db.run(`UPDATE ${this.table} SET created_by = ? WHERE id = ? AND created_by IS NULL`, [owner, id]);
+    await this.db.run(`UPDATE ${this.table} SET created_by = ? WHERE id = ? AND created_by IS NULL AND team_id = ?`, [owner, id, this.teamId]);
   }
 
   /** Drops rows whose ids are no longer present in the file registry. */
   async pruneMissing(ids: string[]): Promise<number> {
-    const rows = await this.db.all<{ id: string }>(`SELECT id FROM ${this.table}`);
+    const rows = await this.db.all<{ id: string }>(`SELECT id FROM ${this.table} WHERE team_id = ?`, [this.teamId]);
     const keep = new Set(ids);
     const stale = rows.filter((row) => !keep.has(row.id));
-    for (const row of stale) await this.db.run(`DELETE FROM ${this.table} WHERE id = ?`, [row.id]);
+    for (const row of stale) await this.db.run(`DELETE FROM ${this.table} WHERE team_id = ? AND id = ?`, [this.teamId, row.id]);
     return stale.length;
   }
 }
@@ -141,27 +140,24 @@ export interface SampleResourceItem<T = unknown> extends ResourceItem<T> {
 }
 
 export class SampleContentRepository {
-  constructor(private readonly db: SqlDatabase) {}
+  constructor(private readonly db: SqlDatabase, public readonly teamId: string) {}
 
   async save<T>(resource: SampleResourceKind, input: SaveResourceInput<T>): Promise<SampleResourceItem<T>> {
     const existing = await this.findById<T>(resource, input.id);
     const now = new Date().toISOString();
 
     if (existing) {
-      await this.db.run(
-        "UPDATE sample_content SET name = ?, sha256 = ?, document_json = ?, updated_at = ? WHERE id = ?",
-        [input.name, input.sha256, JSON.stringify(input.document), now, input.id]
+      await this.db.run("UPDATE sample_content SET name = ?, sha256 = ?, document_json = ?, updated_at = ? WHERE id = ? AND team_id = ?", [input.name, input.sha256, JSON.stringify(input.document), now, input.id, this.teamId]
       );
       return { ...(await this.findById<T>(resource, input.id)) as SampleResourceItem<T> };
     }
 
-    await this.db.run(
-      `INSERT INTO sample_content (id, resource, name, sha256, document_json, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [input.id, resource, input.name, input.sha256, JSON.stringify(input.document), input.createdBy, now, now]
+    await this.db.run(`INSERT INTO sample_content (team_id, id, resource, name, sha256, document_json, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [this.teamId, input.id, resource, input.name, input.sha256, JSON.stringify(input.document), input.createdBy, now, now]
     );
 
     return {
+      teamId: this.teamId,
       id: input.id,
       resource,
       name: input.name,
@@ -174,24 +170,24 @@ export class SampleContentRepository {
   }
 
   async list<T>(): Promise<SampleResourceItem<T>[]> {
-    const rows = await this.db.all<SampleRow>("SELECT * FROM sample_content ORDER BY name ASC");
+    const rows = await this.db.all<SampleRow>("SELECT * FROM sample_content WHERE team_id = ? ORDER BY name ASC", [this.teamId]);
     return rows.map((row) => ({ ...toItem<T>(row), resource: row.resource as SampleResourceKind }));
   }
 
   async findById<T>(resource: SampleResourceKind, id: string): Promise<SampleResourceItem<T> | null> {
-    const row = await this.db.get<SampleRow>("SELECT * FROM sample_content WHERE resource = ? AND id = ?", [resource, id]);
+    const row = await this.db.get<SampleRow>("SELECT * FROM sample_content WHERE team_id = ? AND resource = ? AND id = ?", [this.teamId, resource, id]);
     return row ? { ...toItem<T>(row), resource } : null;
   }
 
   async remove(resource: SampleResourceKind, id: string): Promise<void> {
-    await this.db.run("DELETE FROM sample_content WHERE resource = ? AND id = ?", [resource, id]);
+    await this.db.run("DELETE FROM sample_content WHERE team_id = ? AND resource = ? AND id = ?", [this.teamId, resource, id]);
   }
 
   async pruneMissing(ids: string[]): Promise<number> {
-    const rows = await this.db.all<{ id: string }>("SELECT id FROM sample_content");
+    const rows = await this.db.all<{ id: string }>("SELECT id FROM sample_content WHERE team_id = ?", [this.teamId]);
     const keep = new Set(ids);
     const stale = rows.filter((row) => !keep.has(row.id));
-    for (const row of stale) await this.db.run("DELETE FROM sample_content WHERE id = ?", [row.id]);
+    for (const row of stale) await this.db.run("DELETE FROM sample_content WHERE team_id = ? AND id = ?", [this.teamId, row.id]);
     return stale.length;
   }
 }

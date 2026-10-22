@@ -17,5 +17,9 @@ await cp(path.join(repoRoot, "wordpress/exporter"), stage, { recursive: true, fo
 await writeFile(path.join(stage, "VERSION.txt"), `${version}\n`, "utf8");
 await mkdir(artifacts, { recursive: true });
 await createZip(stageRoot, output);
+// The hosted server exposes only this fixed public artifact, never the library.
+const downloads = path.join(repoRoot, "apps/server/client/downloads");
+await mkdir(downloads, { recursive: true });
+await cp(output, path.join(downloads, "wp-starter-exporter.zip"));
 await rm(stageRoot, { recursive: true, force: true });
 console.log(output);

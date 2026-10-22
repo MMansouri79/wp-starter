@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Your teams · WP Starter</title>
+  <link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/design.css">
+  <script src="/ui.js"></script>
+</head>
+<body class="ws-admin">
+  <header class="ws-admin-header"><div><h1 id="team-title">Your teams</h1><p id="team-description">Choose a private workspace.</p></div><nav><a href="/teams.html">All teams</a><a id="platform-link" href="/admin" hidden>Platform administration</a><button id="team-signout" class="ws-button ws-secondary" type="button">Sign out</button></nav></header>
+  <main>
+    <p id="team-message" role="status" aria-live="polite"></p>
+    <section id="team-picker" class="ws-panel"><h2>Workspaces</h2><div id="team-list">Loading…</div></section>
+    <section id="team-settings" class="ws-panel" hidden><h2>Team members</h2><div id="team-members"></div></section>
+    <section id="team-invitations" class="ws-panel" hidden>
+      <h2>Invite a colleague</h2><p>Links match the recipient’s email, expire in seven days, and can be used once.</p>
+      <form id="team-invite-form" class="ws-form-row"><label>Email<input id="team-invite-email" type="email" required maxlength="254"></label><label>Role<select id="team-invite-role"><option value="editor">Editor</option><option value="viewer">Viewer</option></select></label><button class="ws-button" type="submit">Create invitation link</button></form>
+      <div id="team-invite-result" class="ws-invite-code" hidden><label>Invitation link<input id="team-invite-link" readonly></label><button id="team-copy-invite" class="ws-button ws-secondary" type="button">Copy link</button></div>
+      <h3>Invitations</h3><div id="team-invite-list"></div>
+    </section>
+    <section id="team-audit-panel" class="ws-panel" hidden><h2>Recent activity</h2><div id="team-audit"></div></section>
+  </main>
+  <script src="/team-page.js"></script>
+</body>
+</html>

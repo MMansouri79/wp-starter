@@ -113,7 +113,7 @@ test("enforces the CSRF token on mutating requests", async (t) => {
   });
   assert.equal(withWrongToken.status, 403);
 
-  const withToken = await client.post("/api/admin/invites", { json: { role: "client" } });
+  const withToken = await client.post(`/api/teams/${server.teamId}/invites`, { json: { role: "editor", email: "colleague@example.test" } });
   assert.equal(withToken.status, 201);
 });
 

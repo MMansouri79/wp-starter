@@ -64,61 +64,23 @@
       .join("");
   }
 
-  function renderInvites(invites) {
-    var pending = invites.filter(function (invite) {
-      return invite.pending;
+  function renderTeams(teams) {
+    el("invites").replaceChildren();
+    teams.forEach(function(team) {
+      var row = document.createElement("div"); row.className = "ws-team-row";
+      var label = document.createElement("span"); label.textContent = team.name + " · " + team.status; row.appendChild(label);
+      var toggle = document.createElement("button"); toggle.className = "ws-button ws-secondary"; toggle.type = "button"; toggle.textContent = team.status === "active" ? "Suspend" : "Activate";
+      toggle.addEventListener("click", async function () {
+        if (!await WPUI.confirm(toggle.textContent + " " + team.name + "?")) return;
+        try { await api("/api/admin/teams/" + team.id + "/status", { method: "POST", body: JSON.stringify({ status: team.status === "active" ? "suspended" : "active" }) }); await load(); } catch (error) { message(error.message, true); }
+      }); row.appendChild(toggle);
+      var retry = document.createElement("button"); retry.type = "button"; retry.className = "ws-button ws-secondary"; retry.textContent = "Reissue initial owner invite";
+      retry.addEventListener("click", async function () {
+        var email = await WPUI.dialog({ title: "Initial owner invitation", message: "Available only before an owner joins.", input: true, label: "Owner email", accept: "Create invitation" }); if (!email) return;
+        try { var data = await api("/api/admin/teams/" + team.id + "/owner-invite", { method: "POST", body: JSON.stringify({ email: email }) }); el("invite-code").textContent = data.invitationUrl; el("invite-result").classList.remove("ws-hidden"); } catch (error) { message(error.message, true); }
+      }); row.appendChild(retry); el("invites").appendChild(row);
     });
-
-    if (!pending.length) {
-      el("invites").innerHTML = '<div class="ws-empty">No pending invitations.</div>';
-      return;
-    }
-
-    var rows = pending
-      .map(function (invite) {
-        return (
-          "<tr>" +
-          "<td><code>…" +
-          text(invite.codeHint) +
-          "</code></td>" +
-          "<td>" +
-          text(invite.email || "Any email") +
-          "</td>" +
-          "<td>" +
-          text(invite.role) +
-          "</td>" +
-          "<td>" +
-          text(invite.createdByName) +
-          "</td>" +
-          "<td>" +
-          new Date(invite.expiresAt).toLocaleDateString() +
-          "</td>" +
-          '<td><button class="ws-button ws-danger" type="button" data-revoke="' +
-          text(invite.id) +
-          '">Revoke</button></td>' +
-          "</tr>"
-        );
-      })
-      .join("");
-
-    el("invites").innerHTML =
-      '<table class="ws-table"><thead><tr><th>Code</th><th>Reserved for</th><th>Role</th><th>Created by</th><th>Expires</th><th></th></tr></thead><tbody>' +
-      rows +
-      "</tbody></table>";
-
-    Array.prototype.forEach.call(el("invites").querySelectorAll("[data-revoke]"), function (button) {
-      button.addEventListener("click", async function () {
-        if (!await WPUI.confirm("Revoke this invitation code?")) return;
-        api("/api/admin/invites/" + encodeURIComponent(button.getAttribute("data-revoke")), { method: "DELETE" })
-          .then(function () {
-            message("Invitation revoked.");
-            load();
-          })
-          .catch(function (error) {
-            message(error.message, true);
-          });
-      });
-    });
+    if (!teams.length) el("invites").textContent = "No teams yet.";
   }
 
   function renderUsers(users) {
@@ -237,7 +199,7 @@
     Array.prototype.forEach.call(el("users").querySelectorAll("[data-remove]"), function (button) {
       button.addEventListener("click", async function () {
         var email = button.getAttribute("data-email");
-        if (!await WPUI.confirm("Delete " + email + "? Items they created stay in the shared library as unowned.")) return;
+        if (!await WPUI.confirm("Delete " + email + "? Their team items and creator attribution are retained.")) return;
         api("/api/admin/users/" + encodeURIComponent(button.getAttribute("data-remove")), { method: "DELETE" })
           .then(function () {
             message("Account deleted.");
@@ -251,10 +213,10 @@
   }
 
   function load() {
-    return Promise.all([api("/api/admin/overview"), api("/api/admin/invites")])
+    return Promise.all([api("/api/admin/overview"), api("/api/admin/teams")])
       .then(function (results) {
         renderStats(results[0]);
-        renderInvites(results[1].invites);
+        renderTeams(results[1].teams);
         renderUsers(results[0].accounts);
       })
       .catch(function (error) {
@@ -262,31 +224,17 @@
       });
   }
 
-  el("create-invite").addEventListener("click", function () {
-    var days = Number(el("invite-days").value) || 14;
-    api("/api/admin/invites", {
-      method: "POST",
-      body: JSON.stringify({
-        email: el("invite-email").value,
-        role: el("invite-role").value,
-        expiresInDays: days
-      })
-    })
-      .then(function (data) {
-        el("invite-code").textContent = data.code;
-        el("invite-result").classList.remove("ws-hidden");
-        message("Invitation created. Copy the code now; it will not be shown again.");
-        load();
-      })
-      .catch(function (error) {
-        message(error.message, true);
-      });
+  el("provision-team").addEventListener("submit", function (event) {
+    event.preventDefault(); el("create-invite").disabled = true;
+    api("/api/admin/teams", { method: "POST", body: JSON.stringify({ name: el("team-name").value, ownerEmail: el("invite-email").value }) })
+      .then(function (data) { el("invite-code").textContent = data.invitationUrl; el("invite-result").classList.remove("ws-hidden"); message("Team created. Copy the owner invitation link now."); return load(); })
+      .catch(function(error) { message(error.message, true); }).finally(function() { el("create-invite").disabled = false; });
   });
 
   el("copy-invite").addEventListener("click", function () {
     var code = el("invite-code").textContent;
     if (navigator.clipboard) navigator.clipboard.writeText(code);
-    message("Invitation code copied.");
+    message("Invitation link copied.");
   });
 
   el("create-user").addEventListener("click", function () {

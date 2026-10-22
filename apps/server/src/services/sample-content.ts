@@ -55,12 +55,13 @@ export class SampleContentService {
   }
 
   async save(body: Record<string, unknown>, user: User): Promise<SampleContent> {
+    assertCanWrite({ createdBy: null }, user, "save");
     const id = typeof body.id === "string" && body.id ? body.id : undefined;
     const existing = id ? await this.items.findById<SampleContent>("content", id) : null;
     const stored = id ? (await this.registry().list()).content.some((row) => row.id === id) : false;
     if (existing || stored) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
 
-    const saved = await this.registry().save(body, id);
+    const saved = await this.registry().save(body, stored ? id : undefined);
     await this.items.save("content", {
       id: saved.id,
       name: nameOf("content", saved),
@@ -72,12 +73,13 @@ export class SampleContentService {
   }
 
   async saveTerm(body: Record<string, unknown>, user: User): Promise<SampleTerm> {
+    assertCanWrite({ createdBy: null }, user, "save");
     const id = typeof body.id === "string" && body.id ? body.id : undefined;
     const existing = id ? await this.items.findById<SampleTerm>("terms", id) : null;
     const stored = id ? (await this.registry().list()).terms.some((row) => row.id === id) : false;
     if (existing || stored) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
 
-    const saved = await this.registry().saveTerm(body, id);
+    const saved = await this.registry().saveTerm(body, stored ? id : undefined);
     await this.items.save("terms", {
       id: saved.id,
       name: nameOf("terms", saved),
@@ -89,12 +91,13 @@ export class SampleContentService {
   }
 
   async saveAttribute(body: Record<string, unknown>, user: User): Promise<SampleGlobalAttribute> {
+    assertCanWrite({ createdBy: null }, user, "save");
     const id = typeof body.id === "string" && body.id ? body.id : undefined;
     const existing = id ? await this.items.findById<SampleGlobalAttribute>("attributes", id) : null;
     const stored = id ? (await this.registry().list()).attributes.some((row) => row.id === id) : false;
     if (existing || stored) assertCanWrite(existing ?? { createdBy: null }, user, "replace");
 
-    const saved = await this.registry().saveAttribute(body, id);
+    const saved = await this.registry().saveAttribute(body, stored ? id : undefined);
     await this.items.save("attributes", {
       id: saved.id,
       name: nameOf("attributes", saved),

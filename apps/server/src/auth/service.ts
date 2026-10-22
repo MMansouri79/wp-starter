@@ -1,4 +1,5 @@
 import type { SqlDatabase } from "../db/driver.js";
+import { randomUUID } from "node:crypto";
 import { HttpError, badRequest, conflict, forbidden, notFound, unauthorized } from "../errors.js";
 import { InviteRepository } from "../repositories/invites.js";
 import { SessionRepository } from "../repositories/sessions.js";
@@ -6,7 +7,8 @@ import { publicUser, UserRepository, type UserWithSecret } from "../repositories
 import type { Invite, PublicUser, Role, SessionRecord, User } from "../types.js";
 import { assertPasswordStrength, hashPassword, verifyPassword } from "./passwords.js";
 import { LoginRateLimiter } from "./rate-limit.js";
-import { generateInviteCode, hashToken, inviteHint, normalizeInviteCode, randomToken } from "./tokens.js";
+import { generateInviteCode, hashToken, inviteHint, randomToken } from "./tokens.js";
+import { TeamService } from "../services/teams.js";
 
 export const SESSION_COOKIE = "wp_starter_session";
 
@@ -148,45 +150,28 @@ export class AuthService {
   }): Promise<LoginResult> {
     assertPasswordStrength(input.password);
 
-    const code = input.inviteCode ? normalizeInviteCode(input.inviteCode) : "";
-    if (!code && !this.options.allowOpenRegistration) {
-      throw badRequest("invite_required", "An invitation code is required to create an account.");
-    }
-
-    const invite = code ? await this.invites.findByCodeHash(hashToken(code)) : null;
-    if (code) {
-      if (!invite) throw badRequest("invite_invalid", "That invitation code is not valid.");
-      if (invite.usedAt) throw badRequest("invite_used", "That invitation code has already been used.");
-      if (Date.parse(invite.expiresAt) <= Date.now()) throw badRequest("invite_expired", "That invitation code has expired.");
-      if (invite.email && invite.email.toLowerCase() !== input.email.trim().toLowerCase()) {
-        throw badRequest("invite_email_mismatch", `That invitation is reserved for ${invite.email}.`);
-      }
-    }
-
-    const role: Role = invite?.role ?? "client";
+    const code = input.inviteCode?.trim() ?? "";
+    if (!code) throw badRequest("invite_required", "A team invitation is required to create an account.");
+    const teams = new TeamService(this.db, "");
+    await teams.validateInvite(code, input.email);
     const passwordHash = await hashPassword(input.password);
 
     return this.db.transaction(async (tx) => {
       const users = new UserRepository(tx);
       const sessions = new SessionRepository(tx);
-      const invites = new InviteRepository(tx);
-
-      if (invite) {
-        const current = await invites.findById(invite.id);
-        if (!current || current.usedAt || Date.parse(current.expiresAt) <= Date.now()) {
-          throw badRequest("invite_used", "That invitation code is no longer available.");
-        }
-      }
+      const userId = randomUUID();
+      const invite = await teams.reserveInvite(code, input.email, userId, tx);
 
       const user = await users.create({
+        id: userId,
         email: input.email,
         displayName: input.displayName?.trim() || input.email.split("@")[0] || "Member",
-        role,
+        role: "member",
         passwordHash,
-        createdBy: invite ? invite.createdBy : null
+        createdBy: invite.created_by
       });
 
-      if (invite) await invites.consume(invite.id, user.id);
+      await teams.joinInvite(invite, user, tx);
 
       return this.issueSession(sessions, user, input.meta);
     });
@@ -269,6 +254,7 @@ export class AuthService {
       throw badRequest("cannot_disable_self", "You cannot disable your own account.");
     }
     if (status !== "active") await this.assertNotLastAdmin(id);
+    if (status !== "active") await new TeamService(this.db, "").assertUserCanLeave(id);
     const updated = await this.users.setStatus(id, status);
     if (status !== "active") await this.sessions.removeForUser(id);
     return updated;
@@ -291,8 +277,15 @@ export class AuthService {
   async removeUser(id: string, actorId: string): Promise<void> {
     if (id === actorId) throw badRequest("cannot_remove_self", "You cannot delete your own account.");
     await this.assertNotLastAdmin(id);
-    await this.sessions.removeForUser(id);
-    await this.users.remove(id);
+    await new TeamService(this.db, "").assertUserCanLeave(id);
+    await this.db.transaction(async tx => {
+      const memberships = await tx.all<{ team_id: string }>("SELECT team_id FROM team_memberships WHERE user_id = ?", [id]);
+      const teams = new TeamService(tx, "");
+      for (const membership of memberships) await teams.audit(membership.team_id, actorId, "member.account_delete", id);
+      await new SessionRepository(tx).removeForUser(id);
+      await tx.run("DELETE FROM team_memberships WHERE user_id = ?", [id]);
+      await new UserRepository(tx).remove(id);
+    });
   }
 
   private async assertNotLastAdmin(id: string): Promise<void> {

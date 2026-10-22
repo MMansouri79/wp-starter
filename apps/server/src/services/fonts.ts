@@ -55,7 +55,7 @@ export class FontProfileService {
         const owned = await this.items.findById<FontSystemRecord>(record.id);
         assertCanWrite(owned ?? { createdBy: null }, user, "replace");
         if (!prepared.some((row) => row.id === record.id)) await this.library.designSystems().assertFontNotReferenced(record.id);
-        if (owned?.createdBy === user.id) previousBytes += await this.measure(record);
+        previousBytes += await this.measure(record);
       }
       await this.quota.assertWithinQuota(user.id, Math.max(0, newBytes - previousBytes));
 

@@ -45,7 +45,8 @@ for (const required of [
   "apps/gui/public/index.html",
   "packages/builder-core/dist/index.js",
   "compatibility/known-good.json",
-  "wordpress/bootstrap/site-starter-bootstrap.php"
+  "wordpress/bootstrap/site-starter-bootstrap.php",
+  "wordpress/bootstrap/sample-content-installer.php"
 ]) {
   if (!packagedFiles.has(required)) throw new Error(`Desktop app.asar is missing ${required}.`);
 }

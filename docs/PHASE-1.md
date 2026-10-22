@@ -1,5 +1,7 @@
 # Phase 1: Core Build System
 
+Fresh builds default to Post name (`/%postname%/`) permalinks. An explicit non-empty permalink structure in a selected configuration snapshot takes precedence. Bootstrap updates WordPress's rewrite object and flushes routing rules after package activation and content import, including builds without a configuration snapshot.
+
 **Status: COMPLETE as of v0.1.0-alpha.14.** Clean snapshot-based and package-only deployments were both validated on a real Plesk-hosted WordPress installation.
 
 ## Objective

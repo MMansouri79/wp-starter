@@ -1,7 +1,9 @@
 import { mkdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { BuilderError, buildStarter, compatibilityReport, loadProfile, writeJson, type BuildProgress } from "../core.js";
-import { badRequest, forbidden, HttpError, notFound } from "../errors.js";
+import { badRequest, HttpError, notFound } from "../errors.js";
+import { assertCanWrite } from "./ownership.js";
+import { assertTeamPath, validateResolvedPaths, validateTeamFiles } from "./team-paths.js";
 import type { BuildRecord, User } from "../types.js";
 import { BuildRepository } from "../repositories/builds.js";
 import { ProfileItemRepository } from "../repositories/profiles.js";
@@ -19,6 +21,9 @@ export interface BuildServiceOptions {
   pollIntervalMs: number;
   /** Maximum queued+running jobs across all accounts. */
   maxActiveBuilds: number;
+  resolveTeam?: (teamId: string) => Promise<BuildService>;
+  countActive?: () => Promise<number>;
+  canRun?: () => Promise<boolean>;
 }
 
 export const DEFAULT_BUILD_OPTIONS: Omit<BuildServiceOptions, "builderVersion" | "bootstrapFile"> = {
@@ -90,13 +95,14 @@ export class BuildService {
   }
 
   async enqueue(profileFileName: string, user: User): Promise<BuildRecord> {
+    assertCanWrite({ createdBy: user.id }, user, "build");
     const safe = safeFileName(profileFileName, "");
     if (!safe || !safe.endsWith(".json")) throw badRequest("invalid_request", "A valid profile filename is required.");
 
     const profile = await this.profiles.findByFileName(safe);
     if (!profile) throw notFound("profile_not_found", "That build profile is no longer in the shared library.");
 
-    const active = await this.builds.countActive();
+    const active = await (this.options.countActive?.() ?? this.builds.countActive());
     if (active >= this.options.maxActiveBuilds) {
       throw new HttpError(
         429,
@@ -128,15 +134,14 @@ export class BuildService {
 
   async remove(id: string, user: User): Promise<BuildRecord> {
     const build = await this.builds.requireById(id);
-    if (build.createdBy !== user.id && !(build.createdBy === null && user.role === "admin")) {
-      throw forbidden("read_only", "Only the account that started this build can delete it.");
-    }
+    assertCanWrite(build, user, "delete");
     if (build.status === "running" || build.status === "queued") {
       throw badRequest("build_active", "Wait for the build to finish before deleting it.");
     }
 
     if (build.artifactFile) {
-      const target = path.join(this.library.buildsDir, build.artifactFile);
+      const target = this.artifactPath(build);
+      await assertTeamPath(this.library.root, target);
       await rm(target, { force: true });
       await rm(`${target}.json`, { force: true });
     }
@@ -146,6 +151,7 @@ export class BuildService {
 
   artifactPath(build: BuildRecord): string {
     if (!build.artifactFile) throw notFound("build_artifact_missing", "This build did not produce an artifact.");
+    if (safeFileName(build.artifactFile, "") !== build.artifactFile) throw badRequest("unsafe_team_path", "Invalid build artifact path.");
     return path.join(this.library.buildsDir, build.artifactFile);
   }
 
@@ -164,12 +170,14 @@ export class BuildService {
       const reference = build.completedAt ?? build.createdAt;
       if (reference >= cutoff) continue;
 
+      const service = this.options.resolveTeam ? await this.options.resolveTeam(build.teamId) : this;
       if (build.artifactFile) {
-        const target = path.join(this.library.buildsDir, build.artifactFile);
+        const target = service.artifactPath(build);
+        await assertTeamPath(service.library.root, target);
         await rm(target, { force: true });
         await rm(`${target}.json`, { force: true });
       }
-      await this.builds.remove(build.id);
+      await service.builds.remove(build.id);
       removed += 1;
     }
 
@@ -205,7 +213,8 @@ export class BuildService {
       }
 
       this.log.info(`Worker ${worker} started build ${claimed.id} (${claimed.profileName}).`);
-      await this.execute(claimed);
+      const service = this.options.resolveTeam ? await this.options.resolveTeam(claimed.teamId) : this;
+      await service.execute(claimed);
     }
   }
 
@@ -225,10 +234,14 @@ export class BuildService {
     let outputZip: string | null = null;
 
     try {
+      if (this.options.canRun && !await this.options.canRun()) throw new BuilderError("team_suspended", "The team is suspended.");
+      await validateTeamFiles(this.library.root);
       await this.builds.update(build.id, { stage: "loading", message: "Resolving the build profile.", percent: 1 });
 
       const profilePath = path.join(this.library.profilesDir, build.profileFile);
+      await assertTeamPath(this.library.root, profilePath);
       const profile = await loadProfile(profilePath, { libraryDir: this.library.root });
+      await validateResolvedPaths(this.library.root, profile);
       const compatibility = compatibilityReport(profile);
       if (compatibility.status === "unsupported") {
         throw new BuilderError("unsupported_compatibility", compatibility.errors.join(" "));
@@ -267,7 +280,7 @@ export class BuildService {
       });
 
       await this.library.mutate(async () => {
-        if (build.createdBy) await this.quota.assertWithinQuota(build.createdBy, sizeBytes);
+        await this.quota.assertWithinQuota(build.createdBy ?? "", sizeBytes);
         await this.builds.update(build.id, {
           status: "complete",
           stage: "complete",

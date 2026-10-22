@@ -2,6 +2,7 @@ import { forbidden } from "../errors.js";
 import type { User } from "../types.js";
 
 export interface OwnedRecord {
+  teamId?: string;
   createdBy: string | null;
 }
 
@@ -13,32 +14,24 @@ export interface OwnershipView {
 }
 
 /**
- * Sharing rule for the hosted app: everyone signed in can read the whole shared
- * library, but only the account that created an item may change or delete it.
- *
- * Items with no owner were imported outside the web app (for example with the
- * CLI against the shared library directory). Nobody can claim them, so
- * administrators may clean those up; administrators gain no rights over items
- * that belong to another account.
+ * Content belongs to a team; creator identity is retained only for attribution.
+ * A validated request actor carries its current team role. Global administration
+ * never grants content privileges. This also covers CLI-imported, unattributed items.
  */
 export function ownershipOf(record: OwnedRecord, user: User): OwnershipView {
   const owned = record.createdBy !== null && record.createdBy === user.id;
-  const unowned = record.createdBy === null;
-  const managesUnowned = unowned && user.role === "admin";
+  const canWrite = user.teamRole !== undefined && user.teamRole !== "viewer" && (!record.teamId || record.teamId === user.teamId);
 
   return {
     createdBy: record.createdBy,
     ownedByCurrentUser: owned,
-    canEdit: owned || managesUnowned,
-    canDelete: owned || managesUnowned
+    canEdit: canWrite,
+    canDelete: canWrite
   };
 }
 
 export function assertCanWrite(record: OwnedRecord, user: User, action = "change"): void {
   if (ownershipOf(record, user).canEdit) return;
 
-  if (record.createdBy === null) {
-    throw forbidden("read_only", `This item has no owner, so only an administrator can ${action} it.`);
-  }
-  throw forbidden("read_only", `Only the account that created this item can ${action} it.`);
+  throw forbidden("read_only", `An editor role in this team is required to ${action} this item.`);
 }

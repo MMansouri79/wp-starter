@@ -4,6 +4,7 @@ import { notFound } from "../errors.js";
 import type { BuildRecord, BuildStatus } from "../types.js";
 
 interface BuildRow {
+  team_id: string;
   id: string;
   status: string;
   stage: string;
@@ -28,6 +29,7 @@ interface BuildRow {
 function toBuild(row: BuildRow): BuildRecord {
   return {
     id: row.id,
+    teamId: row.team_id,
     status: row.status as BuildStatus,
     stage: row.stage,
     percent: Number(row.percent),
@@ -88,10 +90,12 @@ const PATCH_COLUMNS: Record<keyof BuildPatch, string> = {
 };
 
 export class BuildRepository {
-  constructor(private readonly db: SqlDatabase) {}
+  constructor(private readonly db: SqlDatabase, public readonly teamId: string | null = null) {}
 
   async enqueue(input: EnqueueBuildInput): Promise<BuildRecord> {
+    if (!this.teamId) throw new Error("A team is required to enqueue a build.");
     const record: BuildRecord = {
+      teamId: this.teamId!,
       id: randomUUID(),
       status: "queued",
       stage: "queued",
@@ -112,10 +116,8 @@ export class BuildRepository {
       completedAt: null
     };
 
-    await this.db.run(
-      `INSERT INTO builds (id, status, stage, percent, message, profile_id, profile_file, profile_name, artifact_file, artifact_path, sha256, size_bytes, manifest_json, error_code, error_message, created_by, created_at, started_at, completed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
+    await this.db.run(`INSERT INTO builds (team_id, id, status, stage, percent, message, profile_id, profile_file, profile_name, artifact_file, artifact_path, sha256, size_bytes, manifest_json, error_code, error_message, created_by, created_at, started_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [this.teamId,
         record.id,
         record.status,
         record.stage,
@@ -142,18 +144,23 @@ export class BuildRepository {
   }
 
   async list(limit = 100): Promise<BuildRecord[]> {
-    const rows = await this.db.all<BuildRow>("SELECT * FROM builds ORDER BY created_at DESC LIMIT ?", [limit]);
+    const rows = await this.db.all<BuildRow>("SELECT * FROM builds WHERE (CAST(? AS TEXT) IS NULL OR team_id = ?) ORDER BY created_at DESC LIMIT ?", [this.teamId, this.teamId, limit]);
     return rows.map(toBuild);
   }
 
   async findById(id: string): Promise<BuildRecord | null> {
-    const row = await this.db.get<BuildRow>("SELECT * FROM builds WHERE id = ?", [id]);
+    if (!this.teamId) throw new Error("Team scope is required for a build lookup.");
+    const row = await this.db.get<BuildRow>("SELECT * FROM builds WHERE (CAST(? AS TEXT) IS NULL OR team_id = ?) AND id = ?", [this.teamId, this.teamId, id]);
+    return row ? toBuild(row) : null;
+  }
+  async findByArtifactFile(file: string): Promise<BuildRecord | null> {
+    if (!this.teamId) throw new Error("Team scope is required for an artifact lookup.");
+    const row = await this.db.get<BuildRow>("SELECT * FROM builds WHERE team_id = ? AND artifact_file = ?", [this.teamId, file]);
     return row ? toBuild(row) : null;
   }
 
   async expired(cutoff: string): Promise<BuildRecord[]> {
-    const rows = await this.db.all<BuildRow>(
-      "SELECT * FROM builds WHERE status NOT IN ('queued', 'running') AND COALESCE(completed_at, created_at) < ?", [cutoff]);
+    const rows = await this.db.all<BuildRow>("SELECT * FROM builds WHERE (CAST(? AS TEXT) IS NULL OR team_id = ?) AND status NOT IN ('queued', 'running') AND COALESCE(completed_at, created_at) < ?", [this.teamId, this.teamId, cutoff]);
     return rows.map(toBuild);
   }
 
@@ -165,20 +172,18 @@ export class BuildRepository {
 
   /** Oldest queued job, claimed for a worker. Callers serialize claims in-process. */
   async claimNext(): Promise<BuildRecord | null> {
-    const next = await this.db.get<{ id: string }>(
-      "SELECT id FROM builds WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1"
+    const next = await this.db.get<{ id: string; team_id: string }>("SELECT id, team_id FROM builds WHERE (CAST(? AS TEXT) IS NULL OR team_id = ?) AND status = 'queued' ORDER BY created_at ASC LIMIT 1", [this.teamId, this.teamId]
     );
     if (!next) return null;
 
-    await this.db.run(
-      "UPDATE builds SET status = 'running', stage = 'starting', message = ?, started_at = ? WHERE id = ? AND status = 'queued'",
-      ["Starting build.", new Date().toISOString(), next.id]
+    await this.db.run("UPDATE builds SET status = 'running', stage = 'starting', message = ?, started_at = ? WHERE id = ? AND status = 'queued' AND team_id = ?", ["Starting build.", new Date().toISOString(), next.id, next.team_id]
     );
 
-    return this.findById(next.id);
+    return new BuildRepository(this.db, next.team_id).findById(next.id);
   }
 
   async update(id: string, patch: BuildPatch): Promise<void> {
+    if (!this.teamId) throw new Error("Team scope is required for a build update.");
     const assignments: string[] = [];
     const values: Array<string | number | null> = [];
 
@@ -191,25 +196,25 @@ export class BuildRepository {
 
     if (!assignments.length) return;
     values.push(id);
-    await this.db.run(`UPDATE builds SET ${assignments.join(", ")} WHERE id = ?`, values);
+    await this.db.run(`UPDATE builds SET ${assignments.join(", ")} WHERE id = ? AND (CAST(? AS TEXT) IS NULL OR team_id = ?)`, [...values, this.teamId, this.teamId]);
   }
 
   async remove(id: string): Promise<void> {
-    await this.db.run("DELETE FROM builds WHERE id = ?", [id]);
+    if (!this.teamId) throw new Error("Team scope is required for a build deletion.");
+    await this.db.run("DELETE FROM builds WHERE (CAST(? AS TEXT) IS NULL OR team_id = ?) AND id = ?", [this.teamId, this.teamId, id]);
   }
 
   /** A restart cannot resume an in-flight job, so it is reported as failed. */
   async failInterrupted(): Promise<number> {
-    const rows = await this.db.all<{ id: string }>("SELECT id FROM builds WHERE status = 'running'");
+    const rows = await this.db.all<{ id: string; team_id: string }>("SELECT id, team_id FROM builds WHERE (CAST(? AS TEXT) IS NULL OR team_id = ?) AND status = 'running'", [this.teamId, this.teamId]);
     for (const row of rows) {
-      await this.db.run(
-        "UPDATE builds SET status = 'failed', stage = 'failed', message = ?, error_code = ?, error_message = ?, completed_at = ? WHERE id = ?",
-        [
+      await this.db.run("UPDATE builds SET status = 'failed', stage = 'failed', message = ?, error_code = ?, error_message = ?, completed_at = ? WHERE id = ? AND team_id = ?", [
           "Build was interrupted by a server restart.",
           "build_interrupted",
           "The server restarted before this build finished. Start it again from the profile.",
           new Date().toISOString(),
-          row.id
+          row.id,
+          row.team_id
         ]
       );
     }
@@ -217,16 +222,13 @@ export class BuildRepository {
   }
 
   async countActive(): Promise<number> {
-    const row = await this.db.get<{ total: number }>(
-      "SELECT COUNT(*) AS total FROM builds WHERE status IN ('queued', 'running')"
+    const row = await this.db.get<{ total: number }>("SELECT COUNT(*) AS total FROM builds WHERE (CAST(? AS TEXT) IS NULL OR team_id = ?) AND status IN ('queued', 'running')", [this.teamId, this.teamId]
     );
     return Number(row?.total ?? 0);
   }
 
-  async bytesForUser(userId: string): Promise<number> {
-    const row = await this.db.get<{ total: number }>(
-      "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM builds WHERE created_by = ?",
-      [userId]
+  async totalBytes(): Promise<number> {
+    const row = await this.db.get<{ total: number }>("SELECT COALESCE(SUM(size_bytes), 0) AS total FROM builds WHERE (CAST(? AS TEXT) IS NULL OR team_id = ?)", [this.teamId, this.teamId]
     );
     return Number(row?.total ?? 0);
   }

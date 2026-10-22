@@ -7,7 +7,10 @@ import { publicUser } from "../repositories/users.js";
 import { toItemView, type ItemView } from "../services/view.js";
 import { isVNextApiKind, VNEXT_KINDS, type VNextApiKind } from "../services/vnext.js";
 import { isInfrastructurePackage } from "../services/packages.js";
+import { teamCapabilities } from "../services/teams.js";
+import { assertTeamPath } from "../services/team-paths.js";
 import { discardUpload } from "../services/snapshots.js";
+import { pluginUpdates } from "../services/plugin-updates.js";
 import type { BuildRecord, OwnedItem, User } from "../types.js";
 import type { Router } from "../http/router.js";
 import type { AppContext } from "../app-context.js";
@@ -53,7 +56,7 @@ export function registerLibraryRoutes(router: Router, app: AppContext): void {
 
     /** Items created outside the web app have no owner; administrators may manage those. */
     const unownedView = (id: string, name: string) => ({
-      ...toItemView({ id, name, createdBy: null, createdAt: "", updatedAt: "" }, viewer, names)
+      ...toItemView({ id, teamId: app.teamId!, name, createdBy: null, createdAt: "", updatedAt: "" }, viewer, names)
     });
 
     const elementorTemplatesView = await Promise.all(
@@ -80,11 +83,8 @@ export function registerLibraryRoutes(router: Router, app: AppContext): void {
       version: app.version,
       host: config.baseUrl,
       currentUser: publicUser(viewer),
-      capabilities: {
-        isAdmin: viewer.role === "admin",
-        canCreateProfiles: true,
-        canUpload: true
-      },
+      teamId: app.teamId,
+      capabilities: { isAdmin: viewer.role === "admin", ...teamCapabilities(viewer.teamRole!) },
       packages: packages
         .filter((item) => !isInfrastructurePackage(item.document))
         .map((item) => withoutInternalPaths({ ...item.document, sizeBytes: item.sizeBytes, ...toItemView(item, viewer, names) })),
@@ -123,6 +123,17 @@ export function registerLibraryRoutes(router: Router, app: AppContext): void {
   });
 
   // ------------------------------------------------------------- packages ---
+
+  router.get("/api/plugin-updates", async (context) => {
+    viewerOf(context);
+    sendJson(context.res, 200, await pluginUpdates(app).view());
+  });
+
+  router.put("/api/plugin-updates", async (context) => {
+    requireCsrf(context);
+    const result = await pluginUpdates(app).save(await context.readJson(), viewerOf(context));
+    sendJson(context.res, 200, result);
+  });
 
   router.post("/api/packages", async (context) => {
     requireCsrf(context);
@@ -418,6 +429,7 @@ export function registerLibraryRoutes(router: Router, app: AppContext): void {
 
   router.put("/api/sample-content/:id", async (context) => {
     requireCsrf(context);
+    await app.sampleContent.get(context.params.id);
     const body = await context.readJson();
     sendJson(context.res, 200, await app.sampleContent.save({ ...body, id: context.params.id }, viewerOf(context)));
   });
@@ -430,12 +442,23 @@ export function registerLibraryRoutes(router: Router, app: AppContext): void {
 
   // ---------------------------------------------------------------- builds ---
 
+  router.get("/api/builds/by-file/:file/download", async (context) => {
+    viewerOf(context);
+    const build = await app.buildItems.findByArtifactFile(context.params.file);
+    if (!build) throw notFound("build_not_found", "Build not found.");
+    const artifact = app.builds.artifactPath(build);
+    await assertTeamPath(app.library.root, artifact);
+    sendBytes(context.res, 200, await readFile(artifact), "application/zip", { headers: { "Content-Disposition": `attachment; filename="${build.artifactFile!.replaceAll('"', "")}"` } });
+  });
+
   router.get("/api/builds/:id/download", async (context) => {
     viewerOf(context);
     const build = await app.builds.get(context.params.id);
     if (!build.artifactFile) throw notFound("build_artifact_missing", "This build did not produce an artifact.");
 
-    const data = await readFile(app.builds.artifactPath(build));
+    const artifact = app.builds.artifactPath(build);
+    await assertTeamPath(app.library.root, artifact);
+    const data = await readFile(artifact);
     sendBytes(context.res, 200, data, "application/zip", {
       headers: { "Content-Disposition": `attachment; filename="${build.artifactFile.replaceAll('"', "")}"` }
     });
@@ -450,6 +473,7 @@ export function buildOwnership(build: BuildRecord, viewer: User, names: Map<stri
   return toItemView(
     {
       id: build.id,
+      teamId: build.teamId,
       name: build.profileName,
       createdBy: build.createdBy,
       createdAt: build.createdAt,

@@ -19,6 +19,7 @@ import {
 import type { BuildProfile, BuildProgress, StarterBuildManifest } from "./types.js";
 import { resourceHash } from "./vnext.js";
 import { validateSampleLibrary, SAMPLE_BUILD_ASSET_LIMIT, type SampleContentPayload } from "./sample-content.js";
+import { resolveSiteContent, siteContentSelection } from "./site-content.js";
 
 export interface BuildOptions {
   profile: BuildProfile;
@@ -72,6 +73,8 @@ async function createCanonicalPackageZip(options: {
 
 export async function buildStarter(options: BuildOptions): Promise<{ outputZip: string; sha256: string; manifest: StarterBuildManifest; compatibility: NonNullable<StarterBuildManifest["compatibility"]> }> {
   const { profile } = options;
+  const selectedSiteContent = siteContentSelection(profile.siteContent);
+  if ((selectedSiteContent.posts || selectedSiteContent.products) && (profile.schemaVersion !== 9 || !profile.configExport)) throw new BuilderError("invalid_profile", "Site content requires profile schema v9 and a configuration snapshot.");
   // Compatibility enforcement must happen before any workspace or output is
   // created so unsupported combinations never produce a distribution.
   const compatibility = compatibilityReport(profile, options.compatibilityMatrix);
@@ -326,9 +329,19 @@ export async function buildStarter(options: BuildOptions): Promise<{ outputZip: 
     }
 
     let sampleContentPayload: StarterBuildManifest["sampleContentPayload"] = null;
-    if (profile.sampleContent?.content.length) {
+    let samples = profile.sampleContent;
+    if (selectedSiteContent.posts || selectedSiteContent.products) {
+      const site = await resolveSiteContent(configExtract, selectedSiteContent);
+      if ((selectedSiteContent.posts && !site.content.some(r => r.kind === "post")) || (selectedSiteContent.products && !site.content.some(r => r.kind === "product"))) throw new BuilderError("site_content_not_found", "The snapshot does not contain the selected site content.");
+      if (site.content.some(r => r.kind === "product") && !activePlugins.some(p => p.slug === "woocommerce")) throw new BuilderError("site_woocommerce_required", "Exported products require WooCommerce for this locale.");
+      if (site.content.some(r => r.acf?.groups.length) && !activePlugins.some(p => ["advanced-custom-fields", "advanced-custom-fields-pro", "acf-pro"].includes(p.slug))) throw new BuilderError("site_acf_required", "Exported fields require an ACF package for this locale.");
+      if (site.content.some(r => /"type":"(?:repeater|flexible_content|gallery)"/.test(JSON.stringify(r.acf?.groups))) && !activePlugins.some(p => ["advanced-custom-fields-pro", "acf-pro"].includes(p.slug))) throw new BuilderError("site_acf_pro_required", "Exported Pro fields require an ACF Pro package for this locale.");
+      samples = samples ? { schemaVersion: 1, selectedIds: [...samples.selectedIds, ...site.selectedIds], content: [...samples.content, ...site.content], terms: [...samples.terms, ...site.terms], attributes: [...samples.attributes, ...site.attributes], assets: [...samples.assets, ...site.assets] } : site;
+      validateSampleLibrary(samples);
+      if (samples.assets.reduce((sum, asset) => sum + asset.size, 0) > SAMPLE_BUILD_ASSET_LIMIT) throw new BuilderError("sample_asset_limit", "Combined site and sample assets exceed 500 MiB.");
+    }
+    if (samples?.content.length) {
       await emit(options, { percent: 81, stage: "sample_content", message: "Embedding selected sample content and local assets…" });
-      const samples = profile.sampleContent;
       const assets: SampleContentPayload["assets"] = [];
       for (const asset of samples.assets) {
         if (!/^sample-assets\/asset-[a-z0-9-]+\.(?:png|jpg|gif|webp|pdf|txt)$/.test(asset.file)) throw new BuilderError("invalid_sample_asset", "Unsafe sample asset payload path.");

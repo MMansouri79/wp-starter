@@ -15,6 +15,7 @@ export interface PackageItem extends OwnedItem {
 }
 
 interface PackageRow {
+  team_id: string;
   id: string;
   kind: string;
   slug: string;
@@ -36,6 +37,7 @@ export function variantOf(record: Pick<PackageRecord, "kind" | "variant" | "loca
 function toItem(row: PackageRow): PackageItem {
   return {
     id: row.id,
+    teamId: row.team_id,
     name: row.name,
     kind: row.kind as PackageKind,
     slug: row.slug,
@@ -58,7 +60,7 @@ export interface UpsertPackageInput {
 }
 
 export class PackageItemRepository {
-  constructor(private readonly db: SqlDatabase) {}
+  constructor(private readonly db: SqlDatabase, public readonly teamId: string) {}
 
   /** Mirrors a builder-core registry record; replaces the row when the bytes changed. */
   async upsert(input: UpsertPackageInput): Promise<PackageItem> {
@@ -68,15 +70,14 @@ export class PackageItemRepository {
     const now = new Date().toISOString();
 
     if (existing) {
-      await this.db.run(
-        `UPDATE packages SET name = ?, sha256 = ?, file_path = ?, size_bytes = ?, document_json = ?
-         WHERE id = ?`,
-        [record.name, record.sha256, record.zip, input.sizeBytes, JSON.stringify(record), existing.id]
+      await this.db.run(`UPDATE packages SET name = ?, sha256 = ?, file_path = ?, size_bytes = ?, document_json = ?
+         WHERE id = ? AND team_id = ?`, [record.name, record.sha256, record.zip, input.sizeBytes, JSON.stringify(record), existing.id, this.teamId]
       );
       return (await this.findById(existing.id)) as PackageItem;
     }
 
     const item: PackageItem = {
+      teamId: this.teamId!,
       id: record.kind === "wordpress" ? `wp-${record.slug}-${record.version}-${variant}` : `${record.kind}-${record.slug}-${record.version}`,
       name: record.name,
       kind: record.kind,
@@ -92,10 +93,8 @@ export class PackageItemRepository {
       updatedAt: now
     };
 
-    await this.db.run(
-      `INSERT INTO packages (id, kind, slug, version, variant, name, sha256, file_path, size_bytes, document_json, uploaded_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
+    await this.db.run(`INSERT INTO packages (team_id, id, kind, slug, version, variant, name, sha256, file_path, size_bytes, document_json, uploaded_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [this.teamId,
         item.id,
         item.kind,
         item.slug,
@@ -115,21 +114,18 @@ export class PackageItemRepository {
   }
 
   async list(): Promise<PackageItem[]> {
-    const rows = await this.db.all<PackageRow>(
-      "SELECT * FROM packages ORDER BY kind ASC, slug ASC, version ASC, variant ASC"
+    const rows = await this.db.all<PackageRow>("SELECT * FROM packages WHERE team_id = ? ORDER BY kind ASC, slug ASC, version ASC, variant ASC", [this.teamId]
     );
     return rows.map(toItem);
   }
 
   async findById(id: string): Promise<PackageItem | null> {
-    const row = await this.db.get<PackageRow>("SELECT * FROM packages WHERE id = ?", [id]);
+    const row = await this.db.get<PackageRow>("SELECT * FROM packages WHERE team_id = ? AND id = ?", [this.teamId, id]);
     return row ? toItem(row) : null;
   }
 
   async findByCoordinate(kind: string, slug: string, version: string, variant: string): Promise<PackageItem | null> {
-    const row = await this.db.get<PackageRow>(
-      "SELECT * FROM packages WHERE kind = ? AND slug = ? AND version = ? AND variant = ?",
-      [kind, slug, version, variant]
+    const row = await this.db.get<PackageRow>("SELECT * FROM packages WHERE team_id = ? AND kind = ? AND slug = ? AND version = ? AND variant = ?", [this.teamId, kind, slug, version, variant]
     );
     return row ? toItem(row) : null;
   }
@@ -141,18 +137,16 @@ export class PackageItemRepository {
   }
 
   async remove(id: string): Promise<void> {
-    await this.db.run("DELETE FROM packages WHERE id = ?", [id]);
+    await this.db.run("DELETE FROM packages WHERE team_id = ? AND id = ?", [this.teamId, id]);
   }
 
   async totalBytes(): Promise<number> {
-    const row = await this.db.get<{ total: number }>("SELECT COALESCE(SUM(size_bytes), 0) AS total FROM packages");
+    const row = await this.db.get<{ total: number }>("SELECT COALESCE(SUM(size_bytes), 0) AS total FROM packages WHERE team_id = ?", [this.teamId]);
     return Number(row?.total ?? 0);
   }
 
   async bytesForUser(userId: string): Promise<number> {
-    const row = await this.db.get<{ total: number }>(
-      "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM packages WHERE uploaded_by = ?",
-      [userId]
+    const row = await this.db.get<{ total: number }>("SELECT COALESCE(SUM(size_bytes), 0) AS total FROM packages WHERE team_id = ? AND uploaded_by = ?", [this.teamId, userId]
     );
     return Number(row?.total ?? 0);
   }

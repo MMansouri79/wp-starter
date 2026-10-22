@@ -507,3 +507,13 @@ body.ws-admin {
   font-size: 13px;
   text-align: center;
 }
+/* Team pages reuse the hosted application's existing tokens and controls. */
+.ws-team-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--border, #d8dde4); }
+.ws-team-row > span { flex: 1 1 260px; overflow-wrap: anywhere; }
+.ws-team-row button, .ws-team-row select { min-height: 44px; }
+.ws-account select { width: 100%; margin: 6px 0 12px; }
+.ws-invite-code input { min-width: 260px; max-width: 100%; }
+[hidden] { display: none !important; }
+.ws-plugin-updates fieldset { border: 1px solid var(--border); border-radius: 9px; margin: 12px 0; padding: 12px; }
+.ws-plugin-updates label { display: flex; align-items: center; gap: 8px; min-height: 44px; overflow-wrap: anywhere; }
+.ws-plugin-updates input[type="checkbox"] { flex: 0 0 auto; width: 18px; height: 18px; padding: 0; accent-color: var(--primary); }

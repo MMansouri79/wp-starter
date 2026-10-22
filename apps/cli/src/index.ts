@@ -43,7 +43,7 @@ Usage:
   wp-starter resource <typography|colors|design-systems> <add|list|remove> [file-or-id] [--library <dir>]
   wp-starter template list [--library <dir>]
   wp-starter template remove <library-id> [--library <dir>]
-  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--wordpress-version <version>] [--wordpress-variant <locale>] [--theme-version <version>] [--plugin-version <slug=version>]... [--exclude-plugin <slug>]... [--font-system <id>]... [--design-system <id>] [--template <library-id>]... [--template-mapping <source=target>]... [--library <dir>] [--replace]
+  wp-starter profile create <config-id> --output <profile.json> [--name <name>] [--locale <locale>] [--wordpress-version <version>] [--wordpress-variant <locale>] [--theme-version <version>] [--plugin-version <slug=version>]... [--exclude-plugin <slug>]... [--font-system <id>]... [--design-system <id>] [--template <library-id>]... [--template-mapping <source=target>]... [--include-posts] [--include-products] [--library <dir>] [--replace]
   wp-starter profile check <profile.json> [--library <dir>]
   wp-starter library path [--library <dir>]
   wp-starter build --profile <profile.json> --output <starter.zip> [--library <dir>]
@@ -402,6 +402,7 @@ async function handleProfile(): Promise<void> {
       themeVersion: getArg("--theme-version") ?? undefined,
       pluginVersions,
       excludePlugins: getArgs("--exclude-plugin"),
+      siteContent: { posts: hasFlag("--include-posts"), products: hasFlag("--include-products") },
       fontSystemIds: getArgs("--font-system"),
       designSystemId: getArg("--design-system"),
       elementorTemplates: hasFlag("--elementor-template") ? getArgs("--elementor-template").map((entry) => {

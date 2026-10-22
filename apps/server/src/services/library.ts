@@ -25,11 +25,11 @@ export function isVNextKind(value: string): value is VNextKind {
 }
 
 /**
- * The one canonical library every account shares. builder-core keeps using its
- * file registries here; the database mirrors ownership metadata for the web app.
+ * One team's canonical library. All libraries share the application mutation lock;
+ * builder-core keeps using its file registries and remains permission-agnostic.
  */
 export class SharedLibrary {
-  private readonly mutations = new MutationLock();
+  private readonly mutations: MutationLock;
 
   mutate<T>(work: () => Promise<T>): Promise<T> {
     return this.mutations.run(work);
@@ -39,7 +39,8 @@ export class SharedLibrary {
   public readonly buildsDir: string;
   public readonly vnextDir: string;
 
-  constructor(root: string) {
+  constructor(root: string, mutations = new MutationLock()) {
+    this.mutations = mutations;
     this.root = path.resolve(root);
     this.profilesDir = path.join(this.root, "profiles");
     this.buildsDir = path.join(this.root, "builds");

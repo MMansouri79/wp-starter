@@ -31,6 +31,7 @@
   var ID_ATTRIBUTES = ["data-id", "data-edit", "data-edit-term", "data-edit-global", "data-save-asset"];
 
   var session = null;
+  var previousWriteCapability = null;
 
   function readCookie(name) {
     var parts = String(document.cookie || "").split(";");
@@ -86,8 +87,9 @@
     if (!foot || document.getElementById("ws-account")) return;
 
     var user = session.user;
+    var team = (session.teams || []).find(function (candidate) { return window.WPTeam && candidate.id === window.WPTeam.id; });
     var brandSubtitle = document.querySelector(".brand small");
-    if (brandSubtitle) brandSubtitle.textContent = "Shared workspace";
+    if (brandSubtitle) brandSubtitle.textContent = team ? team.name : "Team workspace";
     var quota = session.quota || { usedBytes: 0, limitBytes: 1 };
     var percent = Math.min(100, Math.round((quota.usedBytes / Math.max(1, quota.limitBytes)) * 100));
 
@@ -105,11 +107,20 @@
 
     var badge = document.createElement("span");
     badge.className = "ws-role-badge ws-role-" + user.role;
-    badge.textContent = user.role;
+    badge.textContent = team ? team.role : user.role;
 
     row.appendChild(name);
     row.appendChild(badge);
     panel.appendChild(row);
+    if (team) {
+      var teamLabel = document.createElement("label"); teamLabel.textContent = "Team workspace";
+      var teamSelect = document.createElement("select"); teamSelect.setAttribute("aria-label", "Team workspace");
+      session.teams.forEach(function (candidate) { var option = document.createElement("option"); option.value = candidate.id; option.textContent = candidate.name; teamSelect.appendChild(option); });
+      teamSelect.value = team.id;
+      teamSelect.addEventListener("change", function () { window.WPTeam.switchTo(teamSelect.value); });
+      teamLabel.appendChild(teamSelect); panel.appendChild(teamLabel);
+      var teamLink = document.createElement("a"); teamLink.href = "/teams.html?team=" + encodeURIComponent(team.id); teamLink.textContent = "Team settings"; panel.appendChild(teamLink);
+    }
 
     var quotaLabel = document.createElement("div");
     quotaLabel.className = "ws-quota";
@@ -125,6 +136,12 @@
 
     var actions = document.createElement("div");
     actions.className = "ws-account-actions";
+
+    var exporterLink = document.createElement("a");
+    exporterLink.href = "/downloads/wp-starter-exporter.zip";
+    exporterLink.setAttribute("download", "");
+    exporterLink.textContent = "Download Exporter";
+    actions.appendChild(exporterLink);
 
     if (user.role === "admin") {
       var adminLink = document.createElement("a");
@@ -263,6 +280,12 @@
   }
 
   function annotate() {
+    var data = currentState();
+    if (data && data.capabilities && data.capabilities.canEdit === false) {
+      document.querySelectorAll('input[type="file"], button.primary, #sample-new-post, #sample-new-product, #sample-add-term, #sample-add-attribute, .build-profile, .rebuild, .duplicate-resource, [data-duplicate], [data-save], [data-new], [data-action="save"], ' + MUTATING_SELECTOR).forEach(function (control) {
+        control.disabled = true; control.setAttribute("aria-disabled", "true"); control.title = "Your team role is read-only.";
+      });
+    }
     var index = buildIndex();
     if (!Object.keys(index).length) return;
 
@@ -301,17 +324,20 @@
     var note = document.createElement("p");
     note.className = "ws-readonly-note";
     note.id = "ws-readonly-note";
-    note.textContent =
-      count +
-      " item" +
-      (count === 1 ? "" : "s") +
-      " on this page belong to another account. You can read, use, and duplicate them, but only their owner can change or delete them.";
+    note.textContent = "Your team role is read-only. You can browse resources and download existing builds.";
     view.insertBefore(note, view.firstChild);
   }
 
   /* ------------------------------------------------------------------ wiring */
 
   function afterRender() {
+    var data = currentState();
+    if (data && data.capabilities && typeof data.capabilities.canEdit === "boolean") {
+      if (previousWriteCapability !== null && previousWriteCapability !== data.capabilities.canEdit) { window.location.reload(); return; }
+      previousWriteCapability = data.capabilities.canEdit;
+    }
+    var subtitle = document.getElementById("subtitle");
+    if (subtitle && subtitle.textContent.indexOf("Your local WordPress starter workspace.") !== -1) subtitle.textContent = "Your private team WordPress starter workspace.";
     renderAccountPanel();
     annotate();
   }

@@ -14,6 +14,18 @@ function update_option( $key, $value, $autoload = null ) { $GLOBALS['options'][$
 function add_option( $key, $value, $deprecated = '', $autoload = false ) { if ( isset( $GLOBALS['options'][$key] ) ) return false; return update_option( $key, $value ); }
 function delete_option( $key ) { unset( $GLOBALS['options'][$key] ); persist(); }
 function add_action() {}
+class FixtureRewrite {
+    public $permalink_structure = '/%year%/%monthnum%/%day%/%postname%/';
+    public function set_permalink_structure( $value ) {
+        $this->permalink_structure = $value;
+        update_option( 'permalink_structure', $value );
+    }
+}
+$wp_rewrite = new FixtureRewrite();
+function flush_rewrite_rules( $hard ) {
+    global $wp_rewrite;
+    update_option( 'fixture_flushed_structure', $wp_rewrite->permalink_structure );
+}
 function wp_installing() { return false; }
 function is_admin() { return true; }
 function current_user_can() { return true; }
@@ -46,5 +58,10 @@ function unstick_post() {}
 define( 'OBJECT', 'OBJECT' );
 $_GET = array( 'page' => 'wp-starter-setup', 'wpstarter_step' => '1' );
 require WPMU_PLUGIN_DIR . '/site-starter-bootstrap.php';
+if ( isset( $argv[2] ) ) {
+    $result = MMS_WP_Starter_Bootstrap::select_catalog_choice( $argv[2] );
+    if ( is_wp_error( $result ) ) { fwrite( STDERR, $result->get_error_message() ); exit( 1 ); }
+    persist(); exit;
+}
 MMS_WP_Starter_Bootstrap::maybe_run();
 persist();

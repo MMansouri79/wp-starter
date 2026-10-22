@@ -7,7 +7,10 @@ import { Router, type RequestContext } from "./http/router.js";
 import { securityHeaders, sendBytes, sendJson, sendText } from "./http/response.js";
 import { publicErrorMessage } from "./http/public-data.js";
 import { serveStatic, staticNotFound } from "./http/static.js";
-import { HttpError, notFound } from "./errors.js";
+import { HttpError, notFound, forbidden } from "./errors.js";
+import { requireUser, requireCsrf } from "./api/guards.js";
+import { registerTeamRoutes } from "./api/teams.js";
+import { validateTeamFiles } from "./services/team-paths.js";
 import { BuilderError } from "./core.js";
 import { SESSION_COOKIE } from "./auth/service.js";
 import { registerAdminRoutes } from "./api/admin.js";
@@ -36,7 +39,7 @@ function injectServerOverlay(html: string): string {
       ? html.replace('<link rel="stylesheet" href="/design.css">', '<link rel="stylesheet" href="/app.css">\n  <link rel="stylesheet" href="/design.css">')
       : html.replace("</head>", '<link rel="stylesheet" href="/app.css">\n</head>');
   if (withStyles.includes('src="/shell.js"')) return withStyles;
-  return withStyles.replace("</body>", '  <script src="/shell.js"></script>\n</body>');
+  return withStyles.replace("</head>", '<script src="/team-transport.js"></script>\n</head>').replace("</body>", '  <script src="/shell.js"></script>\n  <script src="/plugin-updates.js"></script>\n</body>');
 }
 
 async function serveAppShell(app: AppContext, res: ServerResponse): Promise<void> {
@@ -52,8 +55,7 @@ export function createRouter(app: AppContext): Router {
   const router = new Router();
   registerAuthRoutes(router, app);
   registerAdminRoutes(router, app);
-  registerLibraryRoutes(router, app);
-  registerBuildRoutes(router, app);
+  registerTeamRoutes(router, app);
   return router;
 }
 
@@ -87,7 +89,21 @@ async function dispatchApi(
   res: ServerResponse,
   url: URL
 ): Promise<void> {
-  const match = router.match(req.method ?? "GET", url.pathname);
+  let contentApp: AppContext | null = null;
+  const teamPath = /^\/api\/teams\/([^/]+)(\/.*)$/.exec(url.pathname);
+  let match = router.match(req.method ?? "GET", url.pathname);
+  if (!match && teamPath) {
+    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE] ?? null;
+    const auth = await app.auth.resolveSession(token);
+    if (!auth) throw new HttpError(401, "unauthorized", "Sign in to continue.");
+    await app.teams.requireAccess(teamPath[1], auth.user);
+    contentApp = await app.forTeam(teamPath[1]);
+    const contentRouter = new Router();
+    registerLibraryRoutes(contentRouter, contentApp);
+    registerBuildRoutes(contentRouter, contentApp);
+    contentRouter.get("/api/quota", async context => sendJson(context.res, 200, await contentApp!.quota.usage(requireUser(context).id)));
+    match = contentRouter.match(req.method ?? "GET", `/api${teamPath[2]}`);
+  }
   if (!match) {
     if (router.allowsMethod(url.pathname)) {
       sendJson(res, 405, { error: { code: "method_not_allowed", message: `${req.method} is not allowed for this endpoint.` } });
@@ -118,30 +134,62 @@ async function dispatchApi(
     query: (name) => url.searchParams.get(name)
   };
 
+  const handler = match.handler;
+  const run = async () => {
+    if (teamPath) {
+      const access = await app.teams.requireAccess(teamPath[1], requireUser(context));
+      context.auth!.user = access.actor;
+      if (contentApp) await validateTeamFiles(contentApp.library.root);
+      if (contentApp && !["GET", "HEAD", "OPTIONS"].includes(req.method ?? "GET")) {
+        requireCsrf(context);
+        if (access.membership.role === "viewer") throw forbidden("read_only", "An editor role in this team is required.");
+      }
+    }
+    await handler(context);
+    if (contentApp && !["GET", "HEAD", "OPTIONS"].includes(req.method ?? "GET") && res.statusCode < 400) {
+      await app.teams.audit(teamPath![1], requireUser(context).id, `content.${req.method!.toLowerCase()}`, `${teamPath![2]}${url.search}`);
+    }
+  };
   if (["GET", "HEAD", "OPTIONS"].includes(req.method ?? "GET")) {
-    await match.handler(context);
+    await run();
   } else {
     await app.library.mutate(async () => {
       // A queued write may outlive account disabling, logout or a role change.
       context.auth = await app.auth.resolveSession(cookies[SESSION_COOKIE] ?? null);
-      await match.handler(context);
+      await run();
     });
   }
 }
 
 async function dispatchPage(app: AppContext, req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> {
+  // One deliberately public release artifact; all team downloads stay protected.
+  if (pathname === "/downloads/wp-starter-exporter.zip") {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      sendText(res, 405, "Method not allowed", "text/plain; charset=utf-8", { headers: { Allow: "GET, HEAD" } });
+      return;
+    }
+    let zip: Buffer;
+    try {
+      zip = await readFile(path.join(app.config.clientDir, "downloads/wp-starter-exporter.zip"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      throw notFound("exporter_not_found", "The exporter download is unavailable. Ask the administrator to rebuild the server.");
+    }
+    res.writeHead(200, {
+      "Content-Type": "application/zip",
+      "Content-Length": zip.length,
+      "Content-Disposition": 'attachment; filename="wp-starter-exporter.zip"',
+      "Cache-Control": "no-cache"
+    });
+    res.end(req.method === "HEAD" ? undefined : zip);
+    return;
+  }
   const cookies = parseCookies(req.headers.cookie);
   const auth = await app.auth.resolveSession(cookies[SESSION_COOKIE] ?? null);
   const normalized = pathname.replace(/\/+$/, "") || "/";
 
   if (!auth && !PUBLIC_PAGES.has(normalized)) {
     res.writeHead(302, { Location: "/login.html", "Cache-Control": "no-store" });
-    res.end();
-    return;
-  }
-
-  if (auth && (normalized === "/login" || normalized === "/login.html")) {
-    res.writeHead(302, { Location: "/", "Cache-Control": "no-store" });
     res.end();
     return;
   }
@@ -154,6 +202,12 @@ async function dispatchPage(app: AppContext, req: IncomingMessage, res: ServerRe
 
   // The Builder shell is always served with the server overlay injected.
   if (normalized === "/" || normalized === "/index.html") {
+    const accessible = await app.teams.forUser(auth!.user.id);
+    const selected = new URL(req.url ?? "/", app.config.baseUrl).searchParams.get("team");
+    if (!selected || !accessible.some(team => team.id === selected)) {
+      res.writeHead(302, { Location: !selected && accessible.length === 1 ? `/?team=${accessible[0].id}` : "/teams.html", "Cache-Control": "no-store" });
+      res.end(); return;
+    }
     await serveAppShell(app, res);
     return;
   }

@@ -70,6 +70,11 @@ final class Admin_Page {
                     </select></td></tr>
                 </tbody></table>
 
+                <h2>نوشته‌ها و محصولات (اختیاری)</h2>
+                <p>همه نوشته‌ها یا محصولات، از جمله پیش‌نویس‌ها و موارد خصوصی، همراه با جزئیات استاندارد، دسته‌بندی‌ها، فایل‌های مرتبط و فیلدهای پشتیبانی‌شده ACF صادر می‌شوند. محصولات متغیر با ویژگی‌ها و تنوع‌ها منتقل می‌شوند. نظرات، کاربران، سفارش‌ها و داده‌های سایر افزونه‌ها منتقل نمی‌شوند. در Builder نیز می‌توانید انتقال هر گروه را جداگانه فعال کنید.</p>
+                <p><label><input type="checkbox" name="export_posts" value="1"> صدور همه نوشته‌ها</label></p>
+                <p><label><input type="checkbox" name="export_products" value="1"> صدور همه محصولات ووکامرس</label></p>
+
                 <h2>قطعه‌کدها</h2>
                 <p>فقط قطعه‌کدهای انتخاب‌شده صادر می‌شوند. قطعه‌کدهای فعال و غیرنمونه به‌صورت پیش‌فرض انتخاب شده‌اند؛ قطعه‌کدهای غیرفعال و نمونه‌های داخلی انتخاب نشده‌اند.</p>
                 <div class="notice notice-warning inline"><p><strong>بررسی اطلاعات محرمانه:</strong> متن قطعه‌کد بدون تغییر صادر می‌شود. اگر قطعه‌کد انتخاب‌شده کلید API، توکن یا رمز عبور داشته باشد، آن اطلاعات نیز صادر خواهد شد.</p></div>
@@ -126,6 +131,8 @@ final class Admin_Page {
         check_admin_referer( 'mms_wp_starter_export' );
 
         $selection = array(
+            'export_posts' => isset( $_POST['export_posts'] ) && '1' === $_POST['export_posts'],
+            'export_products' => isset( $_POST['export_products'] ) && '1' === $_POST['export_products'],
             'starter_plugins'  => isset( $_POST['starter_plugins'] ) && is_array( $_POST['starter_plugins'] ) ? array_map( 'sanitize_text_field', wp_unslash( $_POST['starter_plugins'] ) ) : array(),
             'starter_snippets' => isset( $_POST['starter_snippets'] ) && is_array( $_POST['starter_snippets'] ) ? array_map( 'absint', $_POST['starter_snippets'] ) : array(),
             'starter_elementor_templates' => isset( $_POST['starter_elementor_templates'] ) && is_array( $_POST['starter_elementor_templates'] ) ? array_map( 'absint', $_POST['starter_elementor_templates'] ) : array(),
@@ -135,7 +142,7 @@ final class Admin_Page {
 
         $exporter = new Exporter();
         $config   = wp_json_encode( $exporter->build_config( $selection ), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
-        $manifest = wp_json_encode( $exporter->build_manifest(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+        $manifest = wp_json_encode( $exporter->build_manifest( $selection ), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
         if ( false === $config || false === $manifest ) {
             wp_die( 'تبدیل پیکربندی آغازگر به JSON ممکن نبود.' );
         }
@@ -145,6 +152,14 @@ final class Admin_Page {
             wp_die( 'ساخت پوشه موقت صادرات ممکن نبود.' );
         }
         @chmod( $tmp, 0700 );
+        if ( $selection['export_posts'] || $selection['export_products'] ) {
+            try {
+                ( new Content_Exporter( $tmp ) )->export( $selection );
+            } catch ( \Throwable $error ) {
+                self::cleanup( $tmp );
+                wp_die( esc_html( 'صدور محتوا انجام نشد: ' . $error->getMessage() ) );
+            }
+        }
         $config_path = $tmp . '/starter-config.json';
         $manifest_path = $tmp . '/export-manifest.json';
         if ( false === file_put_contents( $config_path, $config . "\n", LOCK_EX ) || false === file_put_contents( $manifest_path, $manifest . "\n", LOCK_EX ) ) {
@@ -169,17 +184,23 @@ final class Admin_Page {
     }
 
     private static function create_zip( $source_dir, $zip_path ) {
+        $files = array();
+        $iterator = new \RecursiveIteratorIterator( new \RecursiveDirectoryIterator( $source_dir, \FilesystemIterator::SKIP_DOTS ) );
+        foreach ( $iterator as $file ) {
+            if ( $file->isFile() && ! $file->isLink() && $file->getPathname() !== $zip_path ) { $files[] = $file->getPathname(); }
+        }
         if ( class_exists( '\\ZipArchive' ) ) {
             $zip = new \ZipArchive();
             if ( true !== $zip->open( $zip_path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE ) ) return false;
-            foreach ( array( 'starter-config.json', 'export-manifest.json' ) as $name ) {
-                if ( ! $zip->addFile( $source_dir . '/' . $name, $name ) ) { $zip->close(); return false; }
+            foreach ( $files as $file ) {
+                $name = str_replace( '\\', '/', substr( $file, strlen( $source_dir ) + 1 ) );
+                if ( ! $zip->addFile( $file, $name ) ) { $zip->close(); return false; }
             }
             return $zip->close();
         }
         require_once ABSPATH . 'wp-admin/includes/class-pclzip.php';
         $archive = new \PclZip( $zip_path );
-        return 0 !== $archive->create( array( $source_dir . '/starter-config.json', $source_dir . '/export-manifest.json' ), PCLZIP_OPT_REMOVE_PATH, $source_dir );
+        return 0 !== $archive->create( $files, PCLZIP_OPT_REMOVE_PATH, $source_dir );
     }
 
     private static function cleanup( $dir ) {

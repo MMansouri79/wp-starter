@@ -36,6 +36,7 @@ async function withTwoMembers(t) {
     role: "member"
   });
   const bob = await createUserSession(admin, server.url, {
+    teamRole: "viewer",
     email: "bob@example.test",
     password: PASSWORD,
     role: "member"
@@ -126,7 +127,9 @@ test("user A uploads a package and user B sees it read-only", async (t) => {
 });
 
 test("an administrator cannot delete another account's package", async (t) => {
-  const { admin, alice, temp } = await withTwoMembers(t);
+  const { server, admin, alice, temp } = await withTwoMembers(t);
+  const adminSession = await admin.get("/api/auth/session");
+  await server.app.db.run("UPDATE team_memberships SET role = 'viewer' WHERE team_id = ? AND user_id = ?", [server.teamId, adminSession.json.user.id]);
 
   const themeZip = await makeThemeZip(temp, { slug: "owned-theme", name: "Owned Theme", version: "2.0.0" });
   const uploaded = await uploadPackage(alice.client, themeZip, "owned-theme.zip");
@@ -144,6 +147,8 @@ test("an administrator cannot delete another account's package", async (t) => {
 
 test("items imported outside the web app are unowned and manageable only by an administrator", async (t) => {
   const { server, admin, alice, temp } = await withTwoMembers(t);
+
+  await server.app.db.run("UPDATE team_memberships SET role = 'viewer' WHERE team_id = ? AND user_id = ?", [server.teamId, alice.user.id]);
 
   // Simulate a CLI import straight into the shared library directory.
   const pluginZip = await makePluginZip(temp, { slug: "cli-imported", name: "CLI Imported", version: "9.9.9" });
@@ -174,7 +179,7 @@ test("items imported outside the web app are unowned and manageable only by an a
 });
 
 test("profile ownership is enforced on save, rename and delete", async (t) => {
-  const { alice, bob, temp } = await withTwoMembers(t);
+  const { server, alice, bob, temp } = await withTwoMembers(t);
 
   const wordpressZip = await makeWordPressZip(temp, { version: "7.1" });
   const coreUpload = await uploadPackage(alice.client, wordpressZip, "wordpress-7.1.zip");
@@ -220,6 +225,7 @@ test("profile ownership is enforced on save, rename and delete", async (t) => {
   assert.equal(bobOverwrite.status, 403);
 
   // Bob can still create his own profile.
+  await server.app.db.run("UPDATE team_memberships SET role = 'editor' WHERE team_id = ? AND user_id = ?", [server.teamId, bob.user.id]);
   const bobOwn = await bob.client.post("/api/profiles", {
     json: { name: "bob-profile", locale: "en_US", wordpressVersion: "7.1", pluginVersions: { alpha: "1.0.0" } }
   });
@@ -359,7 +365,7 @@ test("portable template ownership is enforced", async (t) => {
   assert.equal((await alice.client.delete(`/api/vnext/templates/${id}`)).status, 200);
 });
 
-test("sample content ownership is enforced, but duplicating is allowed", async (t) => {
+test("viewers cannot edit, delete, or duplicate team sample content", async (t) => {
   const { alice, bob } = await withTwoMembers(t);
 
   const created = await alice.client.post("/api/sample-content", {
@@ -388,20 +394,13 @@ test("sample content ownership is enforced, but duplicating is allowed", async (
   });
   assert.equal(bobOverwrite.status, 403);
 
-  // Duplicating creates a new sample owned by Bob, so it is allowed.
   const duplicate = await bob.client.post(`/api/sample-content/${id}/duplicate`);
-  assert.equal(duplicate.status, 200);
-  assert.notEqual(duplicate.json.id, id);
-
-  const bobAfter = await bob.client.get("/api/state");
-  const copy = bobAfter.json.sampleContent.content.find((item) => item.id === duplicate.json.id);
-  assert.ok(copy);
-  assert.equal(copy.ownedByCurrentUser, true, "the duplicate belongs to the account that made it");
+  assert.equal(duplicate.status, 403, "Viewers cannot duplicate team content");
 
   assert.equal((await alice.client.delete(`/api/sample-content/${id}`)).status, 200);
 });
 
-test("reports storage usage and enforces the per-account quota", async (t) => {
+test("reports storage usage and enforces the team quota", async (t) => {
   const server = await startTestServer();
   const temp = await mkdtemp(path.join(os.tmpdir(), "wp-starter-quota-"));
   t.after(async () => {
@@ -431,7 +430,7 @@ test("reports storage usage and enforces the per-account quota", async (t) => {
   assert.equal(after.json.remainingBytes, after.json.limitBytes - after.json.usedBytes);
 });
 
-test("refuses an upload that would exceed the account quota", async (t) => {
+test("refuses an upload that would exceed the team quota", async (t) => {
   const server = await startTestServer({ accountQuotaBytes: 64 });
   const temp = await mkdtemp(path.join(os.tmpdir(), "wp-starter-quota-full-"));
   t.after(async () => {

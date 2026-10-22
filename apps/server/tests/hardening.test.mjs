@@ -33,7 +33,7 @@ function sync(app) {
     app.resourceItems, app.fontItems, app.elementorItems, app.sampleItems, app.log).run();
 }
 
-test("duplicate package imports preserve ownership; foreign replacement is refused before file mutation", async (t) => {
+test("duplicate package imports preserve ownership; viewer replacement is refused before file mutation", async (t) => {
   const { server, temp, admin } = await fixture(t);
   const { alice, bob } = await members(admin, server.url);
   const original = await makePluginZip(temp, { slug: "shared", name: "Original", version: "1.0" });
@@ -43,7 +43,8 @@ test("duplicate package imports preserve ownership; foreign replacement is refus
   assert.equal(duplicate.json.item.createdBy, alice.user.id);
   assert.equal(duplicate.json.added, false);
   const changed = await makePluginZip(temp, { slug: "shared", name: "Changed", version: "1.0" });
-  for (const client of [bob.client, admin]) {
+  await server.app.db.run("UPDATE team_memberships SET role = 'viewer' WHERE team_id = ? AND user_id = ?", [server.teamId, bob.user.id]);
+  for (const client of [bob.client]) {
     const denied = await upload(client, "/api/packages", changed, true);
     assert.equal(denied.status, 403);
     assert.equal(denied.json.error.code, "read_only");
@@ -56,7 +57,7 @@ test("duplicate package imports preserve ownership; foreign replacement is refus
   assert.equal(allowed.json.item.createdBy, alice.user.id);
 });
 
-test("snapshot duplicate and replacement imports enforce ownership", async (t) => {
+test("snapshot duplicate and replacement imports enforce team roles", async (t) => {
   const { server, temp, admin } = await fixture(t);
   const { alice, bob } = await members(admin, server.url);
   const zip = await makeSnapshotZip(temp);
@@ -65,6 +66,7 @@ test("snapshot duplicate and replacement imports enforce ownership", async (t) =
   const duplicate = await upload(bob.client, "/api/configs", zip);
   assert.equal(duplicate.json.item.createdBy, alice.user.id);
   const changed = await makeSnapshotZip(temp, { locale: "fa_IR", label: "changed" });
+  await server.app.db.run("UPDATE team_memberships SET role = 'viewer' WHERE team_id = ? AND user_id = ?", [server.teamId, bob.user.id]);
   const denied = await upload(bob.client, "/api/configs", changed, true);
   assert.equal(denied.status, 403);
   assert.equal(denied.json.error.code, "read_only");
@@ -72,7 +74,7 @@ test("snapshot duplicate and replacement imports enforce ownership", async (t) =
   assert.equal((await upload(alice.client, "/api/configs", changed, true)).status, 200);
 });
 
-test("unowned package imports cannot be claimed or replaced by members", async (t) => {
+test("unowned package imports cannot be claimed or replaced by viewers", async (t) => {
   const { server, temp, admin } = await fixture(t);
   const { alice } = await members(admin, server.url);
   const zip = await makePluginZip(temp, { slug: "cli", name: "CLI", version: "1.0" });
@@ -80,6 +82,7 @@ test("unowned package imports cannot be claimed or replaced by members", async (
   const duplicate = await upload(alice.client, "/api/packages", zip);
   assert.equal(duplicate.json.item.createdBy, null);
   const changed = await makePluginZip(temp, { slug: "cli", name: "Changed", version: "1.0" });
+  await server.app.db.run("UPDATE team_memberships SET role = 'viewer' WHERE team_id = ? AND user_id = ?", [server.teamId, alice.user.id]);
   assert.equal((await upload(alice.client, "/api/packages", changed, true)).status, 403);
   const replaced = await upload(admin, "/api/packages", changed, true);
   assert.equal(replaced.status, 200);
@@ -138,6 +141,7 @@ test("font IDs cannot be overwritten by another owner through a different archiv
   const zip = path.join(temp, "first.zip"); await createZip(source, zip);
   assert.equal((await upload(alice.client, "/api/fonts", zip)).status, 200);
   const other = path.join(temp, "other.zip"); await createZip(source, other);
+  await server.app.db.run("UPDATE team_memberships SET role = 'viewer' WHERE team_id = ? AND user_id = ?", [server.teamId, bob.user.id]);
   const response = await upload(bob.client, "/api/fonts", other, true);
   assert.equal(response.status, 403);
   assert.equal(response.json.error.code, "read_only");
@@ -168,10 +172,11 @@ test("normalized email lockout holds across distinct trusted proxy IPs", async (
   assert.equal((await client.post("/api/auth/login", { json: ADMIN, headers: { "x-forwarded-for": "192.0.2.3" } })).status, 429);
 });
 
-test("sample objects created through the CLI cannot be claimed or deleted by a member", async (t) => {
+test("sample objects created through the CLI cannot be claimed or deleted by a viewer", async (t) => {
   const { server, admin } = await fixture(t);
   const { alice } = await members(admin, server.url);
   const post = await server.app.library.sampleContent().save({ kind: "post", title: "CLI post" });
+  await server.app.db.run("UPDATE team_memberships SET role = 'viewer' WHERE team_id = ? AND user_id = ?", [server.teamId, alice.user.id]);
   const refused = await alice.client.post("/api/sample-content", { json: { ...post, title: "Claimed" } });
   assert.equal(refused.status, 403);
   assert.equal(refused.json.error.code, "read_only");
@@ -189,8 +194,8 @@ test("invite guesses are throttled and simultaneous redemption creates only one 
   // Reset counters deliberately for the separate redemption race.
   server.app.auth.options.rateLimiter.clear("ip:127.0.0.1");
   server.app.auth.options.rateLimiter.clear("email:guess@example.test");
-  const invite = await createInvite(admin);
-  const results = await Promise.all([register("one@example.test", invite.code), register("two@example.test", invite.code)]);
+  const invite = await createInvite(admin, { email: "one@example.test" });
+  const results = await Promise.all([register("one@example.test", invite.code), register("one@example.test", invite.code)]);
   assert.equal(results.filter((row) => row.status === 200).length, 1);
 });
 
@@ -228,7 +233,7 @@ test("health, state, nested upload documents and build failures hide internal pa
 
 test("retention removes old artifacts beyond 1000 newer rows and preserves active/recent jobs", async (t) => {
   const { server } = await fixture(t);
-  await server.app.builds.stop();
+  await server.queue.stop();
   const repo = server.app.buildItems;
   const old = await repo.enqueue({ profileId: null, profileFile: "old.json", profileName: "Old", createdBy: null });
   await repo.update(old.id, { status: "complete", completedAt: "2000-01-01T00:00:00.000Z", artifactFile: "old.zip" });
@@ -239,7 +244,7 @@ test("retention removes old artifacts beyond 1000 newer rows and preserves activ
     const row = await repo.enqueue({ profileId: null, profileFile: "recent.json", profileName: "Recent", createdBy: null });
     await repo.update(row.id, { status: "complete", completedAt: new Date().toISOString() });
   }
-  assert.equal(await server.app.builds.pruneExpired(), 1);
+  assert.equal(await server.queue.pruneExpired(), 1);
   assert.equal(await repo.findById(old.id), null);
   assert.equal((await repo.findById(active.id)).status, "queued");
   await assert.rejects(stat(target), { code: "ENOENT" });
@@ -248,27 +253,27 @@ test("retention removes old artifacts beyond 1000 newer rows and preserves activ
 
 test("startup retention runs and stop clears the hourly timer", async (t) => {
   const { server } = await fixture(t);
-  await server.app.builds.stop();
+  await server.queue.stop();
   const row = await server.app.buildItems.enqueue({ profileId: null, profileFile: "old.json", profileName: "Old", createdBy: null });
   await server.app.buildItems.update(row.id, { status: "failed", completedAt: "2000-01-01T00:00:00.000Z" });
-  await server.app.builds.start();
+  await server.queue.start();
   assert.equal(await server.app.buildItems.findById(row.id), null);
-  assert.ok(server.app.builds.retentionTimer);
-  await server.app.builds.stop();
-  assert.equal(server.app.builds.retentionTimer, null);
+  assert.ok(server.queue.retentionTimer);
+  await server.queue.stop();
+  assert.equal(server.queue.retentionTimer, null);
 });
 
 test("hourly retention removes builds that expire after startup", async (t) => {
   const { server } = await fixture(t);
-  await server.app.builds.stop();
+  await server.queue.stop();
   t.mock.timers.enable({ apis: ["setInterval"] });
-  await server.app.builds.start();
+  await server.queue.start();
   const row = await server.app.buildItems.enqueue({ profileId: null, profileFile: "expired.json", profileName: "Expired", createdBy: null });
   await server.app.buildItems.update(row.id, { status: "failed", completedAt: "2000-01-01T00:00:00.000Z" });
   t.mock.timers.tick(3600_000);
-  await server.app.builds.retentionSweep;
+  await server.queue.retentionSweep;
   assert.equal(await server.app.buildItems.findById(row.id), null);
-  await server.app.builds.stop();
+  await server.queue.stop();
 });
 
 test("reconciliation refreshes content while preserving owners and removes stale mirrors", async (t) => {
@@ -401,7 +406,7 @@ async function templateSnapshot(temp, generatedAt, name = "Header") {
   const zip = path.join(temp, `${name}.zip`); await createZip(source, zip); return zip;
 }
 
-test("snapshot templates inherit ownership and another snapshot cannot overwrite them", async (t) => {
+test("snapshot templates inherit ownership and a viewer cannot overwrite them", async (t) => {
   const { server, temp, admin } = await fixture(t);
   const { alice, bob } = await members(admin, server.url);
   const original = await templateSnapshot(temp, "2026-08-24T05:01:24+00:00");
@@ -410,6 +415,7 @@ test("snapshot templates inherit ownership and another snapshot cannot overwrite
   assert.equal(item.createdBy, alice.user.id);
   assert.equal(item.canDelete, true);
   const changed = await templateSnapshot(temp, "2026-08-25T05:01:24+00:00", "Changed");
+  await server.app.db.run("UPDATE team_memberships SET role = 'viewer' WHERE team_id = ? AND user_id = ?", [server.teamId, bob.user.id]);
   const refused = await upload(bob.client, "/api/configs", changed);
   assert.equal(refused.status, 403);
   assert.equal(refused.json.error.code, "read_only");

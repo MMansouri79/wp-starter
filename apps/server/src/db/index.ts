@@ -9,13 +9,13 @@ export async function openDatabase(
   if (config.driver === "sqlite") {
     const { SqliteDatabase } = await import("./sqlite.js");
     const database = new SqliteDatabase(config.file);
-    await migrate(database, log);
+    try { await migrate(database, log); } catch (error) { await database.close(); throw error; }
     return database;
   }
 
   const { PostgresDatabase } = await import("./postgres.js");
   const database = await PostgresDatabase.connect({ connectionString: config.connectionString, ssl: config.ssl });
-  await migrate(database, log);
+  try { await migrate(database, log); } catch (error) { await database.close(); throw error; }
   return database;
 }
 

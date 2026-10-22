@@ -23,6 +23,10 @@ test("coordinated backups restore library bytes and restart after dump failure",
   await Promise.all([source, bin, restore].map((dir) => mkdir(dir)));
   await writeFile(path.join(source, "registry.json"), '{"test":"offline"}');
   await writeFile(path.join(source, "package.zip"), Buffer.from([0, 1, 2, 255]));
+  await mkdir(path.join(source, "teams", "team-a"), { recursive: true });
+  await mkdir(path.join(source, "teams", "team-b"), { recursive: true });
+  await writeFile(path.join(source, "teams", "team-a", "registry.json"), '{"team":"a"}');
+  await writeFile(path.join(source, "teams", "team-b", "package.zip"), "private-team-b");
   for (const [file, installed] of [["backup-database.sh", "wp-starter-backup"], ["backup-file-store.sh", "wp-starter-backup-files"], ["backup-system.sh", "wp-starter-backup-system"]]) {
     await copyFile(path.join(repoRoot, "deploy/scripts", file), path.join(bin, installed));
   }
@@ -34,6 +38,8 @@ test("coordinated backups restore library bytes and restart after dump failure",
   const prefix = 'set -e; export PATH="/usr/bin:/bin:$PATH"; ' + setup + 'export PATH="$TEST_BIN:$PATH"; chmod +x "$TEST_BIN/"*; ';
   await execute(bash, ["-c", prefix + '"$TEST_BIN/wp-starter-backup-system"; archive=$(find "$WP_STARTER_BACKUP_DIR" -name "*.tar.gz"); tar -xzf "$archive" -C "$RESTORE"'], { env, cwd: repoRoot });
   assert.deepEqual(await readFile(path.join(restore, "package.zip")), await readFile(path.join(source, "package.zip")));
+  assert.equal(await readFile(path.join(restore, "teams", "team-a", "registry.json"), "utf8"), '{"team":"a"}');
+  assert.equal(await readFile(path.join(restore, "teams", "team-b", "package.zip"), "utf8"), "private-team-b");
   assert.equal(await readFile(path.join(restore, "registry.json"), "utf8"), '{"test":"offline"}');
   const sets = await readdir(backup);
   assert.equal(sets.length, 1);

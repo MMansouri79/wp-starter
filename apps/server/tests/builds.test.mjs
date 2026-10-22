@@ -86,7 +86,7 @@ async function waitForBuild(client, id, timeoutMs = 60_000) {
 }
 
 test("queues a build asynchronously and stores a downloadable artifact", async (t) => {
-  const { alice, temp } = await withMember(t);
+  const { server, alice, temp } = await withMember(t);
   await createBuildProfile(alice.client, temp);
 
   const queued = await alice.client.post("/api/build-jobs", { json: { file: PROFILE_FILE } });
@@ -99,7 +99,7 @@ test("queues a build asynchronously and stores a downloadable artifact", async (
   assert.equal(finished.percent, 100);
   assert.ok(finished.result?.file.endsWith(".zip"), "the job reports the artifact file");
   assert.ok(finished.result?.sha256, "the artifact is checksummed");
-  assert.equal(finished.result.downloadUrl, `/api/builds/${queued.json.id}/download`);
+  assert.equal(finished.result.downloadUrl, `/api/teams/${server.teamId}/builds/${queued.json.id}/download`);
 
   const download = await alice.client.get(finished.result.downloadUrl);
   assert.equal(download.status, 200);
@@ -126,7 +126,7 @@ test("build history is shared read-only across accounts", async (t) => {
   const bob = await createUserSession(admin, server.url, {
     email: "reader@example.test",
     password: PASSWORD,
-    role: "member"
+    role: "member", teamRole: "viewer"
   });
 
   const bobList = await bob.client.get("/api/build-jobs");

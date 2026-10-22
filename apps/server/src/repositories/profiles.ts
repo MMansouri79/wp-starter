@@ -12,6 +12,7 @@ export interface ProfileItem extends OwnedItem {
 }
 
 interface ProfileRow {
+  team_id: string;
   id: string;
   name: string;
   file_name: string;
@@ -25,6 +26,7 @@ interface ProfileRow {
 function toItem(row: ProfileRow): ProfileItem {
   return {
     id: row.id,
+    teamId: row.team_id,
     name: row.name,
     fileName: row.file_name,
     sha256: row.sha256,
@@ -44,7 +46,7 @@ export interface SaveProfileInput {
 }
 
 export class ProfileItemRepository {
-  constructor(private readonly db: SqlDatabase) {}
+  constructor(private readonly db: SqlDatabase, public readonly teamId: string) {}
 
   /** A profile is keyed by its file name, matching the builder-core profile directory. */
   async save(input: SaveProfileInput): Promise<ProfileItem> {
@@ -52,14 +54,13 @@ export class ProfileItemRepository {
     const now = new Date().toISOString();
 
     if (existing) {
-      await this.db.run(
-        "UPDATE profiles SET name = ?, sha256 = ?, document_json = ?, updated_at = ? WHERE id = ?",
-        [input.name, input.sha256, JSON.stringify(input.document), now, existing.id]
+      await this.db.run("UPDATE profiles SET name = ?, sha256 = ?, document_json = ?, updated_at = ? WHERE id = ? AND team_id = ?", [input.name, input.sha256, JSON.stringify(input.document), now, existing.id, this.teamId]
       );
       return (await this.findById(existing.id)) as ProfileItem;
     }
 
     const item: ProfileItem = {
+      teamId: this.teamId!,
       id: `profile-${input.fileName}`,
       name: input.name,
       fileName: input.fileName,
@@ -70,27 +71,25 @@ export class ProfileItemRepository {
       updatedAt: now
     };
 
-    await this.db.run(
-      `INSERT INTO profiles (id, name, file_name, sha256, document_json, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [item.id, item.name, item.fileName, item.sha256, JSON.stringify(item.document), item.createdBy, item.createdAt, item.updatedAt]
+    await this.db.run(`INSERT INTO profiles (team_id, id, name, file_name, sha256, document_json, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [this.teamId, item.id, item.name, item.fileName, item.sha256, JSON.stringify(item.document), item.createdBy, item.createdAt, item.updatedAt]
     );
 
     return item;
   }
 
   async list(): Promise<ProfileItem[]> {
-    const rows = await this.db.all<ProfileRow>("SELECT * FROM profiles ORDER BY name ASC");
+    const rows = await this.db.all<ProfileRow>("SELECT * FROM profiles WHERE team_id = ? ORDER BY name ASC", [this.teamId]);
     return rows.map(toItem);
   }
 
   async findById(id: string): Promise<ProfileItem | null> {
-    const row = await this.db.get<ProfileRow>("SELECT * FROM profiles WHERE id = ?", [id]);
+    const row = await this.db.get<ProfileRow>("SELECT * FROM profiles WHERE team_id = ? AND id = ?", [this.teamId, id]);
     return row ? toItem(row) : null;
   }
 
   async findByFileName(fileName: string): Promise<ProfileItem | null> {
-    const row = await this.db.get<ProfileRow>("SELECT * FROM profiles WHERE file_name = ?", [fileName]);
+    const row = await this.db.get<ProfileRow>("SELECT * FROM profiles WHERE team_id = ? AND file_name = ?", [this.teamId, fileName]);
     return row ? toItem(row) : null;
   }
 
@@ -101,11 +100,11 @@ export class ProfileItemRepository {
   }
 
   async remove(id: string): Promise<void> {
-    await this.db.run("DELETE FROM profiles WHERE id = ?", [id]);
+    await this.db.run("DELETE FROM profiles WHERE team_id = ? AND id = ?", [this.teamId, id]);
   }
 
   /** Used when a profile is renamed: the previous file name must not linger. */
   async removeByFileName(fileName: string): Promise<void> {
-    await this.db.run("DELETE FROM profiles WHERE file_name = ?", [fileName]);
+    await this.db.run("DELETE FROM profiles WHERE team_id = ? AND file_name = ?", [this.teamId, fileName]);
   }
 }

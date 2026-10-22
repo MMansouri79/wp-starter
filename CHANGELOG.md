@@ -2,6 +2,30 @@
 
 ## 0.2.0-alpha.1 — unreleased
 
+- Added default-off, team-wide automatic WordPress.org plugin library updates on the hosted server, with explicit source confirmation, twelve-hour checks, status reporting, and team owner/admin controls. New releases retain old versions and never change pinned profiles or existing sites.
+
+- Fixed large-catalog profile resolution exhausting the hosted Node.js heap: assets now reuse one parsed catalog and verify files sequentially, preserving containment and checksum checks.
+
+- Fixed hosted catalog creation with stable content, attribute and term IDs; new records no longer enter the update-only path. Added a queued website build/download regression check for the packaged setup controls and paired installer checksum.
+
+- Added persistent setup controls to skip image imports or keep existing content and stop the remaining catalog. A stopped catalog cannot restart through configuration reentry; unfinished drafts remain unchanged.
+
+- Show catalog import stages and completed item counts during setup instead of a fixed “Preparing WordPress — 2%” display.
+
+- Fixed generated Persian/Unicode content and taxonomy slugs to respect WordPress's 200-character URL-encoded limit. Optional stable suffixes keep imported catalog slugs unique; overlong stored selections are rejected before packaging.
+
+- Preserve exported variation menu ordering during catalog installation.
+
+- Added independent, default-off post/product switches to Exporter and Builder profiles. Exporter v0.2.0-alpha.10 carries classic posts, WooCommerce simple/variable/grouped/external products, terms, global/local attributes, variations, referenced local assets, and supported ACF field groups/values. Builder validates and bundles only selected content, remaps references, requires WooCommerce/ACF as needed, and installs through resumable draft-first provisioning without overwriting unrelated content.
+
+- Added a public WordPress Exporter ZIP download on the hosted sign-in page and builder account panel. Server builds refresh the installable plugin automatically; downloading it requires no account.
+
+- New installations default to Post name permalinks, including package-only builds. Bootstrap refreshes the in-memory rewrite structure and routing rules after provisioning; explicit snapshot permalink choices remain supported.
+
+- Added private team workspaces with per-team libraries, storage quotas, isolated build dependencies/artifacts, multiple memberships per account, and owner/admin/editor/viewer roles. Platform administrators provision and suspend teams without automatic content access.
+- Added email-bound, single-use seven-day team invitation links, team settings and activity records, a hosted team picker/switcher, and team-scoped hosted API routes. Creator attribution remains intact while editors collaborate across the team's items; public signup and legacy invitations are disabled.
+- Added a stopped-server `migrate-teams --dry-run` inventory and restartable checksum-verified legacy library migration. Existing accounts/content migrate into one initial team; old sessions and invitations are revoked. Existing deployments must complete migration before starting the new server. See `docs/SERVER-DEPLOYMENT.md`.
+
 - Added an optional Docker HTTPS listener on port 2053, private HTTP health monitoring, secure-page redirects, and a scoped certificate reload hook.
 
 - Redesigned the shared local, desktop, and hosted workspace with light/dark/system themes, grouped navigation, searchable libraries, a five-step profile editor, focused builds with persistent progress, compact typography editors, accessible dialogs, and reduced-motion-aware transitions. Login, registration, and administration share the same offline design assets.

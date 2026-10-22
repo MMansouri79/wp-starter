@@ -8,6 +8,7 @@ import { startApplication } from "../dist/app.js";
 export const repoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 
 export const ADMIN = { email: "admin@example.test", password: "admin-password-123" };
+const fixtures = new Map();
 
 /**
  * Boots an isolated server: temporary library directory, in-memory SQLite, and
@@ -15,6 +16,7 @@ export const ADMIN = { email: "admin@example.test", password: "admin-password-12
  * test files or runs.
  */
 export async function startTestServer(overrides = {}) {
+  const { teamFixture = true, ...settings } = overrides;
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "wp-starter-server-test-"));
   const application = await startApplication({
     host: "127.0.0.1",
@@ -29,14 +31,28 @@ export async function startTestServer(overrides = {}) {
     logLevel: "quiet",
     skipSync: true,
     buildWorkers: 1,
-    ...overrides
+    ...settings
   });
+
+  let fixtureApp = application.app;
+  if (teamFixture) {
+    const admin = (await application.app.auth.listUsers()).find(user => user.role === "admin");
+    const team = await application.app.teams.create("Test team", admin.id);
+    await application.app.db.run("INSERT INTO team_memberships (team_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)", [team.id, admin.id, new Date().toISOString()]);
+    fixtureApp = await application.app.forTeam(team.id);
+    fixtures.set(application.url, { teamId: team.id, app: fixtureApp });
+  }
 
   return {
     ...application,
+    app: fixtureApp,
+    platform: application.app,
+    queue: application.app.builds,
+    teamId: fixtureApp.teamId,
     dataDir,
     async stop() {
       await application.stop();
+      fixtures.delete(application.url);
       await rm(dataDir, { recursive: true, force: true });
     }
   };
@@ -68,6 +84,12 @@ export function createClient(baseUrl) {
   }
 
   async function request(method, target, options = {}) {
+    const fixture = fixtures.get(baseUrl);
+    if (fixture && !options.raw) {
+      if (target === "/api/auth/quota") target = `/api/teams/${fixture.teamId}/quota`;
+      else if (target.startsWith("/api/") && !/^\/api\/(auth|admin|teams|health)(\/|$)/.test(target)) target = `/api/teams/${fixture.teamId}${target.slice(4)}`;
+      else if (target === "/" || target === "/index.html") target += `?team=${fixture.teamId}`;
+    }
     const headers = { ...(options.headers ?? {}) };
     const cookies = cookieHeader();
     if (cookies) headers.cookie = cookies;
@@ -135,21 +157,25 @@ export function createClient(baseUrl) {
 }
 
 /** Creates a user through the admin API and returns a signed-in client. */
-export async function createUserSession(adminClient, baseUrl, { email, password, role }) {
+export async function createUserSession(adminClient, baseUrl, { email, password, role, teamRole = "editor" }) {
   const created = await adminClient.post("/api/admin/users", { json: { email, password, role } });
   if (created.status !== 201) {
     throw new Error(`Could not create ${email}: ${created.status} ${created.text}`);
   }
+  const fixture = fixtures.get(baseUrl);
+  if (fixture) await fixture.app.db.run("INSERT INTO team_memberships (team_id, user_id, role, created_at) VALUES (?, ?, ?, ?)", [fixture.teamId, created.json.user.id, teamRole, new Date().toISOString()]);
   const client = createClient(baseUrl);
   await client.signIn(email, password);
   return { client, user: created.json.user };
 }
 
 /** Creates an invite code through the admin API. */
-export async function createInvite(adminClient, { role = "client", email = null, expiresInDays = 14 } = {}) {
-  const result = await adminClient.post("/api/admin/invites", { json: { role, email, expiresInDays } });
+export async function createInvite(adminClient, { role = "editor", email = "client@example.test" } = {}) {
+  const session = await adminClient.get("/api/auth/session");
+  const teamId = session.json.teams[0].id;
+  const result = await adminClient.post(`/api/teams/${teamId}/invites`, { json: { role: role === "member" || role === "client" ? "editor" : role, email } });
   if (result.status !== 201) throw new Error(`Could not create invite: ${result.status} ${result.text}`);
-  return result.json;
+  return { ...result.json, code: result.json.token };
 }
 
 /* ----------------------------------------------------------- synthetic fixtures */

@@ -17,11 +17,13 @@ final class MMS_WP_Starter_Bootstrap {
     const REVISION_OPTION = 'mms_wp_starter_bootstrap_revision';
     const SETUP_PAGE_SLUG = 'wp-starter-setup';
     const CONFIG_REVISION = 12;
+    const CATALOG_CHOICE_OPTION = 'mms_wp_starter_catalog_choice';
     const VNEXT_MANIFEST_FILENAME = 'starter-design-system.json';
     const ELEMENTOR_TEMPLATES_FILENAME = 'starter-elementor-templates.json';
 
     public static function init() {
         add_action( 'admin_init', array( __CLASS__, 'maybe_run' ), 1 );
+        add_action( 'admin_init', array( __CLASS__, 'handle_catalog_choice' ), 0 );
         add_action( 'admin_menu', array( __CLASS__, 'register_setup_page' ) );
         add_action( 'admin_notices', array( __CLASS__, 'render_notice' ) );
     }
@@ -275,13 +277,13 @@ final class MMS_WP_Starter_Bootstrap {
                 update_option( self::REPORT_OPTION, array_merge( (array) get_option( self::REPORT_OPTION, array() ), array( 'verification' => array( 'checked' => 0, 'mismatches' => 0 ), 'woocommerce_duplicates_removed' => 0, 'configuration_skipped' => true ) ), false );
             }
 
-            if ( ! empty( $build['sampleContentPayload'] ) ) {
+            if ( ! empty( $build['sampleContentPayload'] ) && ! self::catalog_stopped( $build ) ) {
                 self::save_state( array( 'phase' => 'sample_content' ) );
                 self::continue_setup();
             }
         }
 
-        if ( 'sample_content' === $phase ) {
+        if ( 'sample_content' === $phase && ! self::catalog_stopped( $build ) ) {
             $descriptor = $build['sampleContentPayload'] ?? array();
             if ( ( $descriptor['path'] ?? '' ) !== 'starter-sample-content.json' || ! preg_match( '/^[a-f0-9]{64}$/D', $descriptor['sha256'] ?? '' ) ) {
                 self::fail( 'Sample payload descriptor is missing or invalid.' ); return;
@@ -302,12 +304,68 @@ final class MMS_WP_Starter_Bootstrap {
         }
 
         if ( 'configure' === $phase || 'sample_content' === $phase ) {
+            if ( self::catalog_stopped( $build ) ) {
+                $report = (array) get_option( self::REPORT_OPTION, array() );
+                $report['catalog_import_stopped'] = true;
+                unset( $report['sample_content_verified'] );
+                update_option( self::REPORT_OPTION, $report, false );
+            }
+            self::finalize_permalinks( $configuration_enabled ? $config : array() );
             self::save_state( array( 'phase' => 'complete' ) );
             update_option( self::COMPLETE_OPTION, gmdate( 'c' ), false );
             update_option( self::REVISION_OPTION, self::CONFIG_REVISION, false );
             delete_option( self::ERROR_OPTION );
             self::cleanup_payload_and_self();
         }
+    }
+
+    private static function finalize_permalinks( array $config ) {
+        global $wp_rewrite;
+        $structure = (string) ( $config['wordpress']['permalink_structure'] ?? '' );
+        if ( '' === $structure ) {
+            $structure = '/%postname%/';
+        }
+        // Updating the option alone leaves this request's WP_Rewrite on the old
+        // structure. Update the object before flushing, after all imports finish.
+        $wp_rewrite->set_permalink_structure( $structure );
+        flush_rewrite_rules( false );
+    }
+
+    private static function catalog_stopped( array $build ) {
+        $choice = (array) get_option( self::CATALOG_CHOICE_OPTION, array() );
+        return ! empty( $choice['stop'] ) && ( $choice['sha256'] ?? '' ) === ( $build['sampleContentPayload']['sha256'] ?? null );
+    }
+
+    public static function handle_catalog_choice() {
+        if ( ! is_admin() || ! current_user_can( 'manage_options' ) || 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) || empty( $_POST['wp_starter_catalog_choice'] ) ) return;
+        check_admin_referer( 'wp_starter_catalog_choice', 'wp_starter_catalog_nonce' );
+        $result = self::select_catalog_choice( wp_unslash( $_POST['wp_starter_catalog_choice'] ) );
+        if ( is_wp_error( $result ) ) self::fail( $result->get_error_message() );
+        wp_safe_redirect( self::setup_url() ); exit;
+    }
+
+    public static function select_catalog_choice( $action ) {
+        if ( ! current_user_can( 'manage_options' ) || get_option( self::COMPLETE_OPTION ) || 'sample_content' !== ( self::get_state()['phase'] ?? '' ) || ! in_array( $action, array( 'skip_images', 'stop' ), true ) ) return new WP_Error( 'catalog_action', 'Catalog controls are available only during an active import.' );
+        $owner = wp_generate_uuid4();
+        if ( ! add_option( 'mms_wp_starter_sample_lock', array( 'owner' => $owner, 'time' => time() ), '', false ) ) return new WP_Error( 'catalog_busy', 'An import request is running. Wait for it to finish, then retry.' );
+        try {
+            $root = self::package_root(); if ( is_wp_error( $root ) ) return $root;
+            $build = self::read_json( $root . '/starter-build.json' ); if ( is_wp_error( $build ) ) return $build;
+            $descriptor = $build['sampleContentPayload'] ?? array();
+            if ( ( $descriptor['path'] ?? '' ) !== 'starter-sample-content.json' ) return new WP_Error( 'catalog_payload', 'Invalid catalog descriptor.' );
+            $file = self::bundled_payload_file_path( $descriptor['path'], $descriptor['sha256'] ?? '' ); if ( is_wp_error( $file ) ) return $file;
+            $payload = self::read_json( $file ); if ( is_wp_error( $payload ) ) return $payload;
+            $choice = (array) get_option( self::CATALOG_CHOICE_OPTION, array() );
+            if ( ( $choice['sha256'] ?? '' ) !== $descriptor['sha256'] ) $choice = array();
+            $choice['sha256'] = $descriptor['sha256'];
+            $choice['fingerprint'] = hash( 'sha256', wp_json_encode( $payload ) );
+            $choice['skipImages'] = ! empty( $choice['skipImages'] ) || 'skip_images' === $action;
+            $choice['stop'] = ! empty( $choice['stop'] ) || 'stop' === $action;
+            $choice['checkpoint'] = get_option( 'mms_wp_starter_sample_progress', array() );
+            if ( ! update_option( self::CATALOG_CHOICE_OPTION, $choice, false ) && get_option( self::CATALOG_CHOICE_OPTION ) !== $choice ) return new WP_Error( 'catalog_save', 'Could not save the catalog choice.' );
+            delete_option( self::ERROR_OPTION );
+            return true;
+        } finally { $lock = get_option( 'mms_wp_starter_sample_lock' ); if ( ( $lock['owner'] ?? '' ) === $owner ) delete_option( 'mms_wp_starter_sample_lock' ); }
     }
 
     private static function get_state() {
@@ -2061,7 +2119,29 @@ final class MMS_WP_Starter_Bootstrap {
             'configure' => 94,
             'complete' => 100,
         );
-        return array( 'phase' => $phase, 'label' => $labels[ $phase ] ?? 'Preparing WordPress', 'percent' => $percentage[ $phase ] ?? 2, 'state' => $state, 'pluginCount' => $plugin_count, 'languageCount' => $language_count );
+        $detail = '';
+        if ( 'sample_content' === $phase ) {
+            $samples = is_wp_error( $root ) ? array() : self::read_json( $root . '/starter-sample-content.json' );
+            if ( is_wp_error( $samples ) ) $samples = array();
+            $catalog = self::catalog_progress( $samples, (array) get_option( 'mms_wp_starter_sample_progress', array() ) );
+            $labels[$phase] = $catalog['label'];
+            $percentage[$phase] = $catalog['percent'];
+            $detail = $catalog['detail'];
+        }
+        return array( 'phase' => $phase, 'label' => $labels[ $phase ] ?? 'Preparing WordPress', 'percent' => $percentage[ $phase ] ?? 2, 'detail' => $detail, 'state' => $state, 'pluginCount' => $plugin_count, 'languageCount' => $language_count );
+    }
+
+    public static function catalog_progress( array $payload, array $state ) {
+        $labels = array( 'attributes' => 'Importing product attributes', 'terms' => 'Importing categories and attribute terms', 'assets' => 'Importing images and files', 'content' => 'Importing posts and products', 'relationships' => 'Linking products and custom fields', 'publish' => 'Applying publication status', 'verify' => 'Verifying imported content' );
+        $phase = $state['phase'] ?? 'attributes';
+        $total = 0; $finished = 0; $current = 0; $before = true;
+        foreach ( $labels as $key => $label ) {
+            $count = count( (array) ( $payload[in_array( $key, array( 'attributes', 'terms', 'assets' ), true ) ? $key : 'content'] ?? array() ) );
+            $total += $count;
+            if ( $key === $phase ) { $before = false; $current = $count; $finished += min( $count, absint( $state['index'] ?? 0 ) ); }
+            elseif ( $before ) { $finished += $count; }
+        }
+        return array( 'label' => $labels[$phase] ?? 'Finishing catalog import', 'percent' => 90 + ( $total ? (int) floor( 4 * $finished / $total ) : 0 ), 'detail' => sprintf( '%d of %d items completed in this stage. Each reload imports the next item; keep this page open.', min( $current, absint( $state['index'] ?? 0 ) ), $current ) );
     }
 
     public static function render_setup_page() {
@@ -2071,6 +2151,14 @@ final class MMS_WP_Starter_Bootstrap {
         $progress = self::setup_progress_data();
         $dashboard_url = admin_url();
         echo '<div class="wrap wp-starter-setup"><h1>Setting up your WordPress site</h1>';
+        if ( ! $completed && 'sample_content' === $progress['phase'] ) {
+            $choice = (array) get_option( self::CATALOG_CHOICE_OPTION, array() );
+            echo '<form method="post" action="' . esc_url( self::setup_url() ) . '" style="margin:16px 0" onsubmit="window.wpStarterCatalogSubmitting=true">';
+            wp_nonce_field( 'wp_starter_catalog_choice', 'wp_starter_catalog_nonce' );
+            if ( empty( $choice['skipImages'] ) ) echo '<button class="button" name="wp_starter_catalog_choice" value="skip_images">Skip images and keep importing products</button> ';
+            else echo '<p>Image import is disabled. Products and required attributes will continue importing.</p>';
+            echo '<button class="button" name="wp_starter_catalog_choice" value="stop">Keep current products and finish setup</button><p>Stopping keeps existing records unchanged. Unfinished products remain drafts.</p></form>';
+        }
         if ( $error ) {
             echo '<div class="notice notice-error"><p><strong>Setup paused:</strong> ' . esc_html( $error ) . '</p></div>';
             echo '<p>Fix the issue shown above, then retry the current step.</p><p><a class="button button-primary" href="' . esc_url( self::setup_url( true ) ) . '">Retry setup</a> <a class="button" href="' . esc_url( $dashboard_url ) . '">Open dashboard</a></p></div>';
@@ -2085,7 +2173,7 @@ final class MMS_WP_Starter_Bootstrap {
         $percent = absint( $progress['percent'] );
         $label = esc_html( $progress['label'] );
         $phase = esc_html( str_replace( '_', ' ', $progress['phase'] ) );
-        $detail = '';
+        $detail = $progress['detail'];
         if ( 'install_plugins' === $progress['phase'] && $progress['pluginCount'] ) {
             $plugin_index = absint( $progress['state']['plugin_index'] ?? 0 );
             $detail = $plugin_index >= $progress['pluginCount'] ? 'Finishing plugin installation' : sprintf( 'Plugin %d of %d', $plugin_index + 1, $progress['pluginCount'] );
@@ -2101,7 +2189,7 @@ final class MMS_WP_Starter_Bootstrap {
         echo '<div style="display:flex;justify-content:space-between;gap:16px;align-items:center"><strong>' . $label . '</strong><strong>' . $percent . '%</strong></div>';
         echo '<div role="progressbar" aria-label="WordPress setup progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' . $percent . '" style="height:14px;background:#e2e4e7;border-radius:999px;overflow:hidden;margin:14px 0 10px"><div style="width:' . $percent . '%;height:100%;background:#2271b1;transition:width .35s ease"></div></div>';
         echo '<p style="margin:0;color:#646970">Stage: ' . $phase . ' · ' . esc_html( $detail ) . '</p></section>';
-        echo '<script>window.setTimeout(function(){ window.location.assign(' . wp_json_encode( self::setup_url( true ) ) . '); }, 650);</script></div>';
+        echo '<script>window.setTimeout(function(){ if (!window.wpStarterCatalogSubmitting) window.location.assign(' . wp_json_encode( self::setup_url( true ) ) . '); }, 650);</script></div>';
     }
 
     public static function render_notice() {

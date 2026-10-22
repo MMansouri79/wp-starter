@@ -772,6 +772,13 @@ function selectedMissingElementorDependencies() {
 }
 
 async function loadBuildSelection(id) {
+  const exported = state.configs.find(c => c.id === id)?.siteContent;
+  for (const kind of ["posts", "products"]) {
+    const input = $(`#build-site-${kind}`);
+    input.disabled = !exported?.[kind];
+    if (input.disabled) input.checked = false;
+  }
+  $("#site-content-help").textContent = exported ? `${exported.posts} exported posts · ${exported.products} exported products. Products require WooCommerce.` : "Select a snapshot exported with posts or products enabled.";
   try {
     const config = id ? state.configs.find(c => c.id === id) : null;
     currentReport = id ? await request(`/api/configs/${encodeURIComponent(id)}/check`) : null;
@@ -831,6 +838,7 @@ async function createProfile() {
     elementorTemplateIds: currentElementorSelection || [],
     elementorTemplateMappings: templateMappingDraft,
     sampleContentIds: SampleContentUI.selectedIds(),
+    siteContent: { posts: $("#build-site-posts").checked, products: $("#build-site-products").checked },
     sourceFile: currentEditingProfileFile
   };
   const missingTemplates = selectedMissingElementorDependencies();
@@ -878,6 +886,8 @@ async function populateProfileEditor(profile) {
     ? (profile.elementorTemplates || []).map(old => elementorTemplatesForBuild().find(template => template.snapshotId === old.snapshotId && template.sourceTemplateId === old.templateId)?.id).filter(Boolean)
     : elementorTemplatesForBuild().filter(template => template.snapshotId === baseId).map(template => template.id);
   SampleContentUI.setSelectedIds(profile.sampleContentIds || []);
+  $("#build-site-posts").checked = profile.siteContent?.posts === true;
+  $("#build-site-products").checked = profile.siteContent?.products === true;
   { const selected=new Set(currentElementorSelection), depended=new Set(elementorTemplatesForBuild().filter(t=>selected.has(t.id)).flatMap(t=>t.dependencies||[])); currentElementorRoots=[...selected].filter(id=>!depended.has(id)); }
   templateMappingDraft = structuredClone(profile.elementorTemplateMappings || {});
   await loadBuildSelection(baseId);

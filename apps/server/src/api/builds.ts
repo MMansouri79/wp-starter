@@ -20,7 +20,7 @@ export function registerBuildRoutes(router: Router, app: AppContext): void {
     await app.disk.assertWritable();
     const user = requireUser(context);
     const body = await context.readJson();
-    const file = String(body.file ?? body.profile ?? "").trim();
+    const file = String(body.file ?? body.profileFile ?? body.profile ?? "").trim();
     if (!file) throw badRequest("invalid_request", "A profile file is required.");
 
     const build = await app.builds.enqueue(file, user);
@@ -56,7 +56,9 @@ export function registerBuildRoutes(router: Router, app: AppContext): void {
               sha256: build.sha256,
               profile: build.profileName,
               manifest: build.manifest,
-              downloadUrl: `/api/builds/${build.id}/download`
+              compatibility: (build.manifest as { compatibility?: unknown } | null)?.compatibility ?? null,
+              download: `/api/teams/${build.teamId}/builds/${build.id}/download`,
+              downloadUrl: `/api/teams/${build.teamId}/builds/${build.id}/download`
             }
           : null,
       error: build.errorCode ? { code: build.errorCode, message: build.errorMessage } : null

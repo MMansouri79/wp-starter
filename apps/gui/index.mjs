@@ -272,6 +272,7 @@ async function createOrUpdateProfile(body) {
       elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined,
       elementorTemplateIds: Array.isArray(body.elementorTemplateIds) ? body.elementorTemplateIds : [],
       elementorTemplateMappings: body.elementorTemplateMappings && typeof body.elementorTemplateMappings === "object" ? body.elementorTemplateMappings : {},
+      siteContent: body.siteContent,
       sampleContentIds: Array.isArray(body.sampleContentIds) ? body.sampleContentIds.map(id => String(id).trim()).filter(Boolean) : []
     });
   }
@@ -291,6 +292,7 @@ async function createOrUpdateProfile(body) {
     elementorTemplates: Array.isArray(body.elementorTemplates) ? body.elementorTemplates : undefined,
     elementorTemplateIds: Array.isArray(body.elementorTemplateIds) ? body.elementorTemplateIds : [],
     elementorTemplateMappings: body.elementorTemplateMappings && typeof body.elementorTemplateMappings === "object" ? body.elementorTemplateMappings : {},
+    siteContent: body.siteContent,
     sampleContentIds: Array.isArray(body.sampleContentIds) ? body.sampleContentIds.map(id => String(id).trim()).filter(Boolean) : []
   });
 }

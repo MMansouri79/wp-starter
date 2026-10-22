@@ -1,5 +1,7 @@
 # Planning: v1 — Stabilization + Shared Hosted Web App
 
+The single shared-library access model below is historical and is superseded by `docs/TEAM-WORKSPACES.md`. The hosted application now uses private team libraries and membership roles.
+
 Status: server implementation committed at `d3312ae`; hardening follows in `V1-SERVER-HARDENING.md`. Deployment acceptance and release remain outstanding. The earlier starting-state notes below are historical.
 
 This document captures the complete planning discussion for the first stable version of WP Starter System. The goal is one combined release: stabilize the existing build pipeline and add a hosted web app on our own VPS, backed by PostgreSQL, where team members and invited clients can browse and build from each other's shared items. Others can view and use any shared item; only the owner edits or deletes their own items.

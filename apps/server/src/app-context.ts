@@ -19,12 +19,16 @@ import type { QuotaService } from "./services/quota.js";
 import type { SampleContentService } from "./services/sample-content.js";
 import type { SnapshotService } from "./services/snapshots.js";
 import type { VNextApiKind, VNextResourceService } from "./services/vnext.js";
+import type { TeamService } from "./services/teams.js";
 
 /**
  * Everything a request handler needs. Built once at startup so the API layer
  * holds no module-level state and tests can construct isolated instances.
  */
 export interface AppContext {
+  teams: TeamService;
+  teamId: string | null;
+  forTeam(id: string): Promise<AppContext>;
   config: ServerConfig;
   version: string;
   db: SqlDatabase;

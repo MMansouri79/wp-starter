@@ -7,6 +7,7 @@ import { ensureDir, exists, findFileRecursive, sha256File, writeJson } from "./f
 import { PackageRegistry, defaultLibraryDir } from "./registry.js";
 import { validatePortableSnapshot } from "./snapshot-policy.js";
 import { ElementorTemplateLibrary } from "./template-library.js";
+import { inspectSiteContent } from "./site-content.js";
 import type {
   ConfigSnapshotFile,
   ConfigSnapshotInspection,
@@ -297,6 +298,7 @@ export class ConfigSnapshotRegistry {
     }
 
     const parsed = await parseConfigExport(absolute);
+    const siteContent = await inspectSiteContent(absolute);
     const id = safeId(options.id || `snapshot-${compactTimestamp(parsed.generatedAt)}`);
     const name = options.name?.trim() || `Reference ${parsed.generatedAt}`;
     const hash = await sha256File(absolute);
@@ -334,7 +336,8 @@ export class ConfigSnapshotRegistry {
       sourceFilename: path.basename(absolute),
       addedAt: new Date().toISOString(),
       ...(parsed.sourceDomain !== UNKNOWN_SOURCE_DOMAIN ? { sourceDomain: parsed.sourceDomain } : {}),
-      elementorTemplates: summarizeElementorTemplates(fullExport, id, name)
+      elementorTemplates: summarizeElementorTemplates(fullExport, id, name),
+      siteContent
     };
 
     let replaced = false;

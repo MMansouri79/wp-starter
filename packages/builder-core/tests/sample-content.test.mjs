@@ -11,6 +11,33 @@ const repoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)
 async function fixture(fn) { const root = await mkdtemp(path.join(os.tmpdir(), "sample-content-")); try { await fn(new SampleContentRegistry(root), root); } finally { await rm(root, { recursive: true, force: true }); } }
 const product = (title, productType = "simple", extra = {}) => ({ kind: "product", title, productType, ...extra });
 
+test("multi-image catalog resolution reads one catalog and still verifies every asset", async () => fixture(async (registry, root) => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+  const input = path.join(root, 'input.png'); await writeFile(input, png);
+  const assets = [];
+  for (let index = 0; index < 24; index++) assets.push(await registry.importAsset(input, {kind:'image'}));
+  const row = await registry.save(product('Gallery', 'simple', {featuredImageId:assets[0].id,galleryIds:assets.slice(1).map(asset=>asset.id)}));
+  const list = registry.list.bind(registry); let reads = 0;
+  registry.list = async () => {reads++;return list();};
+  const resolved = await registry.resolve([row.id]);
+  assert.equal(resolved.assets.length,24);assert.equal(reads,1);
+  await writeFile(resolved.assets[23].absoluteFile, Buffer.alloc(png.length));
+  await assert.rejects(registry.resolve([row.id]), {code:'sample_asset_checksum_mismatch'});
+}));
+
+test("generated Persian slugs fit WordPress's encoded limit and retain unique suffixes", () => {
+  const title = "ماوس گیمینگ بیاند مدل BGM-1200 7D به همراه ماوس پد";
+  const slug = sampleSlug(title, "195");
+  assert.ok(encodeURIComponent(slug).length <= 200);
+  assert.ok(slug.endsWith("-195"));
+  assert.notEqual(slug, sampleSlug(title, "200"));
+  assert.equal(decodeURIComponent(encodeURIComponent(slug)), slug);
+  assert.ok(encodeURIComponent(sampleSlug("ن".repeat(100))).length <= 200);
+  assert.equal(sampleSlug("a".repeat(250)).length, 200);
+  assert.equal(sampleSlug("ن".repeat(100), "195"), "ن".repeat(32) + "-195");
+  assert.throws(() => normalizeSampleContent({ kind: "post", title, slug: "ن".repeat(40) }), /slug/);
+});
+
 test("sample post defaults keep optional classic fields optional and preserve Unicode slugs", () => {
   const post = normalizeSampleContent({ kind: "post", title: "نمونه نوشته", content: "<p>Text</p>" });
   assert.equal(post.slug, "نمونه-نوشته"); assert.equal(post.status, "draft"); assert.equal(post.excerpt, ""); assert.deepEqual(post.categoryIds, []);

@@ -2,6 +2,7 @@ node_modules/
 dist/
 .tmp/
 artifacts/
+apps/server/client/downloads/
 builds/
 *.log
 .DS_Store

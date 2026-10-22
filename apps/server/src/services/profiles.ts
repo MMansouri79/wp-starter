@@ -6,6 +6,7 @@ import {
   createProfileFromPackages,
   createProfileFromSnapshot,
   loadProfile,
+  siteContentSelection,
   sha256File,
   writeJson,
   exists,
@@ -18,6 +19,7 @@ import { badRequest, notFound } from "../errors.js";
 import { safeFileName } from "../http/body.js";
 import { SharedLibrary } from "./library.js";
 import { assertCanWrite } from "./ownership.js";
+import { validateResolvedPaths } from "./team-paths.js";
 
 export interface ProfileSummary {
   id: string;
@@ -44,8 +46,8 @@ export interface SaveProfileResult {
 }
 
 /**
- * Build profiles are editable shared objects. Anyone may read or build from a
- * profile; only its creator may overwrite, rename, or delete it.
+ * Build profiles belong to a private team; editors collaborate on them while
+ * creator attribution is preserved. File registries retain their portable format.
  */
 export class ProfileService {
   constructor(private readonly library: SharedLibrary, private readonly items: ProfileItemRepository) {}
@@ -176,6 +178,7 @@ export class ProfileService {
     try {
       await writeFile(tempProfile, JSON.stringify(document));
       const loaded = await loadProfile(tempProfile, { libraryDir: this.library.root });
+      await validateResolvedPaths(this.library.root, loaded);
       return compatibilityReport(loaded);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
@@ -221,6 +224,7 @@ export class ProfileService {
         elementorTemplates: Array.isArray(body.elementorTemplates) ? (body.elementorTemplates as never) : undefined,
         elementorTemplateIds,
         elementorTemplateMappings,
+        siteContent: siteContentSelection(body.siteContent),
         sampleContentIds
       });
     }
@@ -242,6 +246,7 @@ export class ProfileService {
       elementorTemplates: Array.isArray(body.elementorTemplates) ? (body.elementorTemplates as never) : undefined,
       elementorTemplateIds,
       elementorTemplateMappings,
+      siteContent: siteContentSelection(body.siteContent),
       sampleContentIds
     });
   }
